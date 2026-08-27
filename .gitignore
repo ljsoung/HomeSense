@@ -1,0 +1,78 @@
+### === 민감정보 / 환경설정 (최우선 제외) === ###
+.env
+.env.*
+!.env.example
+
+application-local.yml
+application-local.yaml
+application-local.properties
+application-prod.properties
+application-secret.yml
+application-secret.yaml
+
+*.pem
+*.key
+*.p12
+*.jks
+*credentials*.json
+
+### === Gradle / Java 빌드 산출물 === ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+out/
+*.class
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### === Maven (Gradle 대신 사용 시) === ###
+target/
+
+### === IDE === ###
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+.settings/
+.classpath
+.project
+
+### === OS === ###
+.DS_Store
+Thumbs.db
+
+### === 로그 / 임시파일 === ###
+*.log
+logs/
+*.tmp
+*.pid
+
+### === 프론트엔드 (React, 모노레포로 함께 push 시) === ###
+node_modules/
+dist/
+build/
+.env.local
+.env.development.local
+.env.production.local
+
+### === DB 덤프 (실거래가 데이터 통째로 유출 방지) === ###
+*.sql
+!schema_all.sql
+!**/schema/*.sql
+dump.sql
+*.dump
+
+### === 대용량 원본 데이터 (data.go.kr / 국토부 원본 파일) === ###
+# 재다운로드 가능한 원본 데이터는 저장소에 올리지 않는 걸 권장합니다.
+# 필요하면 아래 두 줄을 지우고 직접 커밋하세요.
+/data/raw/*.xlsx
+/data/raw/*.csv
+
+### === 테스트/커버리지 리포트 === ###
+coverage/
+*.exec
+htmlcov/
+
+CLAUDE.md
