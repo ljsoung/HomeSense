@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci.yml'
 
 permissions:
   contents: read
@@ -13,6 +19,9 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
 
     steps:
       - name: Checkout
@@ -26,6 +35,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: backend
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
@@ -38,5 +49,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-report
-          path: build/reports/tests/test
+          path: backend/build/reports/tests/test
           retention-days: 7
