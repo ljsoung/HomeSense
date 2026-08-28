@@ -139,7 +139,7 @@ public class Trade {
     private LocalDate cancelDate;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "match_method", nullable = false, length = 12)
+    @Column(name = "match_method", nullable = true, length = 12)
     private MatchMethod matchMethod;
 
     @Column(name = "match_confidence", precision = 4, scale = 3)
