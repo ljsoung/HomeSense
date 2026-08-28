@@ -75,7 +75,7 @@ public class Complex {
     private LocalDate approvalDate;
 
     @Column(name = "building_count")
-    private Integer buildingCount;
+    private Short buildingCount;
 
     @Column(name = "household_count")
     private Integer householdCount;
@@ -114,13 +114,13 @@ public class Complex {
     private String managementCompany;
 
     @Column(name = "elevator_passenger_count", nullable = false)
-    private int elevatorPassengerCount;
+    private short elevatorPassengerCount;
 
     @Column(name = "elevator_cargo_count", nullable = false)
-    private int elevatorCargoCount;
+    private short elevatorCargoCount;
 
     @Column(name = "elevator_combined_count", nullable = false)
-    private int elevatorCombinedCount;
+    private short elevatorCombinedCount;
 
     @Column(name = "total_parking_count")
     private Integer totalParkingCount;
@@ -132,7 +132,7 @@ public class Complex {
     private Integer undergroundParkingCount;
 
     @Column(name = "cctv_count")
-    private Integer cctvCount;
+    private Short cctvCount;
 
     @Column(name = "home_network_yn")
     private Boolean homeNetworkYn;
@@ -150,13 +150,13 @@ public class Complex {
     private String residentAmenities;
 
     @Column(name = "highest_floor")
-    private Integer highestFloor;
+    private Short highestFloor;
 
     @Column(name = "highest_floor_registered")
-    private Integer highestFloorRegistered;
+    private Short highestFloorRegistered;
 
     @Column(name = "basement_floor_count")
-    private Integer basementFloorCount;
+    private Short basementFloorCount;
 
     @Column(name = "ev_charger_ground_yn")
     private Boolean evChargerGroundYn;
@@ -165,10 +165,10 @@ public class Complex {
     private Boolean evChargerUndergroundYn;
 
     @Column(name = "ev_parking_ground_count")
-    private Integer evParkingGroundCount;
+    private Short evParkingGroundCount;
 
     @Column(name = "ev_parking_underground_count")
-    private Integer evParkingUndergroundCount;
+    private Short evParkingUndergroundCount;
 
     @Column(name = "latitude", precision = 10, scale = 7)
     private BigDecimal latitude;
