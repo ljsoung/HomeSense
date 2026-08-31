@@ -60,7 +60,7 @@ class RealEstateApiCollectorTest {
     @Test
     void 데이터셋이_1개인_조합은_요청_1건으로_끝난다() {
         RealEstateApiCollector collector = newCollector();
-        String expectedUri = "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent"
+        String expectedUri = "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
                 + "?serviceKey=" + ENCODED_SERVICE_KEY
                 + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1";
         mockServer.expect(requestTo(expectedUri))
@@ -76,11 +76,11 @@ class RealEstateApiCollectorTest {
     @Test
     void 아파트_매매는_기본과_상세_두_URL_모두에_요청한다() {
         RealEstateApiCollector collector = newCollector();
-        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade"
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade"
                         + "?serviceKey=" + ENCODED_SERVICE_KEY
                         + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
                 .andRespond(withSuccess(responseXml("000", 1, 1), MediaType.APPLICATION_XML));
-        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev"
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev"
                         + "?serviceKey=" + ENCODED_SERVICE_KEY
                         + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
                 .andRespond(withSuccess(responseXml("000", 1, 1), MediaType.APPLICATION_XML));
@@ -94,11 +94,11 @@ class RealEstateApiCollectorTest {
     @Test
     void totalCount가_numOfRows보다_많으면_다음_페이지를_이어서_요청한다() {
         RealEstateApiCollector collector = newCollector();
-        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent"
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
                         + "?serviceKey=" + ENCODED_SERVICE_KEY
                         + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
                 .andRespond(withSuccess(responseXml("000", 1500, 1000), MediaType.APPLICATION_XML));
-        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent"
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
                         + "?serviceKey=" + ENCODED_SERVICE_KEY
                         + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=2"))
                 .andRespond(withSuccess(responseXml("000", 1500, 500), MediaType.APPLICATION_XML));
@@ -112,7 +112,7 @@ class RealEstateApiCollectorTest {
     @Test
     void resultCode가_03이면_한_페이지만_요청하고_빈_결과로_끝낸다() {
         RealEstateApiCollector collector = newCollector();
-        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent"
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
                         + "?serviceKey=" + ENCODED_SERVICE_KEY
                         + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
                 .andRespond(withSuccess(responseXml("03", 0, 0), MediaType.APPLICATION_XML));
@@ -126,7 +126,7 @@ class RealEstateApiCollectorTest {
     @Test
     void resultCode가_CONTINUE가_아니면_이_조합의_수집을_즉시_중단한다() {
         RealEstateApiCollector collector = newCollector();
-        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent"
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
                         + "?serviceKey=" + ENCODED_SERVICE_KEY
                         + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
                 .andRespond(withSuccess(responseXml("30", 0, 0), MediaType.APPLICATION_XML));
