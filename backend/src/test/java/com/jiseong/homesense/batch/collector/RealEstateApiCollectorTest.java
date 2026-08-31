@@ -2,6 +2,7 @@ package com.jiseong.homesense.batch.collector;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.InstanceOfAssertFactories.type;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -13,6 +14,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import com.jiseong.homesense.batch.errorhandler.ApiErrorCodeClassifier;
+import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
 import com.jiseong.homesense.common.config.DataGoKrProperties;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
@@ -141,6 +143,35 @@ class RealEstateApiCollectorTest {
                 .isInstanceOf(OpenApiResultCodeException.class)
                 .extracting(e -> ((OpenApiResultCodeException) e).resultCode())
                 .isEqualTo("30");
+        mockServer.verify();
+    }
+
+    @Test
+    void 게이트웨이_오류_봉투의_returnReasonCode도_ABORT_BATCH로_판정한다() {
+        // 회귀 테스트: 서비스키 미등록·만료 같은 게이트웨이 오류는 header/resultCode가 아니라
+        // OpenAPI_ServiceResponse/cmmMsgHeader/returnReasonCode로 내려온다. 이 봉투를 못 읽으면
+        // judgment 없는 일반 OpenApiResponseException으로 떨어져 호출부가 ABORT_BATCH를 알 수 없다.
+        String gatewayErrorXml = """
+                <OpenAPI_ServiceResponse>
+                    <cmmMsgHeader>
+                        <errMsg>SERVICE ERROR</errMsg>
+                        <returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg>
+                        <returnReasonCode>30</returnReasonCode>
+                    </cmmMsgHeader>
+                </OpenAPI_ServiceResponse>
+                """;
+        RealEstateApiCollector collector = newCollector();
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withSuccess(gatewayErrorXml, MediaType.APPLICATION_XML));
+
+        assertThatThrownBy(() -> collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401"))
+                .asInstanceOf(type(OpenApiResultCodeException.class))
+                .satisfies(e -> {
+                    assertThat(e.resultCode()).isEqualTo("30");
+                    assertThat(e.judgment()).isEqualTo(ErrorCodeJudgment.ABORT_BATCH);
+                });
         mockServer.verify();
     }
 }

@@ -10,8 +10,8 @@ import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
 /**
- * 페이지네이션·에러코드 판정에 필요한 header/resultCode, totalCount만 가볍게 읽는다.
- * item 파싱은 BAT-PRS-01(TradeXmlParser) 책임이라 여기서는 하지 않는다.
+ * 페이지네이션·에러코드 판정에 필요한 header/resultCode(또는 게이트웨이 오류의 returnReasonCode),
+ * totalCount만 가볍게 읽는다. item 파싱은 BAT-PRS-01(TradeXmlParser) 책임이라 여기서는 하지 않는다.
  */
 final class OpenApiXmlReader {
 
@@ -30,9 +30,16 @@ final class OpenApiXmlReader {
             DocumentBuilder builder = factory.newDocumentBuilder();
             Document document = builder.parse(new InputSource(new StringReader(xml)));
 
+            // 서비스키 미등록·만료 같은 게이트웨이 레벨 오류는 정상 응답(response/header/resultCode)과
+            // 전혀 다른 봉투(OpenAPI_ServiceResponse/cmmMsgHeader/returnReasonCode)로 내려온다.
+            // resultCode가 없으면 이 봉투로 폴백해야 30/31 등이 ABORT_BATCH로 정상 판정된다.
             String resultCode = textOf(document, "resultCode");
             if (resultCode == null) {
-                throw new OpenApiResponseException("dataset=" + datasetId + " 응답에 header/resultCode가 없다");
+                resultCode = textOf(document, "returnReasonCode");
+            }
+            if (resultCode == null) {
+                throw new OpenApiResponseException(
+                        "dataset=" + datasetId + " 응답에 header/resultCode·returnReasonCode가 없다");
             }
             int totalCount = parseIntOrZero(textOf(document, "totalCount"));
             return new PageMeta(resultCode, totalCount);
