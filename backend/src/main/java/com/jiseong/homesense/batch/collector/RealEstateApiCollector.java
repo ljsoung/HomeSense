@@ -39,14 +39,14 @@ public class RealEstateApiCollector {
      * CONTINUE가 아니면 그 즉시 이 조합의 수집을 중단한다.
      */
     public ApiResponseXml collect(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd) {
-        List<String> pageBodies = new ArrayList<>();
+        List<DatasetPage> pages = new ArrayList<>();
         for (DatasetDescriptor dataset : datasetRegistry.resolve(housingType, dealCategory)) {
-            collectAllPages(dataset, sggCd, dealYmd, pageBodies);
+            collectAllPages(dataset, sggCd, dealYmd, pages);
         }
-        return new ApiResponseXml(pageBodies);
+        return new ApiResponseXml(pages);
     }
 
-    private void collectAllPages(DatasetDescriptor dataset, String sggCd, String dealYmd, List<String> pageBodies) {
+    private void collectAllPages(DatasetDescriptor dataset, String sggCd, String dealYmd, List<DatasetPage> pages) {
         int pageNo = 1;
         while (true) {
             String body = requestPage(dataset, sggCd, dealYmd, pageNo);
@@ -57,7 +57,7 @@ public class RealEstateApiCollector {
                 throw new OpenApiResultCodeException(dataset.datasetId(), meta.resultCode(), judgment);
             }
 
-            pageBodies.add(body);
+            pages.add(new DatasetPage(dataset.datasetId(), body));
 
             boolean noData = "03".equals(meta.resultCode());
             boolean lastPage = (long) pageNo * NUM_OF_ROWS >= meta.totalCount();
