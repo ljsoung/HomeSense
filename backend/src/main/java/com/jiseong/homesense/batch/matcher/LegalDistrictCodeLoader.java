@@ -91,7 +91,10 @@ public class LegalDistrictCodeLoader {
         }
 
         legalDistrictCodeRepository.saveAll(rows);
-        log.info("법정동코드 적재 완료: {}건 (dataVersion={})", rows.size(), dataVersion);
+        legalDistrictCodeRepository.flush();
+        int deactivatedCount = legalDistrictCodeRepository.deactivateStaleVersions(dataVersion);
+        log.info("법정동코드 적재 완료: {}건 (dataVersion={}), 비활성화: {}건",
+                rows.size(), dataVersion, deactivatedCount);
     }
 
     private Map<String, Integer> indexColumns(String headerLine, String delimiter) {
