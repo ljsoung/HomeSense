@@ -68,11 +68,16 @@ public class LegalDistrictCodeLoader {
                     .build());
         }
 
+        // 먼저 전부 비활성화한 뒤 이번 CSV에 실제로 존재하는 행만 upsert로 재활성화한다.
+        // dataVersion(일 단위 해상도) 비교에 기대지 않으므로 같은 날 재적재해도 정확하다.
+        legalDistrictCodeRepository.deactivateAll();
+        legalDistrictCodeRepository.flush();
         legalDistrictCodeRepository.saveAll(rows);
         legalDistrictCodeRepository.flush();
-        int deactivatedCount = legalDistrictCodeRepository.deactivateStaleVersions(dataVersion);
-        log.info("법정동코드 적재 완료: {}건 (dataVersion={}), 비활성화: {}건",
-                rows.size(), dataVersion, deactivatedCount);
+
+        long inactiveCount = legalDistrictCodeRepository.count() - rows.size();
+        log.info("법정동코드 적재 완료: {}건 (dataVersion={}), 비활성: {}건",
+                rows.size(), dataVersion, inactiveCount);
     }
 
     private List<DongRecord> readExistingRecords(File csvFile) {
