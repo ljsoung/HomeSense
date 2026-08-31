@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.region.entity.LegalDistrictCode;
 
 import lombok.RequiredArgsConstructor;
 
@@ -44,9 +45,20 @@ public class ComplexMasterMatcher {
 
     private final ComplexRepository complexRepository;
 
-    public MatchResult matchComplex(TradeDraft draft) {
+    /**
+     * legalDistrictCode는 BAT-MAT-01(LegalDistrictMatcher)이 이미 sgg_cd·umd_nm으로 해석한 결과다.
+     * draft 자체에는 원본 API의 sgg_cd·umd_nm만 있고 시도/시군구/동리 명칭이 없어, 지역 1차 필터링에는
+     * 반드시 이 값을 받아야 한다. BAT-MAT-01이 매칭에 실패해 null이면 후보를 좁힐 지역 정보가 없으므로
+     * 곧바로 매칭 실패로 처리한다.
+     */
+    public MatchResult matchComplex(TradeDraft draft, LegalDistrictCode legalDistrictCode) {
+        if (legalDistrictCode == null) {
+            return MatchResult.unmatched();
+        }
+
         List<Complex> candidates = complexRepository.findBySidoAndSigunguAndDongRi(
-                draft.sido(), draft.sigungu(), draft.dongRi());
+                legalDistrictCode.getSidoName(), legalDistrictCode.getSigunguName(),
+                legalDistrictCode.getEupmyeondongName());
         if (candidates.isEmpty()) {
             return MatchResult.unmatched();
         }

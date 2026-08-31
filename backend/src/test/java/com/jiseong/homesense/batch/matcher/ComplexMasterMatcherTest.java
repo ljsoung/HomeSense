@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -17,11 +18,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.region.entity.LegalDistrictCode;
+import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.MatchMethod;
 
 @ExtendWith(MockitoExtension.class)
 class ComplexMasterMatcherTest {
+
+    private static final LegalDistrictCode YEOKSAM_DONG =
+            legalDistrictCode("서울특별시", "강남구", "역삼동");
 
     @Mock
     private ComplexRepository complexRepository;
@@ -37,8 +43,43 @@ class ComplexMasterMatcherTest {
                 .build();
     }
 
+    private static LegalDistrictCode legalDistrictCode(String sido, String sigungu, String dongRi) {
+        return LegalDistrictCode.builder()
+                .sidoName(sido)
+                .sigunguName(sigungu)
+                .eupmyeondongName(dongRi)
+                .build();
+    }
+
+    /**
+     * jibun·buildingName만 테스트별로 바꾸고 나머지는 BAT-MAT-02 매칭 로직과 무관한 값으로 채운다.
+     */
     private static TradeDraft draft(String jibun, String buildingName) {
-        return new TradeDraft(HousingType.APT, "서울특별시", "강남구", "역삼동", jibun, buildingName);
+        return new TradeDraft(
+                HousingType.APT,
+                DealCategory.SALE,
+                null,
+                "15126468",
+                "11680",
+                "역삼동",
+                buildingName,
+                jibun,
+                new BigDecimal("84.99"),
+                (short) 10,
+                (short) 2005,
+                LocalDate.of(2024, 1, 15),
+                120000L,
+                null,
+                null,
+                null,
+                "AGENT",
+                "강남구",
+                null,
+                null,
+                null,
+                null,
+                false,
+                null);
     }
 
     @Test
@@ -47,7 +88,7 @@ class ComplexMasterMatcherTest {
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
-        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"));
+        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"), YEOKSAM_DONG);
 
         assertThat(result.complexId()).isEqualTo(1L);
         assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
@@ -60,7 +101,7 @@ class ComplexMasterMatcherTest {
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
-        MatchResult result = matcher.matchComplex(draft("123-4", "개명전아파트"));
+        MatchResult result = matcher.matchComplex(draft("123-4", "개명전아파트"), YEOKSAM_DONG);
 
         assertThat(result.complexId()).isEqualTo(2L);
         assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
@@ -73,7 +114,7 @@ class ComplexMasterMatcherTest {
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
-        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"));
+        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"), YEOKSAM_DONG);
 
         // 지번이 일치하지 않으므로 SIMILAR 경로로 넘어가고, 단지명이 완전히 같아 유사도 1.0 -> 최대 신뢰도로 채택된다.
         assertThat(result.complexId()).isEqualTo(3L);
@@ -89,7 +130,7 @@ class ComplexMasterMatcherTest {
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
-        MatchResult result = matcher.matchComplex(draft("산 45-6", "역삼래미안"));
+        MatchResult result = matcher.matchComplex(draft("산 45-6", "역삼래미안"), YEOKSAM_DONG);
 
         assertThat(result.complexId()).isEqualTo(6L);
         assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
@@ -98,11 +139,11 @@ class ComplexMasterMatcherTest {
 
     @Test
     void 지번이_다르지만_단지명_유사도가_높으면_SIMILAR로_채택한다() {
-        Complex candidate = complex(4L, "역삼래미안1차", "999-9");
+        Complex candidate = complex(4L, "역삼래미안1차", "서울특별시 강남구 역삼동 999-9");
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
-        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"));
+        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"), YEOKSAM_DONG);
 
         assertThat(result.complexId()).isEqualTo(4L);
         assertThat(result.matchMethod()).isEqualTo(MatchMethod.SIMILAR);
@@ -112,11 +153,11 @@ class ComplexMasterMatcherTest {
 
     @Test
     void 지번도_단지명도_불일치하면_매칭_실패로_처리한다() {
-        Complex candidate = complex(5L, "전혀다른이름아파트", "999-9");
+        Complex candidate = complex(5L, "전혀다른이름아파트", "서울특별시 강남구 역삼동 999-9");
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
-        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"));
+        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"), YEOKSAM_DONG);
 
         assertThat(result.complexId()).isNull();
         assertThat(result.matchMethod()).isNull();
@@ -128,7 +169,16 @@ class ComplexMasterMatcherTest {
         when(complexRepository.findBySidoAndSigunguAndDongRi(eq("서울특별시"), eq("강남구"), eq("역삼동")))
                 .thenReturn(List.of());
 
-        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"));
+        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"), YEOKSAM_DONG);
+
+        assertThat(result.complexId()).isNull();
+        assertThat(result.matchMethod()).isNull();
+        assertThat(result.matchConfidence()).isNull();
+    }
+
+    @Test
+    void 법정동_매핑에_실패해_legalDistrictCode가_없으면_매칭_실패로_처리한다() {
+        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"), null);
 
         assertThat(result.complexId()).isNull();
         assertThat(result.matchMethod()).isNull();
