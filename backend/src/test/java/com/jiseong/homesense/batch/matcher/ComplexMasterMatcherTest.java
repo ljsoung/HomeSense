@@ -65,6 +65,8 @@ class ComplexMasterMatcherTest {
                 buildingName,
                 jibun,
                 new BigDecimal("84.99"),
+                (short) 10,
+                (short) 2005,
                 LocalDate.of(2024, 1, 15),
                 120000L,
                 null,

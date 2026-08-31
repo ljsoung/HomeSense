@@ -58,6 +58,8 @@ class TradeFieldMapperTest {
         assertThat(draft.buildingName()).isEqualTo("역삼래미안");
         assertThat(draft.jibun()).isEqualTo("123-4");
         assertThat(draft.excluUseArea()).isEqualByComparingTo(new BigDecimal("84.99"));
+        assertThat(draft.floor()).isEqualTo((short) 10);
+        assertThat(draft.buildYear()).isEqualTo((short) 2005);
         assertThat(draft.dealDate()).isEqualTo(LocalDate.of(2024, 1, 15));
         assertThat(draft.dealAmount()).isEqualTo(120_000L);
         assertThat(draft.depositAmount()).isNull();
@@ -120,6 +122,23 @@ class TradeFieldMapperTest {
                 itemWith(Map.of("landLeaseholdGbn", "Y")), HousingType.APT, DealCategory.SALE, "15126468");
 
         assertThat(draft.landLeaseYn()).isTrue();
+    }
+
+    @Test
+    void 층과_건축년도가_공백이면_null로_변환한다() {
+        TradeDraft draft = mapper.mapToUnifiedModel(
+                itemWith(Map.of("floor", " ", "buildYear", " ")), HousingType.APT, DealCategory.SALE, "15126468");
+
+        assertThat(draft.floor()).isNull();
+        assertThat(draft.buildYear()).isNull();
+    }
+
+    @Test
+    void 층을_숫자로_변환할_수_없으면_MalformedTradeItemException을_던진다() {
+        RawTradeItem invalidFloor = itemWith(Map.of("floor", "십층"));
+
+        assertThatThrownBy(() -> mapper.mapToUnifiedModel(invalidFloor, HousingType.APT, DealCategory.SALE, "15126468"))
+                .isInstanceOf(MalformedTradeItemException.class);
     }
 
     @Test
