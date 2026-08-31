@@ -45,6 +45,10 @@ dependencies {
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-gson:0.12.6'
 
+    // BAT-CLC-01 — RealEstateApiCollector 커넥션 풀 구성용 (AWS SDK 등을 통해 전이 의존성으로는
+    // 이미 들어와 있던 라이브러리라 버전만 고정해 명시적으로 선언)
+    implementation 'org.apache.httpcomponents.client5:httpclient5:5.6.4'
+
     // AWS SES — BAT-MAIL-01 (이메일 발송), AWS SDK v2 직접 사용
     implementation platform('software.amazon.awssdk:bom:2.46.7')
     implementation 'software.amazon.awssdk:ses'
@@ -66,3 +70,4 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
