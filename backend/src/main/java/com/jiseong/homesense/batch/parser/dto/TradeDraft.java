@@ -22,6 +22,8 @@ public record TradeDraft(
         String buildingName,
         String jibun,
         BigDecimal excluUseArea,
+        Short floor,
+        Short buildYear,
         LocalDate dealDate,
         Long dealAmount,
         Long depositAmount,
