@@ -10,4 +10,6 @@ public interface LegalDistrictCodeRepository extends JpaRepository<LegalDistrict
 
     List<LegalDistrictCode> findBySidoNameAndSigunguNameAndEupmyeondongNameAndIsActiveTrue(
             String sidoName, String sigunguName, String eupmyeondongName);
+
+    List<LegalDistrictCode> findByLegalDongCdStartingWithAndIsActiveTrue(String legalDongCdPrefix);
 }
