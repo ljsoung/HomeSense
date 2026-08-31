@@ -24,7 +24,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ComplexMasterMatcher {
 
-    private static final Pattern JIBUN_PATTERN = Pattern.compile("^(산\\s*)?([0-9]+(-[0-9]+)?)");
+    /**
+     * legal_dong_address는 "시도 시군구 동리 지번" 형태의 전체 주소이고 draft의 지번은 순번호만 오므로,
+     * 접두사 길이와 무관하게 문자열 끝(마지막 토큰)에서 지번을 추출한다.
+     */
+    private static final Pattern JIBUN_PATTERN = Pattern.compile("(?:^|\\s)(산)?\\s*([0-9]+(-[0-9]+)?)$");
     private static final int NGRAM_SIZE = 3;
 
     private static final BigDecimal EXACT_CONFIDENCE = new BigDecimal("1.000");
@@ -75,7 +79,7 @@ public class ComplexMasterMatcher {
             return Optional.empty();
         }
         Matcher matcher = JIBUN_PATTERN.matcher(raw.trim());
-        if (!matcher.lookingAt()) {
+        if (!matcher.find()) {
             return Optional.empty();
         }
         boolean isMountainLot = matcher.group(1) != null;

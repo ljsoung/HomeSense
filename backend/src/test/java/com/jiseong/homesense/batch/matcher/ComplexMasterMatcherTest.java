@@ -43,7 +43,7 @@ class ComplexMasterMatcherTest {
 
     @Test
     void 지번과_단지명이_모두_일치하면_EXACT_1점을_반환한다() {
-        Complex candidate = complex(1L, "역삼래미안", "123-4");
+        Complex candidate = complex(1L, "역삼래미안", "서울특별시 강남구 역삼동 123-4");
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
@@ -56,7 +56,7 @@ class ComplexMasterMatcherTest {
 
     @Test
     void 지번은_일치하지만_단지명이_다르면_EXACT를_유지하되_신뢰도를_낮춘다() {
-        Complex candidate = complex(2L, "개명후아파트", "123-4");
+        Complex candidate = complex(2L, "개명후아파트", "서울특별시 강남구 역삼동 123-4");
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
@@ -69,7 +69,7 @@ class ComplexMasterMatcherTest {
 
     @Test
     void 산번지와_일반지번은_다른_필지로_취급한다() {
-        Complex candidate = complex(3L, "역삼래미안", "산 123-4");
+        Complex candidate = complex(3L, "역삼래미안", "서울특별시 강남구 역삼동 산 123-4");
         when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
                 .thenReturn(List.of(candidate));
 
@@ -79,6 +79,21 @@ class ComplexMasterMatcherTest {
         assertThat(result.complexId()).isEqualTo(3L);
         assertThat(result.matchMethod()).isEqualTo(MatchMethod.SIMILAR);
         assertThat(result.matchConfidence()).isEqualByComparingTo(new BigDecimal("0.850"));
+    }
+
+    @Test
+    void legal_dong_address가_시도_시군구_동리를_포함한_전체_주소여도_지번을_추출해_EXACT로_매칭한다() {
+        // 회귀 테스트: normalizeJibun이 문자열 맨 앞부터만 매치하던 시절에는 legal_dong_address가
+        // "시도 시군구 동리 지번" 형태의 전체 주소라 절대 매치되지 않아 EXACT 경로가 항상 무너졌다.
+        Complex candidate = complex(6L, "역삼래미안", "서울특별시 강남구 역삼동 산 45-6");
+        when(complexRepository.findBySidoAndSigunguAndDongRi(any(), any(), any()))
+                .thenReturn(List.of(candidate));
+
+        MatchResult result = matcher.matchComplex(draft("산 45-6", "역삼래미안"));
+
+        assertThat(result.complexId()).isEqualTo(6L);
+        assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
+        assertThat(result.matchConfidence()).isEqualByComparingTo(new BigDecimal("1.000"));
     }
 
     @Test
