@@ -51,6 +51,8 @@ public class TradeFieldMapper {
                 item.get("aptNm"),
                 item.get("jibun"),
                 excluUseArea,
+                optionalShort(item, "floor"),
+                optionalShort(item, "buildYear"),
                 dealDate,
                 dealAmount,
                 null, // depositAmount — SALE 행은 항상 NULL
@@ -124,6 +126,18 @@ public class TradeFieldMapper {
         String raw = required(item, tagName);
         try {
             return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            throw new MalformedTradeItemException(tagName + " 값을 숫자로 변환할 수 없다: " + raw);
+        }
+    }
+
+    private Short optionalShort(RawTradeItem item, String tagName) {
+        String raw = nullIfBlank(item.get(tagName));
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Short.parseShort(raw);
         } catch (NumberFormatException e) {
             throw new MalformedTradeItemException(tagName + " 값을 숫자로 변환할 수 없다: " + raw);
         }
