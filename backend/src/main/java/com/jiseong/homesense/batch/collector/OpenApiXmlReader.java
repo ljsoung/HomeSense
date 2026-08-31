@@ -15,6 +15,8 @@ import org.xml.sax.InputSource;
  */
 final class OpenApiXmlReader {
 
+    private static final String RESULT_CODE_SUCCESS = "000";
+
     private OpenApiXmlReader() {
     }
 
@@ -41,12 +43,35 @@ final class OpenApiXmlReader {
                 throw new OpenApiResponseException(
                         "dataset=" + datasetId + " 응답에 header/resultCode·returnReasonCode가 없다");
             }
-            int totalCount = parseIntOrZero(textOf(document, "totalCount"));
+            int totalCount = readTotalCount(document, resultCode, datasetId);
             return new PageMeta(resultCode, totalCount);
         } catch (OpenApiResponseException e) {
             throw e;
         } catch (Exception e) {
             throw new OpenApiResponseException("dataset=" + datasetId + " 응답 XML을 읽을 수 없다", e);
+        }
+    }
+
+    /**
+     * resultCode=000(정상, 데이터 있음)일 때만 totalCount를 엄격하게 요구한다. 이 값이 누락·비정상이면
+     * pageNo*1000 >= totalCount 계산이 0으로 처리돼 첫 페이지에서 다중 페이지 수집이 조용히 끊길 수
+     * 있으므로, 조용히 0으로 넘기지 않고 즉시 예외를 던져 재시도·실패가 눈에 보이게 한다. 03(데이터 없음)과
+     * 게이트웨이 오류 봉투는 애초에 totalCount가 없을 수 있어 관대하게 0으로 둔다.
+     */
+    private static int readTotalCount(Document document, String resultCode, String datasetId) {
+        String raw = textOf(document, "totalCount");
+        if (!RESULT_CODE_SUCCESS.equals(resultCode)) {
+            return parseIntOrZero(raw);
+        }
+        if (raw == null || raw.isBlank()) {
+            throw new OpenApiResponseException(
+                    "dataset=" + datasetId + " resultCode=000 응답에 totalCount가 없다");
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new OpenApiResponseException(
+                    "dataset=" + datasetId + " totalCount 값을 숫자로 변환할 수 없다: " + raw, e);
         }
     }
 

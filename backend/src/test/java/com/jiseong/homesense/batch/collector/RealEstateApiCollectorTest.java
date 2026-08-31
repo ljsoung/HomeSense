@@ -174,4 +174,53 @@ class RealEstateApiCollectorTest {
                 });
         mockServer.verify();
     }
+
+    @Test
+    void resultCode가_000인데_totalCount가_없으면_0으로_넘기지_않고_예외를_던진다() {
+        // 회귀 테스트: totalCount를 조용히 0으로 취급하면 pageNo(1)*1000 >= 0이 참이 되어
+        // 실제로는 여러 페이지가 남아 있는데도 첫 페이지에서 수집이 조용히 끊길 수 있다.
+        String missingTotalCountXml = """
+                <response>
+                    <header>
+                        <resultCode>000</resultCode>
+                        <resultMsg>OK</resultMsg>
+                    </header>
+                    <body>
+                        <items><item><sggCd>11680</sggCd></item></items>
+                        <numOfRows>1000</numOfRows>
+                        <pageNo>1</pageNo>
+                    </body>
+                </response>
+                """;
+        RealEstateApiCollector collector = newCollector();
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withSuccess(missingTotalCountXml, MediaType.APPLICATION_XML));
+
+        assertThatThrownBy(() -> collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401"))
+                .isInstanceOf(OpenApiResponseException.class);
+        mockServer.verify();
+    }
+
+    @Test
+    void resultCode가_000인데_totalCount가_숫자가_아니면_예외를_던진다() {
+        RealEstateApiCollector collector = newCollector();
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withSuccess("""
+                        <response>
+                            <header><resultCode>000</resultCode><resultMsg>OK</resultMsg></header>
+                            <body>
+                                <items><item><sggCd>11680</sggCd></item></items>
+                                <totalCount>N/A</totalCount>
+                            </body>
+                        </response>
+                        """, MediaType.APPLICATION_XML));
+
+        assertThatThrownBy(() -> collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401"))
+                .isInstanceOf(OpenApiResponseException.class);
+        mockServer.verify();
+    }
 }
