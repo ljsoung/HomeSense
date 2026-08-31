@@ -172,4 +172,15 @@ class TradeFieldMapperTest {
         assertThatThrownBy(() -> mapper.mapToUnifiedModel(item, HousingType.APT, DealCategory.RENT, "15126474"))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    @Test
+    void 연립다세대는_단지명_태그가_미확정이라_아파트_태그로_조용히_매핑하지_않고_예외를_던진다() {
+        // 회귀 테스트: housingType을 검사하지 않던 시절에는 VILLA 매매도 aptNm을 그대로 읽어
+        // buildingName == null인 채로 "성공"한 TradeDraft를 만들어냈고, 그 결과 BAT-MAT-02의
+        // 단지명 매칭(EXACT 재확인·SIMILAR)이 VILLA 건에 대해 항상 무력화됐다.
+        RawTradeItem item = itemWith(Map.of());
+
+        assertThatThrownBy(() -> mapper.mapToUnifiedModel(item, HousingType.VILLA, DealCategory.SALE, "15126467"))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
 }

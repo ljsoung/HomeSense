@@ -17,8 +17,10 @@ import com.jiseong.homesense.trade.entity.HousingType;
 /**
  * BAT-PRS-01. RawTradeItem을 통합 스키마(TradeDraft)로 변환한다.
  * 필드 매핑은 「국토교통부 실거래가 정보 오픈API 활용가이드(아파트 매매)」로 확정된 값만 다룬다.
- * 전월세(RENT)는 보증금·월세금액 계열 필드명이 아직 기술문서로 재검증되지 않아 구현하지 않았다
- * (요구사항정의서 4.2절 각주 — 신규 제안이 아니라 원본 전제 조건을 그대로 승계).
+ * 연립다세대(VILLA)·전월세(RENT)는 실제 API 필드명(단지명 태그, 보증금·월세금액 계열 등)이 아직
+ * 기술문서로 재검증되지 않아 구현하지 않았다 — 아파트 전용 태그(aptNm 등)로 잘못 매핑해 데이터를
+ * 조용히 훼손하는 대신 명시적으로 거부한다(요구사항정의서 4.2절 각주 — 신규 제안이 아니라 원본
+ * 전제 조건을 그대로 승계).
  */
 @Component
 public class TradeFieldMapper {
@@ -31,9 +33,10 @@ public class TradeFieldMapper {
 
     public TradeDraft mapToUnifiedModel(
             RawTradeItem item, HousingType housingType, DealCategory dealCategory, String datasetId) {
-        if (dealCategory != DealCategory.SALE) {
+        if (housingType != HousingType.APT || dealCategory != DealCategory.SALE) {
             throw new UnsupportedOperationException(
-                    "전월세(RENT) 필드 매핑은 기술문서 재검증 전이라 아직 구현하지 않았다 — 요구사항정의서 4.2절 각주");
+                    "현재는 아파트 매매(APT/SALE) 필드 매핑만 확정됐다 — 연립다세대·전월세는 실제 필드명이"
+                            + " 기술문서로 재검증되지 않아 아직 구현하지 않았다 (요구사항정의서 4.2절 각주)");
         }
 
         String sggCd = required(item, "sggCd");
