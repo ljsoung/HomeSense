@@ -69,7 +69,8 @@ class RealEstateApiCollectorTest {
 
         ApiResponseXml result = collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401");
 
-        assertThat(result.pageBodies()).hasSize(1);
+        assertThat(result.pages()).hasSize(1);
+        assertThat(result.pages().get(0).datasetId()).isEqualTo("15126474");
         mockServer.verify();
     }
 
@@ -87,7 +88,10 @@ class RealEstateApiCollectorTest {
 
         ApiResponseXml result = collector.collect(HousingType.APT, DealCategory.SALE, "11680", "202401");
 
-        assertThat(result.pageBodies()).hasSize(2);
+        // 회귀 테스트: 페이지를 그냥 이어붙이기만 하면 기본(15126469)·상세(15126468) 중 어느 페이지가
+        // 어느 데이터셋 것인지 알 수 없어 TradeFieldMapper에 잘못된 datasetId가 넘어갈 수 있었다.
+        assertThat(result.pages()).extracting(DatasetPage::datasetId)
+                .containsExactly("15126469", "15126468");
         mockServer.verify();
     }
 
@@ -105,7 +109,9 @@ class RealEstateApiCollectorTest {
 
         ApiResponseXml result = collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401");
 
-        assertThat(result.pageBodies()).hasSize(2);
+        assertThat(result.pages()).hasSize(2);
+        assertThat(result.pages()).extracting(DatasetPage::datasetId)
+                .containsExactly("15126474", "15126474");
         mockServer.verify();
     }
 
@@ -119,7 +125,7 @@ class RealEstateApiCollectorTest {
 
         ApiResponseXml result = collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401");
 
-        assertThat(result.pageBodies()).hasSize(1);
+        assertThat(result.pages()).hasSize(1);
         mockServer.verify();
     }
 
