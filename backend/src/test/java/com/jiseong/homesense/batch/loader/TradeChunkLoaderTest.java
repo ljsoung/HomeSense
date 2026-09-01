@@ -2,6 +2,7 @@ package com.jiseong.homesense.batch.loader;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -42,6 +43,8 @@ class TradeChunkLoaderTest {
     private ComplexRepository complexRepository;
     @Mock
     private DedupHashCalculator dedupHashCalculator;
+    @Mock
+    private TradeInsertGateway tradeInsertGateway;
 
     @InjectMocks
     private TradeChunkLoader chunkLoader;
@@ -68,7 +71,7 @@ class TradeChunkLoaderTest {
         assertThat(outcome.result()).isEqualTo(new LoadResult(1, 0, 1, 0));
         assertThat(outcome.touchedComplexIds()).containsExactly(1L);
         assertThat(outcome.touchedLegalDongCds()).containsExactly("1168010100");
-        verify(tradeRepository, times(1)).saveAndFlush(any(Trade.class));
+        verify(tradeInsertGateway, times(1)).insert(any(Trade.class));
     }
 
     @Test
@@ -114,16 +117,19 @@ class TradeChunkLoaderTest {
         when(complexRepository.getReferenceById(1L)).thenReturn(Complex.builder().complexId(1L).build());
         when(legalDistrictCodeRepository.getReferenceById("1168010100"))
                 .thenReturn(LegalDistrictCode.builder().legalDongCd("1168010100").build());
-        when(tradeRepository.saveAndFlush(any(Trade.class)))
-                .thenThrow(new DataIntegrityViolationException("dedup_hash unique violation"))
-                .thenReturn(winner);
+        // 격리된 INSERT 시도(tradeInsertGateway)는 실패하고, 같은 청크 트랜잭션 안의 재시도 UPDATE
+        // (tradeRepository.saveAndFlush)만 성공한다 — 두 호출이 서로 다른 협력자임을 명확히 구분한다.
+        doThrow(new DataIntegrityViolationException("dedup_hash unique violation"))
+                .when(tradeInsertGateway).insert(any(Trade.class));
+        when(tradeRepository.saveAndFlush(any(Trade.class))).thenReturn(winner);
 
         ChunkOutcome outcome = chunkLoader.loadChunk(List.of(draft));
 
         assertThat(outcome.result()).isEqualTo(new LoadResult(1, 0, 0, 1));
         assertThat(winner.getAptDong()).isEqualTo("101동");
         verify(tradeRepository, times(2)).findByDedupHash(FIXED_HASH);
-        verify(tradeRepository, times(2)).saveAndFlush(any());
+        verify(tradeInsertGateway, times(1)).insert(any());
+        verify(tradeRepository, times(1)).saveAndFlush(any());
     }
 
     @Test
@@ -136,8 +142,9 @@ class TradeChunkLoaderTest {
         when(complexRepository.getReferenceById(1L)).thenReturn(Complex.builder().complexId(1L).build());
         when(legalDistrictCodeRepository.getReferenceById("1168010100"))
                 .thenReturn(LegalDistrictCode.builder().legalDongCd("1168010100").build());
+        doThrow(new DataIntegrityViolationException("first failure"))
+                .when(tradeInsertGateway).insert(any(Trade.class));
         when(tradeRepository.saveAndFlush(any(Trade.class)))
-                .thenThrow(new DataIntegrityViolationException("first failure"))
                 .thenThrow(new DataIntegrityViolationException("retry also fails"));
 
         ChunkOutcome outcome = chunkLoader.loadChunk(List.of(draft));

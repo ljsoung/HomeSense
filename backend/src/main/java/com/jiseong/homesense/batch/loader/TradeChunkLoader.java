@@ -35,6 +35,7 @@ class TradeChunkLoader {
     private final LegalDistrictCodeRepository legalDistrictCodeRepository;
     private final ComplexRepository complexRepository;
     private final DedupHashCalculator dedupHashCalculator;
+    private final TradeInsertGateway tradeInsertGateway;
 
     /**
      * public인 이유: Spring 프록시 기반 @Transactional은 public 메서드에만 보장된 동작이다
@@ -88,14 +89,15 @@ class TradeChunkLoader {
         }
 
         try {
-            tradeRepository.saveAndFlush(buildNewTrade(draft, dedupHash));
+            tradeInsertGateway.insert(buildNewTrade(draft, dedupHash));
             return true;
         } catch (DataIntegrityViolationException raceCondition) {
             // dedup_hash UNIQUE 충돌: findByDedupHash 조회 이후 이 실행이 INSERT하기 전에 다른 배치
             // 실행(겹치는 스케줄 등)이 먼저 같은 dedup_hash로 삽입을 끝낸 동시성 race condition이다.
-            // MariaDB는 이런 문장 단위 실패로 트랜잭션 전체를 중단시키지 않으므로(PostgreSQL과 달리)
-            // 같은 청크 트랜잭션 안에서 그대로 UPDATE로 낙관적 재시도를 1회 수행한다 — 이 재시도까지
-            // 실패하면 예외가 그대로 전파되어 loadChunk()가 잡아 해당 건만 스킵한다.
+            // 이 INSERT는 tradeInsertGateway가 별도 REQUIRES_NEW 트랜잭션에서 시도했으므로, 실패해도
+            // 롤백되는 건 그 격리된 트랜잭션뿐이고 이 청크 트랜잭션(EntityManager)은 오염되지 않았다 —
+            // 그래서 같은 청크 트랜잭션 안에서 그대로 UPDATE로 낙관적 재시도를 1회 수행해도 안전하다.
+            // 이 재시도까지 실패하면 예외가 그대로 전파되어 loadChunk()가 잡아 해당 건만 스킵한다.
             Trade winner = tradeRepository.findByDedupHash(dedupHash).orElseThrow(() -> raceCondition);
             applyLateUpdate(winner, draft);
             tradeRepository.saveAndFlush(winner);

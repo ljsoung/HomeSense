@@ -17,9 +17,14 @@ class DedupHashCalculatorTest {
     private final DedupHashCalculator calculator = new DedupHashCalculator();
 
     private static TradeDraft saleDraft(Long complexId, Short floor, long dealAmount) {
+        return saleDraft(complexId, floor, dealAmount, "11680", "역삼동", "역삼래미안", "123-4");
+    }
+
+    private static TradeDraft saleDraft(Long complexId, Short floor, long dealAmount,
+            String sggCd, String umdNm, String buildingName, String jibun) {
         return new TradeDraft(
-                HousingType.APT, DealCategory.SALE, null, "15126468", "11680", "역삼동", "역삼래미안",
-                "123-4", new BigDecimal("84.99"), floor, (short) 2005, LocalDate.of(2024, 1, 15),
+                HousingType.APT, DealCategory.SALE, null, "15126468", sggCd, umdNm, buildingName,
+                jibun, new BigDecimal("84.99"), floor, (short) 2005, LocalDate.of(2024, 1, 15),
                 dealAmount, null, null, "101동", "AGENT", "강남구", null, null, null, null, false, null,
                 complexId, "1168010100", null, null);
     }
@@ -98,5 +103,31 @@ class DedupHashCalculatorTest {
         String hash = calculator.calculate(saleDraft(1L, null, 120000L));
 
         assertThat(hash).hasSize(64);
+    }
+
+    @Test
+    void 미매칭_건은_시군구_동_건물명_지번이_다르면_다른_해시를_반환한다() {
+        // 회귀 테스트: complexId가 둘 다 null이면 이전 구현은 두 건이 같은 "null" 리터럴로 뭉쳐 같은
+        // housing_type/deal_date/floor/exclu_use_area/금액을 우연히 공유하는 서로 다른 지역의 거래가
+        // 같은 해시로 충돌했다(두 번째 건이 첫 번째 건의 UPDATE로 처리되어 유실됨). 원본 주소
+        // (sggCd/umdNm/buildingName/jibun)를 대체 식별자로 넣어 구분되는지 확인한다.
+        String gangnam = calculator.calculate(
+                saleDraft(null, (short) 10, 120000L, "11680", "역삼동", "역삼래미안", "123-4"));
+        String songpa = calculator.calculate(
+                saleDraft(null, (short) 10, 120000L, "11710", "잠실동", "잠실엘스", "45-6"));
+
+        assertThat(gangnam).isNotEqualTo(songpa);
+    }
+
+    @Test
+    void 매칭된_건은_주소가_달라도_complexId가_같으면_같은_해시를_반환한다() {
+        // complexId로 이미 유일하게 식별되는 매칭 성공 건은 원본 주소가 부가 정보로 들어가지 않는다
+        // — 문서 원문 계산식(complex_id만 사용)을 그대로 유지한다.
+        String hash1 = calculator.calculate(
+                saleDraft(1L, (short) 10, 120000L, "11680", "역삼동", "역삼래미안", "123-4"));
+        String hash2 = calculator.calculate(
+                saleDraft(1L, (short) 10, 120000L, "11710", "잠실동", "잠실엘스", "45-6"));
+
+        assertThat(hash1).isEqualTo(hash2);
     }
 }
