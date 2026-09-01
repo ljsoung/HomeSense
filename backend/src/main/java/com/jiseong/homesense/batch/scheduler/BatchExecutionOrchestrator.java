@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClientException;
 
 import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
@@ -32,7 +33,9 @@ import lombok.extern.slf4j.Slf4j;
  * BAT-SCH-01(2/2). 시군구(약 250여 개) × 계약월(전월+당월) × 주택유형 × 거래유형 조합을 순회하며
  * BAT-CLC-01(RealEstateApiCollector)을 호출하는 실행 루프 제어기. 30 TPS 제한을 넘지 않도록
  * throttle()로 호출 간격을 조절하고, 조합 단위 실패는 건너뛰되 서비스키 오류(30/31)가 연속으로
- * 쌓이면 전체를 조기 중단한다.
+ * 쌓이면 전체를 조기 중단한다. data.go.kr의 HTTP 오류(429/5xx)·커넥션 타임아웃 같은 전송 계층
+ * 실패(RestClientException)도 resultCode 판정과 별개로 재시도 후 조합 단위 실패로 격리해, 일시적인
+ * 네트워크 장애 하나로 하루치 전체 배치가 중단되지 않게 한다.
  */
 @Slf4j
 @Component
@@ -114,11 +117,23 @@ class BatchExecutionOrchestrator {
             handleResultCodeFailure(housingType, dealCategory, sggCd, dealYmd, e);
         } catch (OpenApiResponseException e) {
             // 응답 구조 자체를 못 읽은 경우라 어느 데이터셋인지 정확히 알 수 없다 — 조합의 대표(첫)
-            // 데이터셋으로 귀속시켜 기록한다. 서비스키 문제가 아니므로 연속 실패 카운트는 리셋한다.
-            consecutiveAbortBatchCount = 0;
-            String representativeDatasetId = datasetRegistry.resolve(housingType, dealCategory).get(0).datasetId();
-            logFailure(housingType, dealCategory, sggCd, dealYmd, representativeDatasetId, "N/A", e.getMessage());
+            // 데이터셋으로 귀속시켜 기록한다.
+            logStructuralFailure(housingType, dealCategory, sggCd, dealYmd, e.getMessage());
+        } catch (RestClientException e) {
+            // data.go.kr의 HTTP 오류(429/5xx)·커넥션 타임아웃/리셋 등 전송 계층 실패. resultCode 자체를
+            // 못 받았으므로 OpenApiResultCodeException/OpenApiResponseException 어느 쪽에도 안 걸리지만,
+            // 재시도로 회복 가능한 일시적 오류라는 성격은 RETRY 판정과 같아 collectWithRetry에서 이미
+            // 재시도를 소진한 뒤 여기로 온다 — 조합 단위 실패로만 기록하고 배치 전체는 계속 진행한다.
+            logStructuralFailure(housingType, dealCategory, sggCd, dealYmd, "전송 오류: " + e.getMessage());
         }
+    }
+
+    private void logStructuralFailure(HousingType housingType, DealCategory dealCategory, String sggCd,
+                                       String dealYmd, String message) {
+        // 서비스키 문제가 아니므로 연속 실패 카운트는 리셋한다.
+        consecutiveAbortBatchCount = 0;
+        String representativeDatasetId = datasetRegistry.resolve(housingType, dealCategory).get(0).datasetId();
+        logFailure(housingType, dealCategory, sggCd, dealYmd, representativeDatasetId, "N/A", message);
     }
 
     private ApiResponseXml collectWithRetry(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd) {
@@ -129,6 +144,12 @@ class BatchExecutionOrchestrator {
             } catch (OpenApiResultCodeException e) {
                 boolean canRetry = e.judgment() == ErrorCodeJudgment.RETRY && attempt < MAX_RETRY_ATTEMPTS;
                 if (!canRetry) {
+                    throw e;
+                }
+                attempt++;
+                sleep(RETRY_BASE_BACKOFF_MILLIS * (1L << (attempt - 1)));
+            } catch (RestClientException e) {
+                if (attempt >= MAX_RETRY_ATTEMPTS) {
                     throw e;
                 }
                 attempt++;

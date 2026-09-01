@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.web.client.RestClientException;
 
 import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
@@ -163,6 +164,40 @@ class BatchExecutionOrchestratorTest {
         orchestrator.orchestrate(TARGET_MONTH);
 
         verify(collector, times(4)).collect(any(), any(), any(), any());
+        ArgumentCaptor<BatchLog> batchLogCaptor = ArgumentCaptor.forClass(BatchLog.class);
+        verify(batchLogRepository, times(4)).save(batchLogCaptor.capture());
+        assertThat(batchLogCaptor.getAllValues())
+                .allSatisfy(batchLog -> assertThat(batchLog.getResultCode()).isEqualTo("N/A"));
+        verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    @Test
+    void 전송_계층_오류가_나면_재시도_후_성공하면_정상_처리된다() {
+        // 회귀 테스트: data.go.kr의 HTTP 오류(429/5xx)·커넥션 타임아웃 등은 resultCode 판정 이전에
+        // RestClient가 던지는 예외라 OpenApiResultCodeException/OpenApiResponseException 어느 쪽도
+        // 아니었다 — 이걸 못 잡으면 하루치 배치 전체가 중단됐다.
+        RestClientException transportError = new RestClientException("connection reset");
+        when(collector.collect(any(), any(), any(), any()))
+                .thenThrow(transportError)
+                .thenThrow(transportError)
+                .thenReturn(success("15126469"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(collector, times(6)).collect(any(), any(), any(), any());
+        verify(batchLogRepository, times(4)).save(any(BatchLog.class));
+        verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    @Test
+    void 전송_계층_오류가_재시도를_넘기면_해당_조합만_실패로_기록하고_배치_전체는_계속_진행한다() {
+        RestClientException transportError = new RestClientException("connection reset");
+        when(collector.collect(any(), any(), any(), any())).thenThrow(transportError);
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        // 조합마다 최초 시도 1회 + 재시도 3회 = 4번, 조합은 4개 → 16번
+        verify(collector, times(16)).collect(any(), any(), any(), any());
         ArgumentCaptor<BatchLog> batchLogCaptor = ArgumentCaptor.forClass(BatchLog.class);
         verify(batchLogRepository, times(4)).save(batchLogCaptor.capture());
         assertThat(batchLogCaptor.getAllValues())
