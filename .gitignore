@@ -61,6 +61,7 @@ build/
 *.sql
 !schema_all.sql
 !**/schema/*.sql
+!**/testcontainers/*.sql
 dump.sql
 *.dump
 

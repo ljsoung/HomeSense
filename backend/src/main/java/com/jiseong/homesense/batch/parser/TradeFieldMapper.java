@@ -68,7 +68,11 @@ public class TradeFieldMapper {
                 item.get("buyerGbn"),
                 mapYn(item.get("landLeaseholdGbn")),
                 !isBlank(item.get("cdealType")),
-                parseLegacyDate(item.get("cdealDay"), "cdealDay"));
+                parseLegacyDate(item.get("cdealDay"), "cdealDay"),
+                null, // complexId — BAT-MAT-02가 채움
+                null, // legalDongCd — BAT-MAT-01이 채움
+                null, // matchMethod — BAT-MAT-02가 채움
+                null); // matchConfidence — BAT-MAT-02가 채움
     }
 
     private LocalDate mapDealDate(RawTradeItem item) {

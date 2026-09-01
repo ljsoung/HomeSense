@@ -79,6 +79,10 @@ class ComplexMasterMatcherTest {
                 null,
                 null,
                 false,
+                null,
+                null, // complexId — matchComplex는 draft가 아니라 반환값으로 결정하므로 무관
+                null,
+                null,
                 null);
     }
 

@@ -65,9 +65,33 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testRuntimeOnly 'com.h2database:h2' // 컨텍스트 로드 테스트용 인메모리 DB (실제 스키마는 MariaDB, 테이블 정의서 8장 DDL 기준)
     testAnnotationProcessor 'org.projectlombok:lombok'
+
+    // Testcontainers — @Tag("integration") 테스트 전용(예: BAT-LOD-01 dedup_hash UNIQUE 동시성 검증).
+    // spring-boot-testcontainers만으로는 이 Spring Boot 버전에서 testcontainers-bom이 자동으로
+    // 걸리지 않아 버전을 명시적으로 고정한다.
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:mariadb'
 }
 
+// integration 태그 테스트는 Docker가 필요해 기본 `test` 태스크에서는 제외한다 — 평소 개발 루프
+// (./gradlew test)가 Docker 없이도 항상 돌아가야 하므로, 이 테스트들은 별도 `integrationTest`
+// 태스크로만 실행한다.
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'integration'
+    }
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs @Tag("integration") tests (Testcontainers 등 Docker 필요)'
+    group = 'verification'
+    useJUnitPlatform {
+        includeTags 'integration'
+    }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    shouldRunAfter test
 }
 

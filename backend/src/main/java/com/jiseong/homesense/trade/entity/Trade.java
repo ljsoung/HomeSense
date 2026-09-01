@@ -169,4 +169,17 @@ public class Trade {
         this.cancelYn = true;
         this.cancelDate = cancelDate;
     }
+
+    /**
+     * BAT-LOD-01이 dedup_hash로 기존 행을 찾았을 때(upsert의 UPDATE 경로) 갱신하는 필드만 모은다.
+     * 등기 완료 후 동정보가 추가 공개되거나(apt_dong), 거래가 사후 신고 취소되는 등(cancel_yn/cancel_date)
+     * 최초 적재 이후에도 값이 바뀔 수 있는 필드만 대상이며, complex/legalDistrictCode/matchMethod
+     * 같은 매칭 결과나 dedup_hash 자체는 최초 적재 시점 값을 그대로 유지한다(재매칭은 이 메서드의 책임이 아니다).
+     */
+    public void applyLateUpdate(boolean cancelYn, LocalDate cancelDate, LocalDate registrationDate, String aptDong) {
+        this.cancelYn = cancelYn;
+        this.cancelDate = cancelDate;
+        this.registrationDate = registrationDate;
+        this.aptDong = aptDong;
+    }
 }
