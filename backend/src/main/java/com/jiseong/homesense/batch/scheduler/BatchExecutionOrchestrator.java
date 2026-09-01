@@ -13,6 +13,7 @@ import org.springframework.web.client.RestClientException;
 
 import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
+import com.jiseong.homesense.batch.collector.BatchInterruptedException;
 import com.jiseong.homesense.batch.collector.DatasetPage;
 import com.jiseong.homesense.batch.collector.DatasetRegistry;
 import com.jiseong.homesense.batch.collector.OpenApiResponseException;
@@ -207,6 +208,7 @@ class BatchExecutionOrchestrator {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new BatchInterruptedException("재시도 백오프 대기 중 인터럽트됨", e);
         }
     }
 }

@@ -31,6 +31,7 @@ public class ApiCallThrottle {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new BatchInterruptedException("스로틀 대기 중 인터럽트됨", e);
         }
     }
 }
