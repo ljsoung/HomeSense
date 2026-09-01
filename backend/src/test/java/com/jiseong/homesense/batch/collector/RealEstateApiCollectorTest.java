@@ -35,7 +35,8 @@ class RealEstateApiCollectorTest {
         restClientBuilder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         RestClient restClient = restClientBuilder.build();
-        return new RealEstateApiCollector(datasetRegistry, errorCodeClassifier, dataGoKrProperties, restClient);
+        return new RealEstateApiCollector(
+                datasetRegistry, errorCodeClassifier, dataGoKrProperties, restClient, new ApiCallThrottle());
     }
 
     private static String responseXml(String resultCode, int totalCount, int itemCount) {
@@ -94,6 +95,29 @@ class RealEstateApiCollectorTest {
         // 어느 데이터셋 것인지 알 수 없어 TradeFieldMapper에 잘못된 datasetId가 넘어갈 수 있었다.
         assertThat(result.pages()).extracting(DatasetPage::datasetId)
                 .containsExactly("15126469", "15126468");
+        mockServer.verify();
+    }
+
+    @Test
+    void 같은_조합_안의_여러_요청도_최소_지연을_두고_나간다() {
+        // 회귀 테스트: 스로틀이 BatchExecutionOrchestrator의 조합 경계에만 있으면, 한 조합이
+        // 데이터셋 2개(APT+SALE)로 갈라지는 이 케이스처럼 collect() 내부에서 연달아 나가는 요청
+        // 사이는 무방비 상태가 된다 — ApiCallThrottle이 requestPage() 직전에서 간격을 강제해야 한다.
+        RealEstateApiCollector collector = newCollector();
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withSuccess(responseXml("000", 1, 1), MediaType.APPLICATION_XML));
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withSuccess(responseXml("000", 1, 1), MediaType.APPLICATION_XML));
+
+        long start = System.currentTimeMillis();
+        collector.collect(HousingType.APT, DealCategory.SALE, "11680", "202401");
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertThat(elapsed).isGreaterThanOrEqualTo(40);
         mockServer.verify();
     }
 

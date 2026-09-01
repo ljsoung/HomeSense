@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
+import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
 import com.jiseong.homesense.batch.collector.DatasetPage;
 import com.jiseong.homesense.batch.collector.DatasetRegistry;
@@ -40,9 +41,6 @@ class BatchExecutionOrchestrator {
 
     private static final DateTimeFormatter DEAL_YMD_FORMATTER = DateTimeFormatter.ofPattern("yyyyMM");
 
-    /** 30 TPS(평균 33ms/건) 대비 안전마진을 둔 호출 간 최소 지연. */
-    private static final long MIN_INTERVAL_MILLIS = 40;
-
     private static final int MAX_RETRY_ATTEMPTS = 3;
     private static final long RETRY_BASE_BACKOFF_MILLIS = 200;
 
@@ -60,9 +58,9 @@ class BatchExecutionOrchestrator {
     private final BatchLogRepository batchLogRepository;
     private final BatchSchedulerProperties batchSchedulerProperties;
     private final ApplicationEventPublisher eventPublisher;
+    private final ApiCallThrottle apiCallThrottle;
 
     private int consecutiveAbortBatchCount = 0;
-    private long lastCallAtMillis = 0;
 
     /**
      * targetMonth를 기준으로 "전월 + 당월" 2개월을 계약월 축으로 삼아 재수집한다 — 국토부 자료가
@@ -96,14 +94,14 @@ class BatchExecutionOrchestrator {
         eventPublisher.publishEvent(new TradeCollectionCompletedEvent(targetMonth));
     }
 
-    /** 호출 간 최소 지연을 적용한다(30 TPS 대응). */
+    /**
+     * 호출 간 최소 지연을 적용한다(30 TPS 대응). 실제 요청은 RealEstateApiCollector가 데이터셋·페이지
+     * 단위로 여러 번 내보낼 수 있으므로, 여기서 쓰는 ApiCallThrottle은 RealEstateApiCollector와
+     * 같은 싱글턴 인스턴스를 공유한다 — 그래야 조합 경계뿐 아니라 그 안의 모든 실제 HTTP 요청까지
+     * 하나의 시계로 간격이 지켜진다.
+     */
     void throttle() {
-        long now = System.currentTimeMillis();
-        long remaining = MIN_INTERVAL_MILLIS - (now - lastCallAtMillis);
-        if (remaining > 0) {
-            sleep(remaining);
-        }
-        lastCallAtMillis = System.currentTimeMillis();
+        apiCallThrottle.throttle();
     }
 
     private void processCombination(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd) {

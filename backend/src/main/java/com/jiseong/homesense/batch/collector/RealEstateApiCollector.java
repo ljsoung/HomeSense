@@ -32,6 +32,7 @@ public class RealEstateApiCollector {
     private final ApiErrorCodeClassifier errorCodeClassifier;
     private final DataGoKrProperties dataGoKrProperties;
     private final RestClient restClient;
+    private final ApiCallThrottle apiCallThrottle;
 
     /**
      * 한 조합(housingType×dealCategory)에 걸린 모든 데이터셋(APT+SALE은 기본·상세 2개)의
@@ -49,6 +50,7 @@ public class RealEstateApiCollector {
     private void collectAllPages(DatasetDescriptor dataset, String sggCd, String dealYmd, List<DatasetPage> pages) {
         int pageNo = 1;
         while (true) {
+            apiCallThrottle.throttle();
             String body = requestPage(dataset, sggCd, dealYmd, pageNo);
             PageMeta meta = OpenApiXmlReader.readMeta(body, dataset.datasetId());
 

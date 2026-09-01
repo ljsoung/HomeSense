@@ -19,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
+import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
 import com.jiseong.homesense.batch.collector.DatasetPage;
 import com.jiseong.homesense.batch.collector.DatasetRegistry;
@@ -61,8 +62,8 @@ class BatchExecutionOrchestratorTest {
     void setUp() {
         lenient().when(legalDistrictCodeRepository.findDistinctActiveSggCd()).thenReturn(List.of(SGG_CD));
         BatchSchedulerProperties properties = new BatchSchedulerProperties(List.of(HousingType.APT));
-        orchestrator = new BatchExecutionOrchestrator(
-                legalDistrictCodeRepository, collector, datasetRegistry, batchLogRepository, properties, eventPublisher);
+        orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
+                batchLogRepository, properties, eventPublisher, new ApiCallThrottle());
     }
 
     private static ApiResponseXml success(String datasetId) {
