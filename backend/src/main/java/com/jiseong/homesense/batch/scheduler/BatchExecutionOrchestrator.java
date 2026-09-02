@@ -13,14 +13,15 @@ import org.springframework.web.client.RestClientException;
 
 import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
-import com.jiseong.homesense.batch.collector.BatchInterruptedException;
 import com.jiseong.homesense.batch.collector.DatasetPage;
 import com.jiseong.homesense.batch.collector.DatasetRegistry;
 import com.jiseong.homesense.batch.collector.OpenApiResponseException;
 import com.jiseong.homesense.batch.collector.OpenApiResultCodeException;
 import com.jiseong.homesense.batch.collector.RealEstateApiCollector;
 import com.jiseong.homesense.batch.entity.BatchLog;
+import com.jiseong.homesense.batch.errorhandler.CollectRequest;
 import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
+import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
@@ -34,9 +35,10 @@ import lombok.extern.slf4j.Slf4j;
  * BAT-SCH-01(2/2). 시군구(약 250여 개) × 계약월(전월+당월) × 주택유형 × 거래유형 조합을 순회하며
  * BAT-CLC-01(RealEstateApiCollector)을 호출하는 실행 루프 제어기. 30 TPS 제한을 넘지 않도록
  * throttle()로 호출 간격을 조절하고, 조합 단위 실패는 건너뛰되 서비스키 오류(30/31)가 연속으로
- * 쌓이면 전체를 조기 중단한다. data.go.kr의 HTTP 오류(429/5xx)·커넥션 타임아웃 같은 전송 계층
- * 실패(RestClientException)도 resultCode 판정과 별개로 재시도 후 조합 단위 실패로 격리해, 일시적인
- * 네트워크 장애 하나로 하루치 전체 배치가 중단되지 않게 한다.
+ * 쌓이면 전체를 조기 중단한다. RETRY 판정(resultCode 01/02/04/05/22)과 data.go.kr의 HTTP
+ * 오류(429/5xx)·커넥션 타임아웃 같은 전송 계층 실패(RestClientException)는 그 자리에서 블로킹
+ * 재시도하지 않고 BAT-ERR-01(RetryQueueManager)의 큐에 적재만 해두고 다음 조합으로 즉시 넘어간다 —
+ * 전체 조합 순회가 끝난 뒤 큐를 한 번에 처리해 분 단위 백오프가 순회 자체를 지연시키지 않게 한다.
  */
 @Slf4j
 @Component
@@ -44,9 +46,6 @@ import lombok.extern.slf4j.Slf4j;
 class BatchExecutionOrchestrator {
 
     private static final DateTimeFormatter DEAL_YMD_FORMATTER = DateTimeFormatter.ofPattern("yyyyMM");
-
-    private static final int MAX_RETRY_ATTEMPTS = 3;
-    private static final long RETRY_BASE_BACKOFF_MILLIS = 200;
 
     /**
      * 서비스키 오류(30/31)가 단발성 오탐일 가능성을 배제하기 위한 연속 발생 임계치.
@@ -63,6 +62,7 @@ class BatchExecutionOrchestrator {
     private final BatchSchedulerProperties batchSchedulerProperties;
     private final ApplicationEventPublisher eventPublisher;
     private final ApiCallThrottle apiCallThrottle;
+    private final RetryQueueManager retryQueueManager;
 
     private int consecutiveAbortBatchCount = 0;
 
@@ -77,21 +77,22 @@ class BatchExecutionOrchestrator {
         consecutiveAbortBatchCount = 0;
 
         int combinationCount = 0;
-        for (String sggCd : sggCds) {
-            for (YearMonth month : targetMonths) {
-                String dealYmd = month.format(DEAL_YMD_FORMATTER);
-                for (HousingType housingType : housingTypes) {
-                    for (DealCategory dealCategory : DealCategory.values()) {
-                        try {
+        try {
+            for (String sggCd : sggCds) {
+                for (YearMonth month : targetMonths) {
+                    String dealYmd = month.format(DEAL_YMD_FORMATTER);
+                    for (HousingType housingType : housingTypes) {
+                        for (DealCategory dealCategory : DealCategory.values()) {
                             processCombination(housingType, dealCategory, sggCd, dealYmd);
                             combinationCount++;
-                        } catch (CriticalBatchException e) {
-                            log.error("BAT-SCH-01 배치 조기 중단: {}", e.getMessage(), e);
-                            return;
                         }
                     }
                 }
             }
+            retryQueueManager.processRetryQueue(this::attemptRetry, this::logRetryExhausted);
+        } catch (CriticalBatchException e) {
+            log.error("BAT-SCH-01 배치 조기 중단: {}", e.getMessage(), e);
+            return;
         }
 
         log.info("BAT-SCH-01 조합 순회 완료: targetMonth={}, 처리 조합 수={}", targetMonth, combinationCount);
@@ -111,10 +112,17 @@ class BatchExecutionOrchestrator {
     private void processCombination(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd) {
         throttle();
         try {
-            ApiResponseXml response = collectWithRetry(housingType, dealCategory, sggCd, dealYmd);
+            ApiResponseXml response = collector.collect(housingType, dealCategory, sggCd, dealYmd);
             consecutiveAbortBatchCount = 0;
             logSuccess(housingType, dealCategory, sggCd, dealYmd, response);
         } catch (OpenApiResultCodeException e) {
+            if (e.judgment() == ErrorCodeJudgment.RETRY) {
+                // 지금 당장 블로킹으로 재시도하지 않고 큐에 적재만 해두고 다음 조합으로 넘어간다 —
+                // 실제 재시도는 전체 순회가 끝난 뒤 RetryQueueManager.processRetryQueue()가 수행한다.
+                consecutiveAbortBatchCount = 0;
+                retryQueueManager.enqueueRetry(new CollectRequest(housingType, dealCategory, sggCd, dealYmd));
+                return;
+            }
             handleResultCodeFailure(housingType, dealCategory, sggCd, dealYmd, e);
         } catch (OpenApiResponseException e) {
             // 응답 구조 자체를 못 읽은 경우라 어느 데이터셋인지 정확히 알 수 없다 — 조합의 대표(첫)
@@ -123,10 +131,50 @@ class BatchExecutionOrchestrator {
         } catch (RestClientException e) {
             // data.go.kr의 HTTP 오류(429/5xx)·커넥션 타임아웃/리셋 등 전송 계층 실패. resultCode 자체를
             // 못 받았으므로 OpenApiResultCodeException/OpenApiResponseException 어느 쪽에도 안 걸리지만,
-            // 재시도로 회복 가능한 일시적 오류라는 성격은 RETRY 판정과 같아 collectWithRetry에서 이미
-            // 재시도를 소진한 뒤 여기로 온다 — 조합 단위 실패로만 기록하고 배치 전체는 계속 진행한다.
-            logStructuralFailure(housingType, dealCategory, sggCd, dealYmd, "전송 오류: " + e.getMessage());
+            // 재시도로 회복 가능한 일시적 오류라는 성격은 RETRY 판정과 같아 마찬가지로 큐에 적재한다.
+            consecutiveAbortBatchCount = 0;
+            retryQueueManager.enqueueRetry(new CollectRequest(housingType, dealCategory, sggCd, dealYmd));
         }
+    }
+
+    /**
+     * RetryQueueManager가 백오프 이후 재시도할 때 호출하는 콜백. true를 반환하면 큐에서 제거되고
+     * (성공했거나 더 이상 RETRY 대상이 아님), false면 다음 백오프 단계로 재적재된다.
+     */
+    private boolean attemptRetry(CollectRequest request) {
+        try {
+            ApiResponseXml response = collector.collect(
+                    request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd());
+            consecutiveAbortBatchCount = 0;
+            logSuccess(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(), response);
+            return true;
+        } catch (OpenApiResultCodeException e) {
+            if (e.judgment() == ErrorCodeJudgment.RETRY) {
+                return false;
+            }
+            handleResultCodeFailure(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(), e);
+            return true;
+        } catch (OpenApiResponseException e) {
+            logStructuralFailure(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(),
+                    e.getMessage());
+            return true;
+        } catch (RestClientException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 재시도 큐의 backoffSchedule을 소진했거나(최대 재시도 횟수 초과), RetryQueueManager의
+     * 대기 예산(maxTotalWaitMinutes)을 넘어 더 이상 대기·재시도하지 않고 넘어온 최종 실패.
+     * batch_log에 실패로 기록하고, 같은 조합은 다음 배치 사이클(익일 재수집)에서 자연히 다시
+     * 시도된다.
+     */
+    private void logRetryExhausted(CollectRequest request) {
+        consecutiveAbortBatchCount = 0;
+        String representativeDatasetId =
+                datasetRegistry.resolve(request.housingType(), request.dealCategory()).get(0).datasetId();
+        logFailure(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(),
+                representativeDatasetId, "N/A", "재시도 소진 또는 재시도 대기 예산 초과 — 다음 배치 사이클로 이월");
     }
 
     private void logStructuralFailure(HousingType housingType, DealCategory dealCategory, String sggCd,
@@ -135,28 +183,6 @@ class BatchExecutionOrchestrator {
         consecutiveAbortBatchCount = 0;
         String representativeDatasetId = datasetRegistry.resolve(housingType, dealCategory).get(0).datasetId();
         logFailure(housingType, dealCategory, sggCd, dealYmd, representativeDatasetId, "N/A", message);
-    }
-
-    private ApiResponseXml collectWithRetry(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd) {
-        int attempt = 0;
-        while (true) {
-            try {
-                return collector.collect(housingType, dealCategory, sggCd, dealYmd);
-            } catch (OpenApiResultCodeException e) {
-                boolean canRetry = e.judgment() == ErrorCodeJudgment.RETRY && attempt < MAX_RETRY_ATTEMPTS;
-                if (!canRetry) {
-                    throw e;
-                }
-                attempt++;
-                sleep(RETRY_BASE_BACKOFF_MILLIS * (1L << (attempt - 1)));
-            } catch (RestClientException e) {
-                if (attempt >= MAX_RETRY_ATTEMPTS) {
-                    throw e;
-                }
-                attempt++;
-                sleep(RETRY_BASE_BACKOFF_MILLIS * (1L << (attempt - 1)));
-            }
-        }
     }
 
     private void handleResultCodeFailure(HousingType housingType, DealCategory dealCategory, String sggCd,
@@ -201,14 +227,5 @@ class BatchExecutionOrchestrator {
             return message;
         }
         return message.substring(0, RESULT_MESSAGE_MAX_LENGTH);
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BatchInterruptedException("재시도 백오프 대기 중 인터럽트됨", e);
-        }
     }
 }

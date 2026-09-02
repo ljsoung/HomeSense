@@ -9,7 +9,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.YearMonth;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,8 +31,10 @@ import com.jiseong.homesense.batch.collector.OpenApiResultCodeException;
 import com.jiseong.homesense.batch.collector.RealEstateApiCollector;
 import com.jiseong.homesense.batch.entity.BatchLog;
 import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
+import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
+import com.jiseong.homesense.common.config.RetryQueueProperties;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
@@ -63,8 +67,12 @@ class BatchExecutionOrchestratorTest {
     void setUp() {
         lenient().when(legalDistrictCodeRepository.findDistinctActiveSggCd()).thenReturn(List.of(SGG_CD));
         BatchSchedulerProperties properties = new BatchSchedulerProperties(List.of(HousingType.APT));
+        // 백오프를 0분으로 둬 재시도 큐 처리가 테스트를 분 단위로 지연시키지 않게 한다 —
+        // 실제 백오프 스케줄(1,5,30분)은 RetryQueueManagerTest에서 별도로 검증한다.
+        RetryQueueManager retryQueueManager =
+                new RetryQueueManager(new RetryQueueProperties(List.of(0L, 0L, 0L), 999_999L));
         orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
-                batchLogRepository, properties, eventPublisher, new ApiCallThrottle());
+                batchLogRepository, properties, eventPublisher, new ApiCallThrottle(), retryQueueManager);
     }
 
     private static ApiResponseXml success(String datasetId) {
@@ -122,10 +130,38 @@ class BatchExecutionOrchestratorTest {
 
         orchestrator.orchestrate(TARGET_MONTH);
 
-        // 첫 조합에서 재시도 2회 + 성공 1회 = 3번, 나머지 3개 조합은 1번씩 = 6번
+        // 4개 조합 모두 최초 시도 1번씩(4번) 거친 뒤, RETRY로 큐에 적재된 조합만 전체 순회가
+        // 끝난 뒤 재시도 큐에서 다시 시도된다. mock 스텁이 앞 2번 호출만 실패라 두 조합이 큐에
+        // 적재되고, 큐 처리 시점엔 이미 성공 스텁만 남아 각 1번씩(2번) 재시도로 성공한다 → 총 6번.
         verify(collector, times(6)).collect(any(), any(), any(), any());
         verify(batchLogRepository, times(4)).save(any(BatchLog.class));
         verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    @Test
+    void RETRY_판정된_조합은_블로킹_재시도_없이_전체_순회가_끝난_뒤에야_재시도된다() {
+        // BAT-ERR-01 핵심 동작: RETRY는 그 자리에서 블로킹 재시도하지 않고 큐에 적재만 해두고
+        // 다음 조합으로 즉시 넘어간다 — 4개 조합의 최초 시도(1~4번째 호출)가 모두 끝난 뒤에야
+        // 재시도(5번째 호출)가 일어나야 한다.
+        OpenApiResultCodeException retry =
+                new OpenApiResultCodeException("15126469", "22", ErrorCodeJudgment.RETRY);
+        AtomicInteger callCount = new AtomicInteger();
+        List<Integer> retryCallIndexes = new ArrayList<>();
+        when(collector.collect(any(), any(), any(), any())).thenAnswer(invocation -> {
+            int index = callCount.incrementAndGet();
+            if (index == 1) {
+                throw retry;
+            }
+            if (index == 5) {
+                retryCallIndexes.add(index);
+            }
+            return success("15126469");
+        });
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        assertThat(callCount.get()).isEqualTo(5);
+        assertThat(retryCallIndexes).containsExactly(5);
     }
 
     @Test
@@ -136,7 +172,7 @@ class BatchExecutionOrchestratorTest {
 
         orchestrator.orchestrate(TARGET_MONTH);
 
-        // 조합마다 최초 시도 1회 + 재시도 3회 = 4번, 조합은 4개 → 16번
+        // 조합마다 최초 시도 1회(4번) + 전체 순회가 끝난 뒤 재시도 큐에서 조합당 3회씩(12번) → 16번
         verify(collector, times(16)).collect(any(), any(), any(), any());
         verify(batchLogRepository, times(4)).save(any(BatchLog.class));
         verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
@@ -184,6 +220,7 @@ class BatchExecutionOrchestratorTest {
 
         orchestrator.orchestrate(TARGET_MONTH);
 
+        // RETRY 케이스와 동일한 이유로 6번(최초 4번 + 큐 적재된 2개 조합의 재시도 2번).
         verify(collector, times(6)).collect(any(), any(), any(), any());
         verify(batchLogRepository, times(4)).save(any(BatchLog.class));
         verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
@@ -196,7 +233,7 @@ class BatchExecutionOrchestratorTest {
 
         orchestrator.orchestrate(TARGET_MONTH);
 
-        // 조합마다 최초 시도 1회 + 재시도 3회 = 4번, 조합은 4개 → 16번
+        // 조합마다 최초 시도 1회(4번) + 전체 순회가 끝난 뒤 재시도 큐에서 조합당 3회씩(12번) → 16번
         verify(collector, times(16)).collect(any(), any(), any(), any());
         ArgumentCaptor<BatchLog> batchLogCaptor = ArgumentCaptor.forClass(BatchLog.class);
         verify(batchLogRepository, times(4)).save(batchLogCaptor.capture());
