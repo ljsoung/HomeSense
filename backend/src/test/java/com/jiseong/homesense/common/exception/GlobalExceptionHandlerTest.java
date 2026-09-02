@@ -74,6 +74,26 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.error.message").value(not(containsString("boom"))));
     }
 
+    /*
+     * GlobalExceptionHandler가 ResponseEntityExceptionHandler를 상속하지 않으면 이 예외도
+     * java.lang.Exception이라 handleUnexpected가 가로채 500으로 응답이 바뀐다 — 회귀 테스트.
+     */
+    @Test
+    void 지원하지_않는_HTTP_메서드는_500이_아니라_405로_응답한다() throws Exception {
+        mockMvc.perform(post("/test/business-exception"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void 형식이_잘못된_JSON_요청은_500이_아니라_400으로_응답한다() throws Exception {
+        mockMvc.perform(post("/test/validate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("not-json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
     @RestController
     static class TestController {
 
