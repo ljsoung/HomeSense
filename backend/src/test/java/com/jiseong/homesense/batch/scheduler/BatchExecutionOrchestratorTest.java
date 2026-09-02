@@ -2,8 +2,11 @@ package com.jiseong.homesense.batch.scheduler;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,6 +33,7 @@ import com.jiseong.homesense.batch.collector.OpenApiResponseException;
 import com.jiseong.homesense.batch.collector.OpenApiResultCodeException;
 import com.jiseong.homesense.batch.collector.RealEstateApiCollector;
 import com.jiseong.homesense.batch.entity.BatchLog;
+import com.jiseong.homesense.batch.errorhandler.CollectRequest;
 import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
@@ -62,6 +66,7 @@ class BatchExecutionOrchestratorTest {
     private final DatasetRegistry datasetRegistry = new DatasetRegistry();
 
     private BatchExecutionOrchestrator orchestrator;
+    private RetryQueueManager retryQueueManager;
 
     @BeforeEach
     void setUp() {
@@ -69,8 +74,7 @@ class BatchExecutionOrchestratorTest {
         BatchSchedulerProperties properties = new BatchSchedulerProperties(List.of(HousingType.APT));
         // 백오프를 0분으로 둬 재시도 큐 처리가 테스트를 분 단위로 지연시키지 않게 한다 —
         // 실제 백오프 스케줄(1,5,30분)은 RetryQueueManagerTest에서 별도로 검증한다.
-        RetryQueueManager retryQueueManager =
-                new RetryQueueManager(new RetryQueueProperties(List.of(0L, 0L, 0L), 999_999L));
+        retryQueueManager = new RetryQueueManager(new RetryQueueProperties(List.of(0L, 0L, 0L), 999_999L));
         orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
                 batchLogRepository, properties, eventPublisher, new ApiCallThrottle(), retryQueueManager);
     }
@@ -179,6 +183,27 @@ class BatchExecutionOrchestratorTest {
     }
 
     @Test
+    void RETRY가_소진되면_대표_데이터셋이_아닌_마지막으로_관측된_실제_API_오류를_기록한다() {
+        // APT+SALE 조합은 데이터셋이 2개다(대표: 15126469, 상세: 15126468). 실패가 대표가 아닌
+        // 상세 데이터셋에서 코드 22로 계속 발생했다면, 소진 시에도 그 사실(15126468/22)이 그대로
+        // 기록돼야 한다 — 대표 데이터셋(15126469)과 "N/A"로 뭉뚱그려지면 어떤 데이터셋의 어떤
+        // 오류로 실패했는지 알 수 없게 된다.
+        OpenApiResultCodeException retryFromDetailDataset =
+                new OpenApiResultCodeException("15126468", "22", ErrorCodeJudgment.RETRY);
+        when(collector.collect(any(), eq(DealCategory.SALE), any(), any())).thenThrow(retryFromDetailDataset);
+        when(collector.collect(any(), eq(DealCategory.RENT), any(), any())).thenReturn(success("15126474"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        ArgumentCaptor<BatchLog> batchLogCaptor = ArgumentCaptor.forClass(BatchLog.class);
+        verify(batchLogRepository, atLeastOnce()).save(batchLogCaptor.capture());
+        assertThat(batchLogCaptor.getAllValues())
+                .filteredOn(log -> "15126468".equals(log.getDatasetId()))
+                .isNotEmpty()
+                .allSatisfy(log -> assertThat(log.getResultCode()).isEqualTo("22"));
+    }
+
+    @Test
     void ABORT_BATCH가_연속으로_임계치만큼_발생하면_배치_전체를_조기_중단한다() {
         OpenApiResultCodeException authError =
                 new OpenApiResultCodeException("15126469", "30", ErrorCodeJudgment.ABORT_BATCH);
@@ -190,6 +215,42 @@ class BatchExecutionOrchestratorTest {
         verify(collector, times(3)).collect(any(), any(), any(), any());
         verify(batchLogRepository, times(3)).save(any(BatchLog.class));
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void 배치가_조기_중단되면_그때까지_쌓인_재시도_큐도_함께_비워져_다음_사이클과_섞이지_않는다() {
+        // RetryQueueManager는 싱글턴이라 orchestrate() 호출 경계를 넘어 큐가 유지된다. 1번째
+        // 조합이 RETRY로 큐에 적재된 직후 이어지는 3개 조합이 연속 ABORT_BATCH(30)를 맞아
+        // 임계치에 도달해 배치가 조기 중단되면, processRetryQueue()엔 아예 도달하지 못한다 —
+        // 이때 큐를 비우지 않으면 이 RETRY 항목이 다음 배치 사이클의 큐에 그대로 남는다.
+        OpenApiResultCodeException retry =
+                new OpenApiResultCodeException("15126469", "22", ErrorCodeJudgment.RETRY);
+        OpenApiResultCodeException authError =
+                new OpenApiResultCodeException("15126469", "30", ErrorCodeJudgment.ABORT_BATCH);
+        when(collector.collect(any(), any(), any(), any()))
+                .thenThrow(retry)
+                .thenThrow(authError)
+                .thenThrow(authError)
+                .thenThrow(authError);
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(collector, times(4)).collect(any(), any(), any(), any());
+        // RETRY로 큐에 적재됐던 combo1이 조기 중단으로 비워지며 실패로 기록되어 4건(ABORT_BATCH
+        // 3건 + 비워진 RETRY 1건).
+        verify(batchLogRepository, times(4)).save(any(BatchLog.class));
+        verify(eventPublisher, never()).publishEvent(any());
+
+        // 다음 배치 사이클: 이번엔 전부 성공한다고 가정한다. 이전 사이클에서 큐가 비워지지
+        // 않았다면, 이번 4개 조합 처리 후 큐 처리 단계에서 stale 항목이 추가로 한 번 더
+        // collect()를 호출하게 되어 총 5번이 된다.
+        reset(collector);
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(collector, times(4)).collect(any(), any(), any(), any());
+        verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
     }
 
     @Test
@@ -239,6 +300,27 @@ class BatchExecutionOrchestratorTest {
         verify(batchLogRepository, times(4)).save(batchLogCaptor.capture());
         assertThat(batchLogCaptor.getAllValues())
                 .allSatisfy(batchLog -> assertThat(batchLog.getResultCode()).isEqualTo("N/A"));
+        verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    @Test
+    void orchestrate_시작_시점에도_이전에_남아있던_재시도_큐를_비운다() {
+        // CriticalBatchException 외의 원인(다른 예외, 프로세스 재기동 등)으로 이전 실행이 큐를
+        // 못 비운 채 끝났을 가능성에 대비한 이중 방어선 — orchestrate() 시작 시점에도 큐를 비워
+        // "새 실행은 항상 빈 큐로 시작한다"는 불변식을 보장해야 한다.
+        CollectRequest staleFromPreviousRun =
+                new CollectRequest(HousingType.APT, DealCategory.SALE, "99999", "202401");
+        retryQueueManager.enqueueRetry(staleFromPreviousRun);
+
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        // stale 항목이 이번 실행의 재시도 큐 처리 단계에서 함께 재시도되지 않고(collect 호출은
+        // 이번 실행 몫인 4번뿐), 조기 소진 처리로 실패 기록만 남긴 채(4개 조합 성공 로그 4건 +
+        // stale 항목 실패 로그 1건 = 5건) 정상적으로 완료 이벤트가 발행된다.
+        verify(collector, times(4)).collect(any(), any(), any(), any());
+        verify(batchLogRepository, times(5)).save(any(BatchLog.class));
         verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
     }
 }

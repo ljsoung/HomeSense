@@ -21,6 +21,8 @@ import com.jiseong.homesense.batch.collector.RealEstateApiCollector;
 import com.jiseong.homesense.batch.entity.BatchLog;
 import com.jiseong.homesense.batch.errorhandler.CollectRequest;
 import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
+import com.jiseong.homesense.batch.errorhandler.RetryFailureDetail;
+import com.jiseong.homesense.batch.errorhandler.RetryOutcome;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
@@ -71,6 +73,13 @@ class BatchExecutionOrchestrator {
      * 계약일 기준으로 소급 등록되는 특성(지연 신고) 때문에 당월 한 달만 보면 최근 신고분을 놓친다.
      */
     void orchestrate(YearMonth targetMonth) {
+        // 이전 실행이 어떤 이유로든(CriticalBatchException 외의 예외, 프로세스 재기동 등)
+        // 큐를 비우지 못하고 끝났을 가능성에 대비해, 새 실행은 항상 빈 큐로 시작한다는 불변식을
+        // 여기서도 보장한다 — CriticalBatchException catch 블록의 clear() 호출과 완전히
+        // 중복되지만(정상 종료 후엔 빈 큐를 비우는 no-op), 둘 중 하나가 나중에 빠지더라도
+        // 다른 하나가 안전망 역할을 계속하도록 이중화한다.
+        retryQueueManager.clear().forEach(this::logRetryAbandoned);
+
         List<String> sggCds = legalDistrictCodeRepository.findDistinctActiveSggCd();
         List<YearMonth> targetMonths = List.of(targetMonth.minusMonths(1), targetMonth);
         List<HousingType> housingTypes = batchSchedulerProperties.housingTypes();
@@ -92,6 +101,10 @@ class BatchExecutionOrchestrator {
             retryQueueManager.processRetryQueue(this::attemptRetry, this::logRetryExhausted);
         } catch (CriticalBatchException e) {
             log.error("BAT-SCH-01 배치 조기 중단: {}", e.getMessage(), e);
+            // 조기 중단으로 processRetryQueue()에 도달하지 못했다 — 그때까지 큐에 쌓인 항목을
+            // 비우지 않으면 싱글턴인 RetryQueueManager에 그대로 남아 다음 배치 사이클의 큐와
+            // 뒤섞인다(계약월 축이 이동해 이미 범위를 벗어난 dealYmd를 재수집할 수도 있다).
+            retryQueueManager.clear().forEach(this::logRetryAbandoned);
             return;
         }
 
@@ -138,43 +151,81 @@ class BatchExecutionOrchestrator {
     }
 
     /**
-     * RetryQueueManager가 백오프 이후 재시도할 때 호출하는 콜백. true를 반환하면 큐에서 제거되고
-     * (성공했거나 더 이상 RETRY 대상이 아님), false면 다음 백오프 단계로 재적재된다.
+     * RetryQueueManager가 백오프 이후 재시도할 때 호출하는 콜백. resolved()면 큐에서 제거되고
+     * (성공했거나 더 이상 RETRY 대상이 아님), 아니면 이번 시도에서 관측한 실제 API 오류
+     * (datasetId·resultCode·message)를 failureDetail에 담아 돌려준다 — 재시도가 결국 소진될
+     * 경우 이 정보가 logRetryExhausted까지 전달돼 batch_log에 "N/A" 대신 실제 오류가 남는다.
      */
-    private boolean attemptRetry(CollectRequest request) {
+    private RetryOutcome attemptRetry(CollectRequest request) {
         try {
             ApiResponseXml response = collector.collect(
                     request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd());
             consecutiveAbortBatchCount = 0;
             logSuccess(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(), response);
-            return true;
+            return RetryOutcome.success();
         } catch (OpenApiResultCodeException e) {
             if (e.judgment() == ErrorCodeJudgment.RETRY) {
-                return false;
+                return RetryOutcome.stillFailing(new RetryFailureDetail(e.datasetId(), e.resultCode(), e.getMessage()));
             }
             handleResultCodeFailure(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(), e);
-            return true;
+            return RetryOutcome.success();
         } catch (OpenApiResponseException e) {
             logStructuralFailure(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(),
                     e.getMessage());
-            return true;
+            return RetryOutcome.success();
         } catch (RestClientException e) {
-            return false;
+            // 전송 계층 실패는 특정 데이터셋의 API 오류가 아니라 datasetId·resultCode로 귀속시킬
+            // 수 없다 — 메시지만 보존하고, 최종 소진 시엔 대표 데이터셋과 "N/A"로 기록된다.
+            return RetryOutcome.stillFailing(RetryFailureDetail.generic(e.getMessage()));
         }
     }
 
     /**
      * 재시도 큐의 backoffSchedule을 소진했거나(최대 재시도 횟수 초과), RetryQueueManager의
      * 대기 예산(maxTotalWaitMinutes)을 넘어 더 이상 대기·재시도하지 않고 넘어온 최종 실패.
-     * batch_log에 실패로 기록하고, 같은 조합은 다음 배치 사이클(익일 재수집)에서 자연히 다시
-     * 시도된다.
+     * detail에 실제 API 오류(datasetId·resultCode)가 남아 있으면 그대로 batch_log에 기록해,
+     * 어떤 데이터셋의 어떤 오류로 재시도가 실패했는지 보존한다 — 전송 계층 실패나 한 번도
+     * 시도되지 못한 채 대기 예산을 넘긴 경우에만 대표 데이터셋과 "N/A"로 대체한다. 같은 조합은
+     * 다음 배치 사이클(익일 재수집)에서 자연히 다시 시도된다.
      */
-    private void logRetryExhausted(CollectRequest request) {
+    private void logRetryExhausted(CollectRequest request, RetryFailureDetail detail) {
         consecutiveAbortBatchCount = 0;
-        String representativeDatasetId =
-                datasetRegistry.resolve(request.housingType(), request.dealCategory()).get(0).datasetId();
         logFailure(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(),
-                representativeDatasetId, "N/A", "재시도 소진 또는 재시도 대기 예산 초과 — 다음 배치 사이클로 이월");
+                resolveDatasetId(request, detail), resolveResultCode(detail),
+                appendRolloverNote(detail, "재시도 소진 또는 재시도 대기 예산 초과 — 다음 배치 사이클로 이월"));
+    }
+
+    /**
+     * 배치가 CriticalBatchException으로 조기 중단돼 처리되지 못한 채 재시도 큐에서 비워진
+     * 요청. 중단 전에 이미 한 번 이상 재시도돼 실제 API 오류를 관측했다면(pending.lastFailure())
+     * 그 정보를 그대로 기록하고, 아직 한 번도 시도되지 못했다면 대표 데이터셋과 "N/A"로
+     * 대체한다. 큐에 그대로 남겨두면 다음 배치 사이클의 큐와 뒤섞이므로 여기서 실패로 기록하고
+     * 다음 배치 사이클(익일 재수집)로 이월시킨다.
+     */
+    private void logRetryAbandoned(RetryQueueManager.PendingRetry pending) {
+        CollectRequest request = pending.request();
+        RetryFailureDetail detail = pending.lastFailure();
+        logFailure(request.housingType(), request.dealCategory(), request.sggCd(), request.dealYmd(),
+                resolveDatasetId(request, detail), resolveResultCode(detail),
+                appendRolloverNote(detail, "배치 조기 중단으로 재시도 취소 — 다음 배치 사이클로 이월"));
+    }
+
+    private String resolveDatasetId(CollectRequest request, RetryFailureDetail detail) {
+        if (detail != null && detail.datasetId() != null) {
+            return detail.datasetId();
+        }
+        return datasetRegistry.resolve(request.housingType(), request.dealCategory()).get(0).datasetId();
+    }
+
+    private String resolveResultCode(RetryFailureDetail detail) {
+        return detail != null && detail.resultCode() != null ? detail.resultCode() : "N/A";
+    }
+
+    private String appendRolloverNote(RetryFailureDetail detail, String rolloverNote) {
+        if (detail != null && detail.message() != null) {
+            return detail.message() + " — " + rolloverNote;
+        }
+        return rolloverNote;
     }
 
     private void logStructuralFailure(HousingType housingType, DealCategory dealCategory, String sggCd,

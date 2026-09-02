@@ -4,8 +4,9 @@ import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
-import java.util.function.Consumer;
-import java.util.function.Predicate;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
@@ -37,18 +38,38 @@ public class RetryQueueManager {
     }
 
     public void enqueueRetry(CollectRequest failedRequest) {
-        queue.add(new RetryQueueEntry(failedRequest, 0));
+        queue.add(new RetryQueueEntry(failedRequest, 0, RetryFailureDetail.EMPTY));
     }
 
     /**
-     * 큐를 순회하며 재시도한다. retryAttempt가 true를 반환하면(성공했거나 더 이상 재시도 대상이
-     * 아니면) 큐에서 제거하고, false(여전히 RETRY 판정)면 다음 백오프 단계로 재적재한다.
-     * backoffSchedule을 소진하면(최대 재시도 횟수 초과) onExhausted로 최종 실패를 알리고 큐에서
-     * 제거한다 — 이 요청은 batch_log에 최종 실패로 기록되고, 다음 배치 사이클(익일 재수집)로
+     * 큐에 남아 있는 모든 요청을 비우고 반환한다. 이 매니저는 싱글턴 빈이라 큐가 orchestrate()
+     * 호출 경계를 넘어 그대로 유지된다 — 배치가 CriticalBatchException으로 조기 중단돼
+     * processRetryQueue()에 도달하지 못하면, 그때까지 쌓인 항목이 비워지지 않은 채 다음 배치
+     * 사이클의 큐에 그대로 남아 이번 실행의 요청과 뒤섞인다(계약월 축이 이동해 이미 목표 범위를
+     * 벗어난 dealYmd를 다시 수집하게 될 수도 있다). 조기 중단 시 호출부(orchestrate())가 이
+     * 메서드로 큐를 비우고 반환값을 실패로 기록해야 한다. 각 항목이 중단 전에 이미 한 번 이상
+     * 재시도돼 실제 API 오류를 관측했다면 그 정보(lastFailure)도 함께 반환한다.
+     */
+    public List<PendingRetry> clear() {
+        List<PendingRetry> pending = queue.stream()
+                .map(entry -> new PendingRetry(entry.request(), entry.lastFailure()))
+                .collect(Collectors.toList());
+        queue.clear();
+        return pending;
+    }
+
+    /**
+     * 큐를 순회하며 재시도한다. retryAttempt가 resolved=true를 반환하면(성공했거나 더 이상 재시도
+     * 대상이 아니면) 큐에서 제거하고, false(여전히 RETRY 판정)면 그 시도에서 관측된
+     * failureDetail을 엔트리에 보존한 채 다음 백오프 단계로 재적재한다. backoffSchedule을
+     * 소진하면(최대 재시도 횟수 초과) onExhausted로 최종 실패를 알리고 큐에서 제거한다 — 이때
+     * 마지막으로 관측된 failureDetail을 함께 전달해, batch_log가 "N/A" 대신 실제 API가 돌려준
+     * datasetId·resultCode를 남길 수 있게 한다. 이 요청은 다음 배치 사이클(익일 재수집)로
      * 자연히 이월된다.
      *
      * <p>대기 예산(maxTotalWait)을 이미 소진했다면, 이번 항목이 아직 한 번도 재시도되지
-     * 않았더라도 더 대기하지 않고 곧바로 onExhausted로 넘긴다 — 대량 장애로 큐가 커질 때
+     * 않았더라도 더 대기하지 않고 곧바로 onExhausted로 넘긴다(이땐 이전에 관측된 detail이
+     * 있으면 그것을, 한 번도 시도되지 않았다면 EMPTY를 전달한다) — 대량 장애로 큐가 커질 때
      * orchestrate()가 몇 시간씩 블로킹되는 것을 막기 위한 안전장치다.
      *
      * <p>Deque를 FIFO로 poll-then-append하기 때문에 이 소진 처리는 라운드로빈으로 공정하게
@@ -58,26 +79,27 @@ public class RetryQueueManager {
      * 아직 poll되지 않은 엔트리는 해당 단계 시도 기회 없이 바로 소진 처리되므로, 엔트리 간 실제
      * 시도 횟수 격차는 최대 한 단계까지 발생할 수 있다.
      */
-    public void processRetryQueue(Predicate<CollectRequest> retryAttempt, Consumer<CollectRequest> onExhausted) {
+    public void processRetryQueue(Function<CollectRequest, RetryOutcome> retryAttempt,
+                                   BiConsumer<CollectRequest, RetryFailureDetail> onExhausted) {
         Duration elapsedWait = Duration.ZERO;
         while (!queue.isEmpty()) {
             RetryQueueEntry entry = queue.poll();
             Duration backoff = backoffSchedule.get(entry.attempt());
             if (elapsedWait.plus(backoff).compareTo(maxTotalWait) > 0) {
-                onExhausted.accept(entry.request());
+                onExhausted.accept(entry.request(), entry.lastFailure());
                 continue;
             }
             sleep(backoff);
             elapsedWait = elapsedWait.plus(backoff);
-            boolean resolved = retryAttempt.test(entry.request());
-            if (resolved) {
+            RetryOutcome outcome = retryAttempt.apply(entry.request());
+            if (outcome.resolved()) {
                 continue;
             }
             int nextAttempt = entry.attempt() + 1;
             if (nextAttempt >= backoffSchedule.size()) {
-                onExhausted.accept(entry.request());
+                onExhausted.accept(entry.request(), outcome.failureDetail());
             } else {
-                queue.add(new RetryQueueEntry(entry.request(), nextAttempt));
+                queue.add(new RetryQueueEntry(entry.request(), nextAttempt, outcome.failureDetail()));
             }
         }
     }
@@ -91,6 +113,9 @@ public class RetryQueueManager {
         }
     }
 
-    private record RetryQueueEntry(CollectRequest request, int attempt) {
+    private record RetryQueueEntry(CollectRequest request, int attempt, RetryFailureDetail lastFailure) {
+    }
+
+    public record PendingRetry(CollectRequest request, RetryFailureDetail lastFailure) {
     }
 }

@@ -1,6 +1,7 @@
 package com.jiseong.homesense.batch.errorhandler;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -8,6 +9,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.jiseong.homesense.batch.errorhandler.RetryQueueManager.PendingRetry;
 import com.jiseong.homesense.common.config.RetryQueueProperties;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
@@ -30,7 +32,7 @@ class RetryQueueManagerTest {
         manager.enqueueRetry(request("11680"));
 
         List<CollectRequest> exhausted = new ArrayList<>();
-        manager.processRetryQueue(req -> true, exhausted::add);
+        manager.processRetryQueue(req -> RetryOutcome.success(), (req, detail) -> exhausted.add(req));
 
         assertThat(exhausted).isEmpty();
     }
@@ -44,12 +46,34 @@ class RetryQueueManagerTest {
         List<CollectRequest> exhausted = new ArrayList<>();
         manager.processRetryQueue(req -> {
             attemptCount.add(1);
-            return false;
-        }, exhausted::add);
+            return RetryOutcome.stillFailing(RetryFailureDetail.EMPTY);
+        }, (req, detail) -> exhausted.add(req));
 
         // backoffSchedule 길이(3)만큼만 재시도하고 그 이상은 소진 처리된다.
         assertThat(attemptCount).hasSize(3);
         assertThat(exhausted).containsExactly(failing);
+    }
+
+    @Test
+    void 소진_콜백은_마지막으로_관측된_실제_API_오류를_그대로_전달받는다() {
+        // 매번 다른 resultCode로 실패한다고 가정하면, 소진 시점엔 가장 마지막(3번째) 시도의
+        // 오류만 남아 있어야 한다 — 첫 시도의 오류로 덮어써지거나 뒤섞이면 안 된다.
+        CollectRequest failing = request("11680");
+        manager.enqueueRetry(failing);
+
+        List<String> resultCodes = List.of("22", "01", "04");
+        List<Integer> attemptCount = new ArrayList<>();
+        List<RetryFailureDetail> exhaustedDetails = new ArrayList<>();
+        manager.processRetryQueue(req -> {
+            String resultCode = resultCodes.get(attemptCount.size());
+            attemptCount.add(1);
+            return RetryOutcome.stillFailing(new RetryFailureDetail("15126468", resultCode, "message-" + resultCode));
+        }, (req, detail) -> exhaustedDetails.add(detail));
+
+        assertThat(exhaustedDetails).hasSize(1);
+        assertThat(exhaustedDetails.get(0).datasetId()).isEqualTo("15126468");
+        assertThat(exhaustedDetails.get(0).resultCode()).isEqualTo("04");
+        assertThat(exhaustedDetails.get(0).message()).isEqualTo("message-04");
     }
 
     @Test
@@ -62,8 +86,8 @@ class RetryQueueManagerTest {
         List<CollectRequest> succeeded = new ArrayList<>();
         manager.processRetryQueue(req -> {
             succeeded.add(req);
-            return true;
-        }, req -> {
+            return RetryOutcome.success();
+        }, (req, detail) -> {
             throw new AssertionError("소진 콜백은 호출되지 않아야 한다: " + req);
         });
 
@@ -71,10 +95,57 @@ class RetryQueueManagerTest {
     }
 
     @Test
+    void clear는_큐에_남은_모든_요청을_반환하고_큐를_비운다() {
+        CollectRequest first = request("11680");
+        CollectRequest second = request("11740");
+        manager.enqueueRetry(first);
+        manager.enqueueRetry(second);
+
+        List<PendingRetry> pending = manager.clear();
+
+        assertThat(pending).extracting(PendingRetry::request).containsExactlyInAnyOrder(first, second);
+        assertThat(pending).extracting(PendingRetry::lastFailure)
+                .containsOnly(RetryFailureDetail.EMPTY);
+
+        // 비워진 뒤엔 processRetryQueue를 호출해도 아무 콜백도 발생하지 않아야 한다.
+        manager.processRetryQueue(
+                req -> { throw new AssertionError("clear() 이후엔 재시도가 시도되면 안 된다"); },
+                (req, detail) -> { throw new AssertionError("clear() 이후엔 소진 콜백도 호출되면 안 된다"); });
+    }
+
+    @Test
+    void clear는_이미_한_번_이상_재시도돼_관측된_실패_정보도_함께_반환한다() {
+        // A는 먼저 한 번 재시도돼 실패 정보(detailA)가 큐 엔트리에 보존된 채 재적재되고,
+        // 이어서 B를 재시도하는 도중 예외(배치 조기 중단을 흉내)가 발생해 processRetryQueue가
+        // 중단된다. 이때 아직 큐에 남아 있는 A의 lastFailure는 유실되지 않고 clear()로 그대로
+        // 회수돼야 한다 — B는 poll()로 이미 큐에서 빠진 뒤 예외가 나서 큐에 남지 않는다(호출부가
+        // 이미 별도로 실패 기록을 남긴 뒤 예외를 던지는 흐름과 대응된다).
+        CollectRequest a = request("11680");
+        CollectRequest b = request("11740");
+        manager.enqueueRetry(a);
+        manager.enqueueRetry(b);
+        RetryFailureDetail detailA = new RetryFailureDetail("15126469", "22", "트래픽 초과");
+        RuntimeException abort = new RuntimeException("시뮬레이션된 조기 중단");
+
+        assertThatThrownBy(() -> manager.processRetryQueue(req -> {
+            if (req.equals(a)) {
+                return RetryOutcome.stillFailing(detailA);
+            }
+            throw abort;
+        }, (req, detail) -> {
+            throw new AssertionError("소진 콜백이 호출되면 안 된다: " + req);
+        })).isSameAs(abort);
+
+        List<PendingRetry> pending = manager.clear();
+
+        assertThat(pending).containsExactly(new PendingRetry(a, detailA));
+    }
+
+    @Test
     void 큐가_비어있으면_아무_콜백도_호출되지_않는다() {
         manager.processRetryQueue(
                 req -> { throw new AssertionError("호출되지 않아야 한다"); },
-                req -> { throw new AssertionError("호출되지 않아야 한다"); });
+                (req, detail) -> { throw new AssertionError("호출되지 않아야 한다"); });
     }
 
     /**
@@ -110,8 +181,8 @@ class RetryQueueManagerTest {
         List<CollectRequest> exhausted = new ArrayList<>();
         cappedManager.processRetryQueue(req -> {
             attempted.add(req);
-            return false;
-        }, exhausted::add);
+            return RetryOutcome.stillFailing(RetryFailureDetail.EMPTY);
+        }, (req, detail) -> exhausted.add(req));
 
         assertThat(attempted).containsExactly(a, b, a);
         assertThat(exhausted).containsExactly(b, a);
@@ -128,7 +199,7 @@ class RetryQueueManagerTest {
         List<CollectRequest> exhausted = new ArrayList<>();
         cappedManager.processRetryQueue(
                 req -> { throw new AssertionError("예산 초과 상태이므로 재시도가 시도되면 안 된다"); },
-                exhausted::add);
+                (req, detail) -> exhausted.add(req));
 
         assertThat(exhausted).hasSize(1);
         assertThat(cappedManager.sleptDurations).isEmpty();
