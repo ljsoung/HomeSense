@@ -18,6 +18,7 @@ class JwtTokenProviderTest {
         String token = provider.createAccessToken(1L, "USER");
 
         assertThat(provider.validateToken(token)).isTrue();
+        assertThat(provider.isAccessToken(token)).isTrue();
         assertThat(provider.getUserId(token)).isEqualTo(1L);
         assertThat(provider.getRole(token)).isEqualTo("USER");
     }
@@ -29,6 +30,17 @@ class JwtTokenProviderTest {
         assertThat(provider.validateToken(token)).isTrue();
         assertThat(provider.getUserId(token)).isEqualTo(1L);
         assertThat(provider.getRole(token)).isNull();
+    }
+
+    @Test
+    void RefreshToken은_서명이_유효해도_AccessToken으로_취급되지_않는다() {
+        // 회귀 테스트: 두 토큰이 같은 서명 키로 발급되어 validateToken()만으로는 구분되지 않는다
+        // — role 유무로 암묵적으로 구분하면 role이 없는 Refresh Token이 "role=null" Access
+        // Token처럼 인증에 쓰일 수 있어(ROLE_null), 명시적 type 클레임으로 구분해야 한다.
+        String refreshToken = provider.createRefreshToken(1L);
+
+        assertThat(provider.validateToken(refreshToken)).isTrue();
+        assertThat(provider.isAccessToken(refreshToken)).isFalse();
     }
 
     @Test

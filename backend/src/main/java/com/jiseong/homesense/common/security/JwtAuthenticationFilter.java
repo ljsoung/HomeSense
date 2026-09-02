@@ -21,6 +21,8 @@ import lombok.RequiredArgsConstructor;
  * 비로그인 조회를 전면 허용하는 화면 설계 원칙(UI정의서 1.5절)에 따라, 토큰이 없거나 만료·위조
  * 되었어도 이 필터는 절대 요청을 차단하지 않고 그대로 다음 필터로 진행한다 — 인증이 실제로
  * 필요한 엔드포인트의 401/403은 SecurityConfig의 authorizeHttpRequests가 별도로 반환한다.
+ * Refresh Token도 같은 서명 키로 서명되어 validateToken()을 통과하므로, isAccessToken()으로
+ * Access Token인지 추가로 확인한 뒤에만 인증 정보를 채운다.
  */
 @Component
 @RequiredArgsConstructor
@@ -35,7 +37,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String token = resolveToken(request);
-        if (token != null && jwtTokenProvider.validateToken(token)) {
+        if (token != null && jwtTokenProvider.validateToken(token) && jwtTokenProvider.isAccessToken(token)) {
             SecurityContextHolder.getContext().setAuthentication(createAuthentication(token));
         }
         filterChain.doFilter(request, response);

@@ -44,8 +44,9 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    void 유효한_토큰이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
+    void 유효한_Access_Token이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
         when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
         when(jwtTokenProvider.getRole("valid-token")).thenReturn("ADMIN");
 
@@ -62,6 +63,23 @@ class JwtAuthenticationFilterTest {
         assertThat(authentication.getAuthorities())
                 .extracting(Object::toString)
                 .containsExactly("ROLE_ADMIN");
+    }
+
+    @Test
+    void Refresh_Token은_서명이_유효해도_인증정보를_채우지_않는다() throws Exception {
+        // Refresh Token은 같은 서명 키로 발급되어 validateToken()은 통과하지만 Access Token이
+        // 아니므로, 이걸 Authorization 헤더에 실어 보내도 로그인 크리덴셜로 받아들여지면 안 된다.
+        when(jwtTokenProvider.validateToken("refresh-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("refresh-token")).thenReturn(false);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer refresh-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test
