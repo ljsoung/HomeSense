@@ -9,6 +9,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @Configuration
 @EnableScheduling
-@EnableConfigurationProperties(BatchSchedulerProperties.class)
+@EnableConfigurationProperties({BatchSchedulerProperties.class, RetryQueueProperties.class})
 public class SchedulingConfig {
 }
