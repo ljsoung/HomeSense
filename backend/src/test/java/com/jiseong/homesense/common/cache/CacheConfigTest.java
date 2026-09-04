@@ -21,9 +21,12 @@ class CacheConfigTest {
     }
 
     @Test
-    void null_값은_캐시하지_않는다() {
+    void null_캐싱을_막지_않는다_disableCachingNullValues는_저장_시도_자체를_예외로_거부하기_때문이다() {
         RedisCacheConfiguration configuration = cacheConfig.redisCacheConfiguration();
 
-        assertThat(configuration.getAllowCacheNullValues()).isFalse();
+        // 코드리뷰(PR #14)에서 지적된 대로 disableCachingNullValues()는 "null은 조용히 캐싱을
+        // 건너뛴다"가 아니라 "null을 캐시에 넣으려는 시도를 IllegalArgumentException으로 거부한다"라
+        // unless 조건 없는 @Cacheable(null 반환 가능)이 깨질 수 있어 의도적으로 켜지 않는다.
+        assertThat(configuration.getAllowCacheNullValues()).isTrue();
     }
 }
