@@ -26,6 +26,7 @@ import com.jiseong.homesense.batch.errorhandler.RetryOutcome;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
+import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
@@ -65,6 +66,7 @@ class BatchExecutionOrchestrator {
     private final ApplicationEventPublisher eventPublisher;
     private final ApiCallThrottle apiCallThrottle;
     private final RetryQueueManager retryQueueManager;
+    private final AuditLogger auditLogger;
 
     private int consecutiveAbortBatchCount = 0;
 
@@ -100,7 +102,7 @@ class BatchExecutionOrchestrator {
             }
             retryQueueManager.processRetryQueue(this::attemptRetry, this::logRetryExhausted);
         } catch (CriticalBatchException e) {
-            log.error("BAT-SCH-01 배치 조기 중단: {}", e.getMessage(), e);
+            auditLogger.logBatchFailure("BAT-SCH-01", e);
             // 조기 중단으로 processRetryQueue()에 도달하지 못했다 — 그때까지 큐에 쌓인 항목을
             // 비우지 않으면 싱글턴인 RetryQueueManager에 그대로 남아 다음 배치 사이클의 큐와
             // 뒤섞인다(계약월 축이 이동해 이미 범위를 벗어난 dealYmd를 재수집할 수도 있다).

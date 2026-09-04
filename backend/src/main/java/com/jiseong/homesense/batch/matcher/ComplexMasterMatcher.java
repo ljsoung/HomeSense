@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
+import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.region.entity.LegalDistrictCode;
@@ -44,6 +45,7 @@ public class ComplexMasterMatcher {
     private static final double SIMILAR_MAX_CONFIDENCE = 0.850;
 
     private final ComplexRepository complexRepository;
+    private final AuditLogger auditLogger;
 
     /**
      * legalDistrictCode는 BAT-MAT-01(LegalDistrictMatcher)이 이미 sgg_cd·umd_nm으로 해석한 결과다.
@@ -53,14 +55,14 @@ public class ComplexMasterMatcher {
      */
     public MatchResult matchComplex(TradeDraft draft, LegalDistrictCode legalDistrictCode) {
         if (legalDistrictCode == null) {
-            return MatchResult.unmatched();
+            return unmatched(draft, "법정동코드 매핑 실패로 후보 지역을 특정할 수 없음");
         }
 
         List<Complex> candidates = complexRepository.findBySidoAndSigunguAndDongRi(
                 legalDistrictCode.getSidoName(), legalDistrictCode.getSigunguName(),
                 legalDistrictCode.getEupmyeondongName());
         if (candidates.isEmpty()) {
-            return MatchResult.unmatched();
+            return unmatched(draft, "동일 시도/시군구/동리에 단지 후보 없음");
         }
 
         Optional<String> draftJibun = normalizeJibun(draft.jibun());
@@ -80,7 +82,12 @@ public class ComplexMasterMatcher {
 
         return findBestSimilarCandidate(draft.buildingName(), candidates)
                 .map(best -> MatchResult.similar(best.complex().getComplexId(), similarConfidence(best.similarity())))
-                .orElseGet(MatchResult::unmatched);
+                .orElseGet(() -> unmatched(draft, "지번 불일치 및 단지명 유사도 임계치 미달"));
+    }
+
+    private MatchResult unmatched(TradeDraft draft, String reason) {
+        auditLogger.logMatchingFailure(draft, reason);
+        return MatchResult.unmatched();
     }
 
     /**

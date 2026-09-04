@@ -2,6 +2,9 @@ package com.jiseong.homesense.common.exception;
 
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 
 @WebMvcTest(controllers = GlobalExceptionHandlerTest.TestController.class)
@@ -41,6 +45,13 @@ class GlobalExceptionHandlerTest {
      */
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    /*
+     * GlobalExceptionHandler는 @RestControllerAdvice라 @WebMvcTest의 controllers 필터와 무관하게
+     * 항상 컨텍스트에 올라간다(COM-LOG-01). 그 생성자 의존성인 AuditLogger를 목으로 채운다.
+     */
+    @MockitoBean
+    private AuditLogger auditLogger;
 
     @Test
     void BusinessException은_보유한_HttpStatus와_errorCode로_응답한다() throws Exception {
@@ -72,6 +83,14 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("INTERNAL_SERVER_ERROR"))
                 .andExpect(jsonPath("$.error.message").value(not(containsString("boom"))));
+    }
+
+    @Test
+    void 예상치_못한_예외는_COM_LOG_01_AuditLogger로_CRITICAL_기록을_남긴다() throws Exception {
+        mockMvc.perform(get("/test/unexpected"))
+                .andExpect(status().isInternalServerError());
+
+        verify(auditLogger).logBatchFailure(eq("COM-EXC-01"), any(IllegalStateException.class));
     }
 
     /*

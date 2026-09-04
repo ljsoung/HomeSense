@@ -39,6 +39,7 @@ import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
 import com.jiseong.homesense.common.config.RetryQueueProperties;
+import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
@@ -61,6 +62,9 @@ class BatchExecutionOrchestratorTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private AuditLogger auditLogger;
+
     // 실제 조합(housingType×dealCategory)마다 등록된 데이터셋을 그대로 알고 있어야 하는 테스트(구조적
     // 오류의 대표 데이터셋 귀속)가 있어 목이 아니라 실제 구현을 쓴다 — RealEstateApiCollectorTest와 동일 관례.
     private final DatasetRegistry datasetRegistry = new DatasetRegistry();
@@ -76,7 +80,8 @@ class BatchExecutionOrchestratorTest {
         // 실제 백오프 스케줄(1,5,30분)은 RetryQueueManagerTest에서 별도로 검증한다.
         retryQueueManager = new RetryQueueManager(new RetryQueueProperties(List.of(0L, 0L, 0L), 999_999L));
         orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
-                batchLogRepository, properties, eventPublisher, new ApiCallThrottle(), retryQueueManager);
+                batchLogRepository, properties, eventPublisher, new ApiCallThrottle(), retryQueueManager,
+                auditLogger);
     }
 
     private static ApiResponseXml success(String datasetId) {
@@ -215,6 +220,8 @@ class BatchExecutionOrchestratorTest {
         verify(collector, times(3)).collect(any(), any(), any(), any());
         verify(batchLogRepository, times(3)).save(any(BatchLog.class));
         verify(eventPublisher, never()).publishEvent(any());
+        // COM-LOG-01: 전체 배치 중단급 오류는 AuditLogger로도 CRITICAL 로그를 남긴다.
+        verify(auditLogger).logBatchFailure(eq("BAT-SCH-01"), any(CriticalBatchException.class));
     }
 
     @Test
