@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +43,7 @@ public class LegalDistrictCodeLoader {
     private static final String SGG_SUFFIX = "00000"; // 6~10자리
 
     private final LegalDistrictCodeRepository legalDistrictCodeRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void loadInitial(File csvFile) {
@@ -78,6 +80,8 @@ public class LegalDistrictCodeLoader {
         long inactiveCount = legalDistrictCodeRepository.count() - rows.size();
         log.info("법정동코드 적재 완료: {}건 (dataVersion={}), 비활성: {}건",
                 rows.size(), dataVersion, inactiveCount);
+
+        eventPublisher.publishEvent(new LegalDistrictCodeReloadedEvent());
     }
 
     private List<DongRecord> readExistingRecords(File csvFile) {
