@@ -12,9 +12,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.response.ApiResponse;
 
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 
 /**
  * COM-EXC-01. 모든 Controller의 예외를 가로채 COM-RES-01 표준 에러 포맷으로 변환하는 단일 지점.
@@ -28,12 +29,14 @@ import lombok.extern.slf4j.Slf4j;
  * 핸들러를 우선 선택), handleExceptionInternal()만 오버라이드해 본문을 COM-RES-01 포맷으로
  * 바꾸면 상태 코드는 그대로 유지된다.
  */
-@Slf4j
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final String CODE_VALIDATION_FAILED = "VALIDATION_FAILED";
     private static final String CODE_INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR";
+
+    private final AuditLogger auditLogger;
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException e) {
@@ -75,7 +78,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     private ApiResponse<Void> internalErrorBody(Exception e) {
-        log.error("COM-EXC-01 예상치 못한 예외", e);
+        auditLogger.logBatchFailure("COM-EXC-01", e);
         return ApiResponse.error(CODE_INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
     }
 }

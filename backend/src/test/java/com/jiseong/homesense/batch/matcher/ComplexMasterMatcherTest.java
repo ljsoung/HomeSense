@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
+import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.region.entity.LegalDistrictCode;
@@ -31,6 +32,9 @@ class ComplexMasterMatcherTest {
 
     @Mock
     private ComplexRepository complexRepository;
+
+    @Mock
+    private AuditLogger auditLogger;
 
     @InjectMocks
     private ComplexMasterMatcher matcher;
