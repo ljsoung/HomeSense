@@ -1,7 +1,10 @@
 package com.jiseong.homesense.complex.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -86,6 +89,39 @@ class ComplexControllerTest {
         mockMvc.perform(get("/api/complexes/popular").param("limit", "3"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1));
+    }
+
+    @Test
+    void 인기단지_limit이_0이면_400을_반환하고_서비스를_호출하지_않는다() throws Exception {
+        mockMvc.perform(get("/api/complexes/popular").param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_LIMIT"));
+
+        verify(complexService, never()).getPopular(anyInt());
+    }
+
+    @Test
+    void 인기단지_limit이_음수면_400을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/complexes/popular").param("limit", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_LIMIT"));
+    }
+
+    @Test
+    void 인기단지_limit이_상한을_넘으면_400을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/complexes/popular").param("limit", "100000"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_LIMIT"));
+
+        verify(complexService, never()).getPopular(anyInt());
+    }
+
+    @Test
+    void 인기단지_limit이_상한과_같으면_통과한다() throws Exception {
+        when(complexService.getPopular(50)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/complexes/popular").param("limit", "50"))
+                .andExpect(status().isOk());
     }
 
     @Test

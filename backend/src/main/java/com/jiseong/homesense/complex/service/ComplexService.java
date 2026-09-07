@@ -106,6 +106,13 @@ public class ComplexService {
         return new ComplexMapSearchResponse(points, truncated);
     }
 
+    /**
+     * candidate complex_id 하나당 최대 2건(findById + 대표 거래 조회)의 쿼리를 낸다 — search()가
+     * QueryDSL 상관 서브쿼리로 단지+대표거래를 한 번에 가져오는 것과 다른 N+1 구조다. limit이
+     * 1~50으로 막혀 있고(ComplexController) popularComplexes 캐시(TTL 24h)로 캐시 미스 시에만
+     * 발생해 지금 당장 문제는 아니지만, 알려진 기술부채다(Codex 코드리뷰 — CLAUDE.md SVC-CPX-01
+     * 절 참고). 나중에 손볼 때는 search()처럼 QueryDSL 서브쿼리 하나로 통합하는 방향을 검토하라.
+     */
     private ComplexSummaryResponse buildSummary(Long complexId) {
         Complex complex = complexRepository.findById(complexId).orElse(null);
         if (complex == null) {

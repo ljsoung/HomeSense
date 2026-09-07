@@ -16,6 +16,7 @@ import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
 import com.jiseong.homesense.complex.dto.ComplexSearchRequest;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
 import com.jiseong.homesense.complex.dto.MapFilterRequest;
+import com.jiseong.homesense.complex.exception.InvalidLimitException;
 import com.jiseong.homesense.complex.service.ComplexService;
 import com.jiseong.homesense.common.response.ApiResponse;
 
@@ -36,6 +37,15 @@ public class ComplexController {
 
     private static final int DEFAULT_POPULAR_LIMIT = 8;
 
+    /**
+     * limit 상한 — getPopular()는 값마다 최대 2건(findById + 대표 거래 조회)의 추가 쿼리를 내는 N+1
+     * 경로라, 인증 없는 이 엔드포인트가 임의로 큰 limit을 그대로 받으면 그만큼 쿼리가 배로 늘어난다
+     * (예: limit=100000 → 최대 약 20만 건). PageRequest.of(0, limit)는 0 이하도 IllegalArgumentException으로
+     * 500을 내므로 하한도 함께 막는다(코드리뷰에서 지적됨).
+     */
+    private static final int MIN_POPULAR_LIMIT = 1;
+    private static final int MAX_POPULAR_LIMIT = 50;
+
     private final ComplexService complexService;
 
     @GetMapping("/search")
@@ -46,6 +56,9 @@ public class ComplexController {
     @GetMapping("/popular")
     public ApiResponse<List<ComplexSummaryResponse>> popular(
             @RequestParam(defaultValue = "" + DEFAULT_POPULAR_LIMIT) int limit) {
+        if (limit < MIN_POPULAR_LIMIT || limit > MAX_POPULAR_LIMIT) {
+            throw new InvalidLimitException();
+        }
         return ApiResponse.success(complexService.getPopular(limit));
     }
 
