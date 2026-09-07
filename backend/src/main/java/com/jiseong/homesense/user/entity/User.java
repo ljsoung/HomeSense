@@ -98,4 +98,12 @@ public class User {
         this.status = UserStatus.WITHDRAWN;
         this.withdrawnAt = LocalDateTime.now();
     }
+
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
 }

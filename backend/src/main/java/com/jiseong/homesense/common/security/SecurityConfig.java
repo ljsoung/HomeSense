@@ -23,9 +23,10 @@ import lombok.RequiredArgsConstructor;
  * authorizeHttpRequests에 개별 규칙을 추가한다 — 그 외는 permitAll로 전면 개방한다(비로그인
  * 조회 허용 원칙, UI정의서 1.5절).
  *
- * <p>SVC-AUTH-01의 logout()은 UserPrincipal(로그인한 본인)이 반드시 있어야 성립하는 연산이라
- * POST /api/auth/logout만 첫 인증 필수 규칙으로 추가한다. 미인증 접근은 Spring Security 기본
- * 401 대신 {@link RestAuthenticationEntryPoint}로 COM-RES-01 포맷을 유지한다.
+ * <p>SVC-AUTH-01의 logout()과 SVC-USER-01의 /api/users/** 세 엔드포인트(getMe/updateMe/withdraw)는
+ * 전부 UserPrincipal(로그인한 본인)이 반드시 있어야 성립하는 연산이라 인증 필수 규칙으로 추가한다.
+ * 미인증 접근은 Spring Security 기본 401 대신 {@link RestAuthenticationEntryPoint}로 COM-RES-01
+ * 포맷을 유지한다.
  */
 @Configuration
 @RequiredArgsConstructor
@@ -47,6 +48,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
+                        .requestMatchers("/api/users/**").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(restAuthenticationEntryPoint))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
