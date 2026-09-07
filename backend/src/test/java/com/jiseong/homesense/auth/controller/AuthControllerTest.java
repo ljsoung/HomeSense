@@ -1,5 +1,6 @@
 package com.jiseong.homesense.auth.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -84,6 +85,21 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"not-an-email\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("email"));
+    }
+
+    @Test
+    void 회원가입_이메일이_100자를_넘으면_400과_필드에러를_반환한다() throws Exception {
+        // user.email이 VARCHAR(100)이라 형식은 유효해도 컬럼 길이를 넘으면 INSERT 시점 truncation
+        // 오류로 500이 새는 걸 막기 위한 회귀 테스트(코드리뷰에서 지적됨).
+        String tooLongEmail = "a".repeat(92) + "@test.com";
+        assertThat(tooLongEmail).hasSizeGreaterThan(100);
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + tooLongEmail + "\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.error.fieldErrors[0].field").value("email"));
