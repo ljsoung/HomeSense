@@ -16,6 +16,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -39,9 +40,20 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
  * 종류의 버그는 목으로는 절대 드러나지 않는다(이 세션에서 반복 확인된 원칙, CLAUDE.md 참고).
  *
  * <p>Docker가 필요해 기본 `./gradlew test`에서는 제외되고 `./gradlew integrationTest`로만 실행된다.
+ *
+ * <p>{@code @Transactional}이 반드시 필요하다 — {@code @SpringBootTest}는 클래스 안의 모든 테스트
+ * 메서드가 같은(캐시된) ApplicationContext, 즉 같은 Testcontainers MariaDB 인스턴스를 공유한다.
+ * {@code @BeforeEach}의 {@code saveAndFlush()}는 그 자체로 자기완결 트랜잭션이라 즉시 커밋되므로,
+ * 이 애노테이션 없이는 두 번째 테스트 메서드부터 setUp()이 SRC-A~D 등 같은 source_complex_cd를
+ * 다시 삽입하려다 UNIQUE 위반으로 실패해 이 클래스의 테스트가 사실상 첫 번째 것 말고는 전부
+ * 못 돌아간다(코드리뷰에서 지적됨). 클래스 레벨 {@code @Transactional}은 Spring 테스트 프레임워크의
+ * {@code TransactionalTestExecutionListener}(@SpringBootTest 기본 리스너)를 통해 각 테스트 메서드를
+ * 트랜잭션으로 감싸고 끝나면 자동 롤백한다 — saveAndFlush()는 그 트랜잭션 안에서 여전히 즉시 flush되어
+ * 같은 메서드 안의 뒤이은 조회에는 정상적으로 보이고, 테스트가 끝나면 커밋 없이 그대로 버려진다.
  */
 @SpringBootTest
 @Testcontainers
+@Transactional
 @Tag("integration")
 class ComplexRepositoryMariaDbIT {
 
