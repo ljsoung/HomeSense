@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.jiseong.homesense.auth.dto.LoginCommand;
@@ -89,6 +90,20 @@ class AuthServiceTest {
         assertThat(response.nickname()).isEqualTo("닉네임");
         verify(userRepository).save(any(User.class));
         verify(refreshTokenRepository).save(any(RefreshToken.class));
+    }
+
+    @Test
+    void signup_동시_가입_경쟁으로_UNIQUE_제약이_깨지면_DuplicateEmailException으로_변환한다() {
+        // existsByEmail() 조회 시점엔 없었지만, 그 사이 다른 요청이 같은 이메일로 먼저 INSERT를 끝낸 경우.
+        when(userRepository.existsByEmail("race@test.com")).thenReturn(false);
+        when(passwordEncoder.encode("Abcd1234!")).thenReturn("encoded-password");
+        when(userRepository.save(any(User.class))).thenThrow(new DataIntegrityViolationException("email UNIQUE"));
+
+        assertThatThrownBy(() -> authService.signup(new SignupCommand("race@test.com", "Abcd1234!", "닉네임")))
+                .isInstanceOf(DuplicateEmailException.class);
+
+        verify(refreshTokenRepository, never()).save(any());
+        verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
     }
 
     @Test
@@ -209,6 +224,22 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.refreshAccessToken("expired"))
                 .isInstanceOf(InvalidRefreshTokenException.class);
+    }
+
+    @Test
+    void refresh_탈퇴하거나_정지된_계정이면_AccountNotActiveException을_던진다() {
+        User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
+        withdrawnUser.withdraw();
+        RefreshToken stored = RefreshToken.issue(withdrawnUser, "hashed-token", LocalDateTime.now().plusDays(1));
+        when(jwtTokenProvider.validateToken("token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("token")).thenReturn(false);
+        when(refreshTokenHasher.hash("token")).thenReturn("hashed-token");
+        when(refreshTokenRepository.findByTokenValue("hashed-token")).thenReturn(Optional.of(stored));
+
+        assertThatThrownBy(() -> authService.refreshAccessToken("token"))
+                .isInstanceOf(AccountNotActiveException.class);
+
+        verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
     }
 
     @Test

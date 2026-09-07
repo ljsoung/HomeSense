@@ -3,6 +3,7 @@ package com.jiseong.homesense.auth.service;
 import java.time.Duration;
 import java.time.LocalDateTime;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,7 +52,18 @@ public class AuthService {
         }
 
         User user = User.createUser(cmd.email(), passwordEncoder.encode(cmd.password()), cmd.nickname());
-        userRepository.save(user);
+        try {
+            userRepository.save(user);
+        } catch (DataIntegrityViolationException raceCondition) {
+            // email UNIQUE 충돌: existsByEmail() 조회 이후 이 요청이 INSERT하기 전에 같은 이메일로
+            // 동시에 들어온 다른 요청이 먼저 삽입을 끝낸 race condition이다(user_id가 IDENTITY라
+            // save()가 즉시 INSERT를 실행하므로 이 지점에서 곧바로 터진다). TradeChunkLoader의 dedup_hash
+            // race와 달리 여기서는 같은 트랜잭션에서 더 할 일이 없으므로(성공 시 이어지는 토큰 발급을
+            // 건너뛰고 그대로 예외를 던져 트랜잭션을 롤백) REQUIRES_NEW 격리 없이 이대로 번역만 하면
+            // 된다 — DuplicateEmailException은 GlobalExceptionHandler가 409로 바꿔 원래 existsByEmail()이
+            // 잡았어야 할 경우와 동일한 응답을 보장한다(코드리뷰에서 지적된 결함).
+            throw new DuplicateEmailException();
+        }
 
         IssuedTokens tokens = loginInternal(user);
         return new SignupResponse(tokens.accessToken(), tokens.refreshToken(), tokens.expiresIn(),
@@ -82,6 +94,12 @@ public class AuthService {
         return new LoginResponse(tokens.accessToken(), tokens.refreshToken(), tokens.expiresIn());
     }
 
+    /**
+     * status를 여기서도 확인한다 — JwtAuthenticationFilter는 Access Token의 클레임만 검증할 뿐 매 요청마다
+     * 계정 상태를 다시 조회하지 않으므로, 로그인 이후 탈퇴·정지된 계정이라도 이 검사가 없으면 Refresh
+     * Token이 만료될 때까지(최대 refreshTokenValidity) 계속 새 Access Token을 발급받을 수 있다 —
+     * login()과 동일한 상태 검사를 재발급 경로에도 강제해 막는다(코드리뷰에서 지적된 결함).
+     */
     public TokenResponse refreshAccessToken(String refreshTokenValue) {
         if (!jwtTokenProvider.validateToken(refreshTokenValue) || jwtTokenProvider.isAccessToken(refreshTokenValue)) {
             throw new InvalidRefreshTokenException();
@@ -94,6 +112,10 @@ public class AuthService {
         }
 
         User user = stored.getUser();
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new AccountNotActiveException();
+        }
+
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId(), user.getRole().name());
         return new TokenResponse(accessToken, accessTokenExpiresInSeconds());
     }
