@@ -58,7 +58,51 @@ class PasswordValidatorTest {
         Set<ConstraintViolation<PasswordHolder>> violations = validator.validate(new PasswordHolder("short"));
 
         assertThat(violations).extracting(ConstraintViolation::getMessage)
-                .containsExactly("비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다");
+                .containsExactly("비밀번호는 8자 이상 72바이트(UTF-8) 이하이며 영문, 숫자, 특수문자를 모두 포함해야 합니다");
+    }
+
+    /**
+     * 코드리뷰에서 지적된 함정을 회귀 테스트로 고정한다 — BCryptPasswordEncoder는 UTF-8 바이트 기준
+     * 72바이트를 넘는 원문을 IllegalArgumentException으로 거부하는데, AUTH-02 스펙에는 원래 상한이
+     * 없어 그 예외가 검증 대신 인코딩 단계에서 500으로 샜다. 정확히 72바이트(ASCII 72자)는 유효,
+     * 73바이트(ASCII 73자)는 무효여야 경계가 정확하다.
+     */
+    @Test
+    void 정확히_72바이트는_유효하다() {
+        String exactly72Bytes = "Aa1!" + "a".repeat(68);
+        assertThat(exactly72Bytes).hasSize(72);
+
+        Set<ConstraintViolation<PasswordHolder>> violations = validator.validate(new PasswordHolder(exactly72Bytes));
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void 바이트_상한을_하나_넘으면_무효하다() {
+        String over72Bytes = "Aa1!" + "a".repeat(69);
+        assertThat(over72Bytes).hasSize(73);
+
+        Set<ConstraintViolation<PasswordHolder>> violations = validator.validate(new PasswordHolder(over72Bytes));
+
+        assertThat(violations).isNotEmpty();
+    }
+
+    /**
+     * 코드리뷰에서 지적된 함정을 회귀 테스트로 고정한다 — 이 검증은 Java {@code String.length()}(문자
+     * 수)가 아니라 UTF-8 인코딩 바이트 길이로 재야 한다. 한글은 문자당 3바이트라, 문자 수는 짧아도
+     * (29자) 바이트 수로는 72를 넘을 수 있다({@code @Size(max = 72)}처럼 문자 수만 쟀다면 이 케이스를
+     * 놓쳤을 것이다).
+     */
+    @Test
+    void 문자수는_짧아도_UTF8_바이트로_72를_넘으면_무효하다() {
+        String shortCharsButLongBytes = "Aa1!" + "가".repeat(25);
+        assertThat(shortCharsButLongBytes).hasSize(29);
+        assertThat(shortCharsButLongBytes.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isGreaterThan(72);
+
+        Set<ConstraintViolation<PasswordHolder>> violations =
+                validator.validate(new PasswordHolder(shortCharsButLongBytes));
+
+        assertThat(violations).isNotEmpty();
     }
 
     /**
