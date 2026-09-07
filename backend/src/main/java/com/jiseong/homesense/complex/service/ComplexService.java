@@ -1,0 +1,122 @@
+package com.jiseong.homesense.complex.service;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.jiseong.homesense.complex.dto.BoundsCondition;
+import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
+import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
+import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
+import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
+import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
+import com.jiseong.homesense.complex.dto.MapFilterCondition;
+import com.jiseong.homesense.complex.entity.Complex;
+import com.jiseong.homesense.complex.exception.ComplexNotFoundException;
+import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.trade.entity.Trade;
+import com.jiseong.homesense.trade.repository.TradeRepository;
+
+import lombok.RequiredArgsConstructor;
+
+/**
+ * SVC-CPX-01. 단지 검색·인기단지·상세·지도 범위 조회를 담당한다. 조회 트래픽이 가장 높은 도메인이라
+ * getDetail()/getPopular()에 COM-CACHE-01 캐시를 적용한다(TTL 24h) — 무효화는 BAT-LOD-01이 발행하는
+ * TradeCacheEvictionEvent를 CacheEvictionListener가 이미 구독하고 있어 별도 배선이 필요 없다.
+ *
+ * <p>getDetail()이 설계서대로 SVC-RCV-01.record()를 호출해 조회 이력을 남기는 부분은 이번 범위에서
+ * 뺐다 — RCV 도메인은 아직 엔티티/레포지토리만 있고 서비스 계층이 없다(지성 확인, CLAUDE.md
+ * SVC-CPX-01 절 참고). RCV-01을 구현하는 시점에 이 메서드에 이어붙여라.
+ */
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class ComplexService {
+
+    /** getPopular() "인기" 정의 — 최근 이 기간 내 거래량 기준(지성 확인). */
+    private static final int POPULARITY_WINDOW_MONTHS = 3;
+
+    /** searchInBounds() 결과 상한 — 이를 넘으면 상한까지만 반환하고 truncated=true. */
+    private static final int MAX_MAP_RESULTS = 500;
+
+    private final ComplexRepository complexRepository;
+    private final TradeRepository tradeRepository;
+
+    public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, Pageable pageable) {
+        return complexRepository.search(condition, pageable);
+    }
+
+    @Cacheable(cacheNames = "popularComplexes", key = "#limit")
+    public List<ComplexSummaryResponse> getPopular(int limit) {
+        LocalDate since = LocalDate.now().minusMonths(POPULARITY_WINDOW_MONTHS);
+        List<Long> complexIds = new ArrayList<>(
+                tradeRepository.findTopComplexIdsByRecentTradeVolume(since, PageRequest.of(0, limit)));
+
+        if (complexIds.size() < limit) {
+            complexIds.addAll(fallbackComplexIds(complexIds, limit));
+        }
+
+        return complexIds.stream()
+                .map(this::buildSummary)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * 최근 거래량만으로 limit을 못 채우면(서비스 초기 등 거래 데이터가 적은 경우) complex_id가 가장 큰
+     * (=DB에 가장 최근 등록된) 단지로 나머지 자리만 채운다(지성 확인) — 이미 거래량 기준에 뽑힌 단지는
+     * 제외한다. data_updated_at을 쓰지 않는 이유는 ComplexRepository.findAllByOrderByComplexIdDesc()
+     * 참고.
+     */
+    private List<Long> fallbackComplexIds(List<Long> alreadySelected, int limit) {
+        int needed = limit - alreadySelected.size();
+        List<Complex> candidates = complexRepository.findAllByOrderByComplexIdDesc(
+                PageRequest.of(0, needed + alreadySelected.size()));
+
+        return candidates.stream()
+                .map(Complex::getComplexId)
+                .filter(id -> !alreadySelected.contains(id))
+                .limit(needed)
+                .toList();
+    }
+
+    @Cacheable(cacheNames = "complexDetail", key = "#complexId")
+    public ComplexDetailResponse getDetail(Long complexId) {
+        Complex complex = complexRepository.findById(complexId).orElseThrow(ComplexNotFoundException::new);
+        return ComplexDetailResponse.from(complex);
+    }
+
+    public ComplexMapSearchResponse searchInBounds(BoundsCondition bounds, MapFilterCondition filter) {
+        List<Complex> results = complexRepository.searchInBounds(bounds, filter, MAX_MAP_RESULTS + 1);
+
+        boolean truncated = results.size() > MAX_MAP_RESULTS;
+        List<ComplexMapPointResponse> points = results.stream()
+                .limit(MAX_MAP_RESULTS)
+                .map(ComplexMapPointResponse::from)
+                .toList();
+
+        return new ComplexMapSearchResponse(points, truncated);
+    }
+
+    private ComplexSummaryResponse buildSummary(Long complexId) {
+        Complex complex = complexRepository.findById(complexId).orElse(null);
+        if (complex == null) {
+            return null;
+        }
+        Trade representativeTrade = tradeRepository
+                .findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(complexId)
+                .orElse(null);
+        if (representativeTrade == null) {
+            return null;
+        }
+        return ComplexSummaryResponse.of(complex, representativeTrade);
+    }
+}
