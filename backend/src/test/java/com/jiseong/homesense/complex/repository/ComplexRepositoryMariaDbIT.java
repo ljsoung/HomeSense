@@ -144,6 +144,31 @@ class ComplexRepositoryMariaDbIT {
     }
 
     @Test
+    void 대표거래_후보가_같은_날짜로_동률이어도_단지당_정확히_한_행만_나온다() {
+        // 같은 단지에 dealDate가 완전히 같은 거래 두 건 — MAX(dealDate)만 걸었다면 이 단지가
+        // 검색 결과에 두 행(카드 두 장)으로 중복 노출됐을 결함(코드리뷰에서 지적됨).
+        Complex tieWithinSameComplex = complexRepository.saveAndFlush(complex("TIE-SAME", "서울특별시", "강남구", "역삼동"));
+        LocalDate tiedDate = LocalDate.of(2026, 1, 10);
+        tradeRepository.saveAndFlush(trade(tieWithinSameComplex, HousingType.APT, DealCategory.SALE,
+                tiedDate, 50000L, null, "59.90", false));
+        Trade laterInsertedTrade = tradeRepository.saveAndFlush(trade(tieWithinSameComplex, HousingType.APT,
+                DealCategory.SALE, tiedDate, 60000L, null, "70.00", false));
+
+        ComplexSearchCondition condition = new ComplexSearchCondition(
+                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
+                "서울특별시", "강남구", "역삼동", SortCondition.LATEST);
+
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+
+        List<ComplexSummaryResponse> matches = page.getContent().stream()
+                .filter(r -> r.complexId().equals(tieWithinSameComplex.getComplexId()))
+                .toList();
+        assertThat(matches).hasSize(1);
+        // tie-break는 MAX(trade_id) — 나중에 저장된(=더 큰 trade_id) 쪽이 대표거래가 된다.
+        assertThat(matches.get(0).representativeAmount()).isEqualTo(laterInsertedTrade.getDealAmount());
+    }
+
+    @Test
     void 취소된_거래만_있는_단지는_검색결과에서_제외된다() {
         ComplexSearchCondition condition = new ComplexSearchCondition(
                 List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
@@ -170,6 +195,40 @@ class ComplexRepositoryMariaDbIT {
         assertThat(latestOrder).containsExactly(complexA.getComplexId(), complexB.getComplexId());
         assertThat(amountOrder).containsExactly(complexB.getComplexId(), complexA.getComplexId());
         assertThat(areaOrder).containsExactly(complexA.getComplexId(), complexB.getComplexId());
+    }
+
+    @Test
+    void 정렬_기준이_동률이어도_페이지_경계에서_단지가_중복되거나_누락되지_않는다() {
+        // dealDate(일 단위)·금액·면적이 전부 동일한 대표거래를 가진 단지 4개 — SQL은 이런 동률 행의
+        // 상대 순서를 보장하지 않으므로, complexId/tradeId 2차 정렬키가 없으면 offset/limit으로
+        // 나눠 받는 인접 페이지에서 같은 단지가 중복되거나 빠질 수 있다(코드리뷰에서 지적됨).
+        // A/B(setUp)와 섞이지 않도록 별도 지역에 만든다.
+        LocalDate tiedDealDate = LocalDate.of(2026, 1, 1);
+        List<Long> tiedComplexIds = new java.util.ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            Complex tied = complexRepository.saveAndFlush(complex("TIE" + i, "대구광역시", "수성구", "범어동"));
+            tradeRepository.saveAndFlush(trade(tied, HousingType.APT, DealCategory.SALE,
+                    tiedDealDate, 50000L, null, "59.90", false));
+            tiedComplexIds.add(tied.getComplexId());
+        }
+
+        ComplexSearchCondition condition = new ComplexSearchCondition(
+                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
+                "대구광역시", "수성구", "범어동", SortCondition.LATEST);
+
+        List<Long> page0 = ids(complexRepository.search(condition, PageRequest.of(0, 2)));
+        List<Long> page1 = ids(complexRepository.search(condition, PageRequest.of(1, 2)));
+        // 같은 조건을 다시 조회해도 완전히 같은 순서가 나와야 한다 — 결정적 정렬이라는 뜻이다.
+        List<Long> page0Again = ids(complexRepository.search(condition, PageRequest.of(0, 2)));
+
+        assertThat(page0).hasSize(2);
+        assertThat(page1).hasSize(2);
+        assertThat(page0).doesNotContainAnyElementsOf(page1);
+        assertThat(page0).containsExactlyElementsOf(page0Again);
+
+        List<Long> combined = new java.util.ArrayList<>(page0);
+        combined.addAll(page1);
+        assertThat(combined).containsExactlyInAnyOrderElementsOf(tiedComplexIds);
     }
 
     @Test

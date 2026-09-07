@@ -42,26 +42,43 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
     @Override
     public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, Pageable pageable) {
         QTrade subTrade = new QTrade("subTrade");
+        QTrade tieBreakTrade = new QTrade("tieBreakTrade");
         BooleanBuilder complexFilters = complexFilters(condition);
         BooleanBuilder tradeFilters = tradeFilters(condition, trade);
         BooleanBuilder subTradeFilters = tradeFilters(condition, subTrade);
+        BooleanBuilder tieBreakTradeFilters = tradeFilters(condition, tieBreakTrade);
 
-        // 검색조건을 만족하는 거래 중 "가장 최근 거래"만 각 단지의 대표 거래로 남긴다 — 동률(같은
-        // 날짜에 여러 건)이면 그 단지가 여러 행으로 중복될 수 있는 드문 경우를 허용한다(문서화된
-        // 한계, CLAUDE.md SVC-CPX-01 절 참고).
+        // 검색조건을 만족하는 거래 중 "가장 최근 거래" 하나만 각 단지의 대표 거래로 남긴다.
+        // dealDate는 일 단위라 같은 날짜에 여러 건이 동률로 걸리는 게 드물지 않다 — MAX(dealDate)만
+        // 걸면 그 동률 거래 전부가 살아남아 같은 complex_id가 결과에 여러 행(=매물 카드 여러 장)으로
+        // 중복 노출된다. ComplexSummaryResponse가 "단지 1건 = 카드 1장"을 전제하므로, dealDate가
+        // 같을 때는 MAX(trade_id)로 한 번 더 좁혀 항상 정확히 한 건만 남긴다(코드리뷰에서 지적됨 —
+        // 처음엔 이 동률 중복을 "드문 엣지케이스"로 문서화하고 넘어갔으나, 대표거래 개념 자체와
+        // 충돌한다는 지적을 받아 근본 수정함).
         var maxDealDateSubquery = JPAExpressions
                 .select(subTrade.dealDate.max())
                 .from(subTrade)
                 .where(subTrade.complex.eq(complex).and(subTradeFilters));
 
-        BooleanBuilder where = complexFilters.and(tradeFilters).and(trade.dealDate.eq(maxDealDateSubquery));
+        var representativeTradeIdSubquery = JPAExpressions
+                .select(tieBreakTrade.tradeId.max())
+                .from(tieBreakTrade)
+                .where(tieBreakTrade.complex.eq(complex)
+                        .and(tieBreakTradeFilters)
+                        .and(tieBreakTrade.dealDate.eq(maxDealDateSubquery)));
+
+        BooleanBuilder where = complexFilters.and(tradeFilters).and(trade.tradeId.eq(representativeTradeIdSubquery));
 
         List<Tuple> rows = queryFactory
                 .select(complex, trade)
                 .from(complex)
                 .join(trade).on(trade.complex.eq(complex))
                 .where(where)
-                .orderBy(orderSpecifier(condition))
+                // 대표거래가 단지당 정확히 하나로 좁혀졌더라도, 정렬 기준(금액·면적) 값 자체가 서로
+                // 다른 단지 사이에서 동률일 수 있다 — complexId를 확정적 2차 정렬키로 덧붙이지 않으면
+                // offset/limit으로 나눠 받는 인접 페이지에서 같은 단지가 중복되거나 빠질 수 있다
+                // (코드리뷰에서 지적됨).
+                .orderBy(orderSpecifier(condition), complex.complexId.asc())
                 .offset(pageable.getOffset())
                 .limit(pageable.getPageSize())
                 .fetch();
