@@ -34,4 +34,21 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
             ORDER BY COUNT(t) DESC
             """)
     List<Long> findTopComplexIdsByRecentTradeVolume(@Param("since") LocalDate since, Pageable pageable);
+
+    /**
+     * SVC-RGN-01.getInterestSummary() — RegionStatsCalculator가 법정동코드 하나의 기간별 매매(SALE)
+     * 평균가를 구할 때 쓴다. 보증금(RENT)은 매매가와 금액 구조가 달라 대상에서 제외한다(SVC-CPX-01/
+     * TRD-01의 기존 "금액" 결정과 같은 이유, CLAUDE.md 참고). 취소된 거래도 제외한다. 대상 기간에
+     * 해당 거래가 하나도 없으면 SQL AVG는 NULL을 내므로 Optional.empty()로 매핑된다.
+     */
+    @Query("""
+            SELECT AVG(t.dealAmount)
+            FROM Trade t
+            WHERE t.legalDistrictCode.legalDongCd = :legalDongCd
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            """)
+    Optional<Double> findAverageSaleAmount(@Param("legalDongCd") String legalDongCd,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
 }
