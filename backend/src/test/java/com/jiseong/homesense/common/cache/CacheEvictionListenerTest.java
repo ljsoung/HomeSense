@@ -33,7 +33,7 @@ class CacheEvictionListenerTest {
     void complexId마다_complexDetail_캐시를_evict하고_popularComplexes는_통째로_clear한다() {
         Cache complexDetailCache = mock(Cache.class);
         Cache popularComplexesCache = mock(Cache.class);
-        when(cacheManager.getCache("complexDetail")).thenReturn(complexDetailCache);
+        when(cacheManager.getCache("complexDetailV2")).thenReturn(complexDetailCache);
         when(cacheManager.getCache("popularComplexes")).thenReturn(popularComplexesCache);
 
         listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L, 2L), Set.of()));
@@ -65,17 +65,17 @@ class CacheEvictionListenerTest {
         listener().onLegalDistrictCodeReloaded(new LegalDistrictCodeReloadedEvent());
 
         verify(regionAutocompleteCache).clear();
-        verify(cacheManager, never()).getCache("complexDetail");
+        verify(cacheManager, never()).getCache("complexDetailV2");
         verify(cacheManager, never()).getCache("popularComplexes");
     }
 
     @Test
     void 캐시를_찾지_못해도_예외없이_넘어간다() {
-        when(cacheManager.getCache("complexDetail")).thenReturn(null);
+        when(cacheManager.getCache("complexDetailV2")).thenReturn(null);
         when(cacheManager.getCache("popularComplexes")).thenReturn(null);
 
         listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L), Set.of()));
 
-        verify(cacheManager).getCache("complexDetail");
+        verify(cacheManager).getCache("complexDetailV2");
     }
 }

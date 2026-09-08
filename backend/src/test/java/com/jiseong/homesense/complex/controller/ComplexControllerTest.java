@@ -3,6 +3,7 @@ package com.jiseong.homesense.complex.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,17 +14,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.LocalDate;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.common.security.UserPrincipal;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
@@ -47,6 +53,18 @@ class ComplexControllerTest {
     private JwtTokenProvider jwtTokenProvider;
     @MockitoBean
     private AuditLogger auditLogger;
+
+    private static final UserPrincipal ME = new UserPrincipal(1L, "USER");
+
+    @AfterEach
+    void clearContext() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private void authenticate() {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                ME, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+    }
 
     private static ComplexSummaryResponse summary(Long id) {
         return new ComplexSummaryResponse(id, "테스트단지", "서울특별시", "강남구", "역삼동", 500, (short) 5,
@@ -132,10 +150,10 @@ class ComplexControllerTest {
                 "분양", 480, 20, 10, 10, "위탁관리", "개별난방", "복도식", "철근콘크리트", "개발사", "관리회사",
                 (short) 2, (short) 1, (short) 0, 400, 200, true, false, (short) 10, (short) 5, (short) 30, true,
                 "커뮤니티", "편의시설", (short) 20, (short) 2, "서울시 강남구", "02-1234-5678");
-        ComplexDetailResponse response = new ComplexDetailResponse(1L, "테스트단지", "아파트", "서울특별시", "강남구", "역삼동",
-                "서울특별시 강남구 역삼동 123", new java.math.BigDecimal("37.5"), new java.math.BigDecimal("127.0"),
-                "PRECISE", false, basicInfo, extendedInfo);
-        when(complexService.getDetail(1L)).thenReturn(response);
+        ComplexDetailResponse response = new ComplexDetailResponse(1L, "테스트단지", "아파트", HousingType.APT,
+                "서울특별시", "강남구", "역삼동", "서울특별시 강남구 역삼동 123", new java.math.BigDecimal("37.5"),
+                new java.math.BigDecimal("127.0"), "PRECISE", false, basicInfo, extendedInfo);
+        when(complexService.getDetail(eq(1L), any(), any())).thenReturn(response);
 
         mockMvc.perform(get("/api/complexes/1"))
                 .andExpect(status().isOk())
@@ -146,8 +164,41 @@ class ComplexControllerTest {
     }
 
     @Test
+    void 상세조회_시_비로그인_세션헤더를_그대로_Service에_전달한다() throws Exception {
+        when(complexService.getDetail(eq(1L), isNull(), eq("session-abc"))).thenReturn(minimalDetail());
+
+        mockMvc.perform(get("/api/complexes/1").header("X-Session-Id", "session-abc"))
+                .andExpect(status().isOk());
+
+        verify(complexService).getDetail(1L, null, "session-abc");
+    }
+
+    @Test
+    void 상세조회_시_로그인_상태면_userId를_Service에_전달한다() throws Exception {
+        authenticate();
+        when(complexService.getDetail(eq(1L), eq(1L), any())).thenReturn(minimalDetail());
+
+        mockMvc.perform(get("/api/complexes/1"))
+                .andExpect(status().isOk());
+
+        verify(complexService).getDetail(1L, 1L, null);
+    }
+
+    private static ComplexDetailResponse minimalDetail() {
+        ComplexDetailResponse.BasicInfo basicInfo =
+                new ComplexDetailResponse.BasicInfo(500, (short) 5, LocalDate.of(2010, 1, 1), "시공사", 600, (short) 20);
+        ComplexDetailResponse.ExtendedInfo extendedInfo = new ComplexDetailResponse.ExtendedInfo(
+                "분양", 480, 20, 10, 10, "위탁관리", "개별난방", "복도식", "철근콘크리트", "개발사", "관리회사",
+                (short) 2, (short) 1, (short) 0, 400, 200, true, false, (short) 10, (short) 5, (short) 30, true,
+                "커뮤니티", "편의시설", (short) 20, (short) 2, "서울시 강남구", "02-1234-5678");
+        return new ComplexDetailResponse(1L, "테스트단지", "아파트", HousingType.APT,
+                "서울특별시", "강남구", "역삼동", "서울특별시 강남구 역삼동 123", new java.math.BigDecimal("37.5"),
+                new java.math.BigDecimal("127.0"), "PRECISE", false, basicInfo, extendedInfo);
+    }
+
+    @Test
     void 존재하지_않는_단지면_404를_반환한다() throws Exception {
-        when(complexService.getDetail(999L)).thenThrow(new ComplexNotFoundException());
+        when(complexService.getDetail(eq(999L), any(), any())).thenThrow(new ComplexNotFoundException());
 
         mockMvc.perform(get("/api/complexes/999"))
                 .andExpect(status().isNotFound())

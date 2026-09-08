@@ -20,8 +20,9 @@ import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
 import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.entity.Complex;
-import com.jiseong.homesense.complex.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.recentview.dto.RecentViewTarget;
+import com.jiseong.homesense.recentview.service.RecentViewService;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
 
@@ -29,12 +30,15 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * SVC-CPX-01. 단지 검색·인기단지·상세·지도 범위 조회를 담당한다. 조회 트래픽이 가장 높은 도메인이라
- * getDetail()/getPopular()에 COM-CACHE-01 캐시를 적용한다(TTL 24h) — 무효화는 BAT-LOD-01이 발행하는
+ * getDetail()/getPopular()에 COM-CACHE-01 캐시(complexDetailV2/popularComplexes)를 적용한다(TTL 24h)
+ * — 무효화는 BAT-LOD-01이 발행하는
  * TradeCacheEvictionEvent를 CacheEvictionListener가 이미 구독하고 있어 별도 배선이 필요 없다.
  *
- * <p>getDetail()이 설계서대로 SVC-RCV-01.record()를 호출해 조회 이력을 남기는 부분은 이번 범위에서
- * 뺐다 — RCV 도메인은 아직 엔티티/레포지토리만 있고 서비스 계층이 없다(지성 확인, CLAUDE.md
- * SVC-CPX-01 절 참고). RCV-01을 구현하는 시점에 이 메서드에 이어붙여라.
+ * <p>설계서 3.6절("RCV 도메인과 협력")·2.2절("Service-to-Service 직접 호출을 허용") 그대로
+ * getDetail() 내부에서 SVC-RCV-01.record()를 부른다. 다만 이 메서드 자체에 {@code @Cacheable}을
+ * 걸면 캐시 히트마다 기록이 스킵되므로, 캐시 조회는 {@link ComplexDetailCache}라는 별도 빈으로
+ * 분리했다 — 같은 클래스 안에 캐시 전용 메서드를 따로 둬도 self-invocation이라 프록시를 안 거쳐
+ * {@code @Cacheable}이 무력화되기 때문이다(CLAUDE.md SVC-RCV-01 절 참고).
  */
 @Service
 @RequiredArgsConstructor
@@ -49,6 +53,8 @@ public class ComplexService {
 
     private final ComplexRepository complexRepository;
     private final TradeRepository tradeRepository;
+    private final ComplexDetailCache complexDetailCache;
+    private final RecentViewService recentViewService;
 
     public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, Pageable pageable) {
         return complexRepository.search(condition, pageable);
@@ -88,10 +94,14 @@ public class ComplexService {
                 .toList();
     }
 
-    @Cacheable(cacheNames = "complexDetail", key = "#complexId")
-    public ComplexDetailResponse getDetail(Long complexId) {
-        Complex complex = complexRepository.findById(complexId).orElseThrow(ComplexNotFoundException::new);
-        return ComplexDetailResponse.from(complex);
+    /**
+     * userId·sessionId는 조회 이력 기록 주체 판별에만 쓰인다 — 상세정보 자체는 이 값과 무관하게
+     * {@link ComplexDetailCache}에서 캐시째로 내려온다(비로그인·회원 모두 같은 캐시 엔트리 공유).
+     */
+    public ComplexDetailResponse getDetail(Long complexId, Long userId, String sessionId) {
+        ComplexDetailResponse detail = complexDetailCache.get(complexId);
+        recentViewService.record(userId, sessionId, new RecentViewTarget(complexId, detail.housingType()));
+        return detail;
     }
 
     public ComplexMapSearchResponse searchInBounds(BoundsCondition bounds, MapFilterCondition filter) {

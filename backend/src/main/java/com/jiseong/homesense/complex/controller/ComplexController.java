@@ -3,9 +3,11 @@ package com.jiseong.homesense.complex.controller;
 import java.util.List;
 
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,6 +21,8 @@ import com.jiseong.homesense.complex.dto.MapFilterRequest;
 import com.jiseong.homesense.complex.exception.InvalidLimitException;
 import com.jiseong.homesense.complex.service.ComplexService;
 import com.jiseong.homesense.common.response.ApiResponse;
+import com.jiseong.homesense.common.security.UserPrincipal;
+import com.jiseong.homesense.recentview.controller.RecentViewController;
 
 import lombok.RequiredArgsConstructor;
 
@@ -29,6 +33,11 @@ import lombok.RequiredArgsConstructor;
  * PageResponse는 COM-RES-01의 기존 {@code ApiResponse.success(Page<T>)}(data+pageMeta) 관례를 그대로
  * 쓰고, map()은 truncated 플래그를 실을 자리가 필요해 {@link ComplexMapSearchResponse}로 감쌌다
  * (CLAUDE.md SVC-CPX-01 절 참고).
+ *
+ * <p>getDetail()은 SVC-RCV-01.record() 호출(조회 이력 기록)을 위해 userId/세션 식별자를 함께
+ * 받는다 — 이 컨트롤러는 HTTP 요청에서 그 두 값을 뽑아 ComplexService에 그대로 넘기기만 할 뿐,
+ * 실제 협력 호출(SVC-CPX-01 → SVC-RCV-01)은 ComplexService.getDetail() 안에서 일어난다
+ * (CLAUDE.md SVC-RCV-01 절 참고).
  */
 @RestController
 @RequestMapping("/api/complexes")
@@ -63,8 +72,12 @@ public class ComplexController {
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<ComplexDetailResponse> getDetail(@PathVariable Long id) {
-        return ApiResponse.success(complexService.getDetail(id));
+    public ApiResponse<ComplexDetailResponse> getDetail(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserPrincipal me,
+            @RequestHeader(value = RecentViewController.SESSION_ID_HEADER, required = false) String sessionId) {
+        Long userId = me == null ? null : me.userId();
+        return ApiResponse.success(complexService.getDetail(id, userId, sessionId));
     }
 
     @GetMapping("/map")

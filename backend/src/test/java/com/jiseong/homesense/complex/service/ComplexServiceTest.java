@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -32,6 +34,7 @@ import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.recentview.service.RecentViewService;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.Trade;
@@ -44,12 +47,16 @@ class ComplexServiceTest {
     private ComplexRepository complexRepository;
     @Mock
     private TradeRepository tradeRepository;
+    @Mock
+    private ComplexDetailCache complexDetailCache;
+    @Mock
+    private RecentViewService recentViewService;
 
     private ComplexService complexService;
 
     @BeforeEach
     void setUp() {
-        complexService = new ComplexService(complexRepository, tradeRepository);
+        complexService = new ComplexService(complexRepository, tradeRepository, complexDetailCache, recentViewService);
     }
 
     private static Complex complex(Long id) {
@@ -94,31 +101,47 @@ class ComplexServiceTest {
     }
 
     @Test
-    void getDetail_존재하지_않으면_ComplexNotFoundException을_던진다() {
-        when(complexRepository.findById(1L)).thenReturn(Optional.empty());
+    void getDetail_ComplexDetailCache가_던진_예외를_그대로_전파한다() {
+        when(complexDetailCache.get(1L)).thenThrow(new ComplexNotFoundException());
 
-        assertThatThrownBy(() -> complexService.getDetail(1L)).isInstanceOf(ComplexNotFoundException.class);
+        assertThatThrownBy(() -> complexService.getDetail(1L, null, null)).isInstanceOf(ComplexNotFoundException.class);
     }
 
     @Test
-    void getDetail_존재하면_상세정보를_반환한다() {
-        Complex complex = complex(1L);
-        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex));
+    void getDetail_ComplexDetailCache의_결과를_그대로_반환한다() {
+        ComplexDetailResponse cached = detailResponse(1L, HousingType.APT);
+        when(complexDetailCache.get(1L)).thenReturn(cached);
 
-        ComplexDetailResponse response = complexService.getDetail(1L);
+        ComplexDetailResponse response = complexService.getDetail(1L, null, null);
 
-        assertThat(response.complexId()).isEqualTo(1L);
-        assertThat(response.complexName()).isEqualTo("테스트단지1");
+        assertThat(response).isSameAs(cached);
     }
 
+    /**
+     * 설계서 3.6절("RCV 도메인과 협력") 그대로 SVC-CPX-01이 SVC-RCV-01.record()를 직접 호출하는지
+     * 검증한다 — 캐시 히트/미스와 무관하게 매 호출마다 실행돼야 하므로, 캐시 조회 자체는
+     * ComplexDetailCache로 분리해 이 메서드가 항상 record()를 부르게 했다(CLAUDE.md SVC-RCV-01
+     * 절 참고).
+     */
     @Test
-    void getDetail_법정동_매칭_대기면_matchPending이_true다() {
-        Complex complex = complex(1L);
-        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex));
+    void getDetail_SVC_RCV_01_record를_호출해_조회이력을_남긴다() {
+        ComplexDetailResponse cached = detailResponse(1L, HousingType.APT);
+        when(complexDetailCache.get(1L)).thenReturn(cached);
 
-        ComplexDetailResponse response = complexService.getDetail(1L);
+        complexService.getDetail(1L, 5L, "session-x");
 
-        assertThat(response.matchPending()).isTrue();
+        verify(recentViewService).record(eq(5L), eq("session-x"),
+                argThat(target -> target.complexId().equals(1L) && target.housingType() == HousingType.APT));
+    }
+
+    private static ComplexDetailResponse detailResponse(Long complexId, HousingType housingType) {
+        ComplexDetailResponse.BasicInfo basicInfo = new ComplexDetailResponse.BasicInfo(null, null, null, null, null, null);
+        ComplexDetailResponse.ExtendedInfo extendedInfo = new ComplexDetailResponse.ExtendedInfo(
+                null, null, null, null, null, null, null, null, null, null, null,
+                (short) 0, (short) 0, (short) 0, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null);
+        return new ComplexDetailResponse(complexId, "테스트단지" + complexId, "아파트", housingType,
+                null, null, null, null, null, null, null, false, basicInfo, extendedInfo);
     }
 
     @Test
