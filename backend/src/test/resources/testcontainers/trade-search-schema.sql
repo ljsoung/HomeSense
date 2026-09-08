@@ -1,9 +1,13 @@
--- TradeRepositoryMariaDbIT 전용 최소 스키마. 테이블정의서 8장 DDL 원문의 일부만 재구성한 것으로,
--- 이 통합 테스트가 실제로 건드리는 컬럼(trade 전체, legal_district_code 전체, complex는 검색 결과에
--- 노출되는 complex_name 등 최소 컬럼)만 담았다 — TradeChunkLoaderMariaDbIT의 trade-race-schema.sql과
--- 내용이 겹치지만, 각 IT 테스트가 자기 스키마를 독립적으로 갖는 이 프로젝트의 관례를 따라 별도
--- 파일로 둔다(ComplexRepositoryMariaDbIT의 complex-search-schema.sql과 같은 이유). 권위 있는 전체
--- DDL은 테이블정의서 8장을 그대로 따라야 한다.
+-- TradeRepositoryMariaDbIT 전용 스키마. 테이블정의서 8장 DDL 원문 중 이 통합 테스트가 실제로
+-- 건드리는 legal_district_code/complex/trade 세 테이블을 재구성한 것이다 — complex는 Complex
+-- 엔티티가 @DynamicInsert를 쓰지 않아 Hibernate가 매핑된 컬럼 전부를 INSERT 문에 실으므로
+-- (saveAndFlush() 호출 시 fixture가 값을 채우지 않은 컬럼도 포함) 일부 컬럼만 정의하면 첫 번째
+-- 리포지토리 호출에서 곧바로 "Unknown column" 에러로 테스트 자체가 실행되지 못한다(코드리뷰에서
+-- 지적됨) — ComplexRepositoryMariaDbIT의 complex-search-schema.sql과 완전히 같은 complex 테이블
+-- 정의를 그대로 옮겨왔다. TradeChunkLoaderMariaDbIT의 trade-race-schema.sql은 그쪽 fixture가
+-- complex_name 외 다른 컬럼을 쓰지 않아 축소판으로 충분했던 것뿐이다. 각 IT 테스트가 자기 스키마를
+-- 독립적으로 갖는 이 프로젝트의 관례를 따라 별도 파일로 두되, 권위 있는 전체 DDL은 테이블정의서
+-- 8장을 그대로 따라야 한다.
 
 CREATE TABLE legal_district_code (
     legal_dong_cd VARCHAR(10) PRIMARY KEY,
@@ -18,7 +22,55 @@ CREATE TABLE legal_district_code (
 CREATE TABLE complex (
     complex_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     source_complex_cd VARCHAR(20) NOT NULL UNIQUE,
-    complex_name VARCHAR(100) NOT NULL
+    legal_dong_cd VARCHAR(10),
+    complex_name VARCHAR(100) NOT NULL,
+    complex_type VARCHAR(20) NOT NULL,
+    sido VARCHAR(20),
+    sigungu VARCHAR(20),
+    dong_ri VARCHAR(20),
+    legal_dong_address VARCHAR(200),
+    supply_type VARCHAR(10),
+    approval_date DATE,
+    building_count SMALLINT,
+    household_count INT,
+    sale_household_count INT,
+    rental_household_count INT,
+    public_rental_count INT,
+    private_rental_count INT,
+    management_type VARCHAR(20),
+    heating_type VARCHAR(20),
+    corridor_type VARCHAR(20),
+    building_structure VARCHAR(30),
+    constructor VARCHAR(100),
+    developer VARCHAR(100),
+    management_company VARCHAR(100),
+    elevator_passenger_count SMALLINT NOT NULL,
+    elevator_cargo_count SMALLINT NOT NULL,
+    elevator_combined_count SMALLINT NOT NULL,
+    total_parking_count INT,
+    ground_parking_count INT,
+    underground_parking_count INT,
+    cctv_count SMALLINT,
+    home_network_yn BOOLEAN,
+    office_address VARCHAR(200),
+    office_phone VARCHAR(20),
+    community_facilities VARCHAR(500),
+    resident_amenities VARCHAR(500),
+    highest_floor SMALLINT,
+    highest_floor_registered SMALLINT,
+    basement_floor_count SMALLINT,
+    ev_charger_ground_yn BOOLEAN,
+    ev_charger_underground_yn BOOLEAN,
+    ev_parking_ground_count SMALLINT,
+    ev_parking_underground_count SMALLINT,
+    latitude DECIMAL(10, 7),
+    longitude DECIMAL(10, 7),
+    location_precision VARCHAR(10),
+    data_updated_at DATE NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT fk_complex_legal_dong_cd FOREIGN KEY (legal_dong_cd)
+        REFERENCES legal_district_code (legal_dong_cd) ON UPDATE RESTRICT ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE trade (
