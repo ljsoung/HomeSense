@@ -25,8 +25,10 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>SVC-AUTH-01의 logout()과 SVC-USER-01의 /api/users/** 세 엔드포인트(getMe/updateMe/withdraw)는
  * 전부 UserPrincipal(로그인한 본인)이 반드시 있어야 성립하는 연산이라 인증 필수 규칙으로 추가한다.
- * 미인증 접근은 Spring Security 기본 401 대신 {@link RestAuthenticationEntryPoint}로 COM-RES-01
- * 포맷을 유지한다.
+ * SVC-RGN-01의 GET /api/regions/interest-summary도 같은 이유(회원의 관심 지역 조회)로 추가했다 —
+ * 같은 base path의 자동완성(GET /api/regions)은 비로그인 조회를 그대로 허용해야 해서 경로 전체가
+ * 아니라 이 엔드포인트 하나만 정확히 매칭한다. 미인증 접근은 Spring Security 기본 401 대신
+ * {@link RestAuthenticationEntryPoint}로 COM-RES-01 포맷을 유지한다.
  */
 @Configuration
 @RequiredArgsConstructor
@@ -49,6 +51,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/users/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/regions/interest-summary").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(restAuthenticationEntryPoint))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
