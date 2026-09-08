@@ -76,4 +76,9 @@ public class RecentView {
     public static RecentView record(User user, String sessionId, Complex complex, HousingType housingType) {
         return new RecentView(user, sessionId, housingType, complex, LocalDateTime.now());
     }
+
+    /** 동일 주체·동일 대상 재조회 시 이력을 새로 쌓지 않고 viewed_at만 현재 시각으로 갱신한다. */
+    public void touch() {
+        this.viewedAt = LocalDateTime.now();
+    }
 }

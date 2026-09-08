@@ -9,6 +9,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import com.jiseong.homesense.region.entity.LegalDistrictCode;
+import com.jiseong.homesense.trade.entity.HousingType;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -189,4 +190,22 @@ public class Complex {
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /**
+     * complex_type은 원본 xlsx의 자유 텍스트("아파트" 등)라 trade.housing_type과는 별도 컬럼이고,
+     * 엔티티정의서 4.2절 실사용 감사에 따르면 이 값이 원본 미기재(NULL)인 행이 약 0.48%(105건)
+     * 존재한다. SVC-RCV-01.record()가 recent_view.housing_type(NOT NULL)을 채우려면 이 값을
+     * enum으로 환산해야 하는데, "아파트" 외의 정확한 원본 표기(연립다세대 쪽 문구)를 실제 xlsx로
+     * 아직 확인하지 못했다 — MVP가 APT/VILLA 2종뿐이라는 CHECK 제약을 이용해 "아파트"가 아니면
+     * 전부 VILLA로 취급한다(지성 확인 필요). 원본이 NULL인 105건은 VILLA로 임의 추정하지 않고
+     * null을 그대로 반환한다 — 호출부(RecentViewService.record())가 null이면 조용히 기록을
+     * 스킵해, 잘못된 housing_type을 확정적으로 저장하는 것보다 "이 105건은 기록하지 않는다"를
+     * 택했다. 원본 표기가 여러 형태로 나뉘어 있다고 밝혀지면 이 메서드만 수정하면 된다.
+     */
+    public HousingType inferHousingType() {
+        if (complexType == null) {
+            return null;
+        }
+        return "아파트".equals(complexType) ? HousingType.APT : HousingType.VILLA;
+    }
 }
