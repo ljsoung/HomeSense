@@ -124,9 +124,17 @@ class TradeRepositoryCustomImpl implements TradeRepositoryCustom {
         return builder;
     }
 
-    /** RENT면 보증금(depositAmount), 그 외(SALE·미지정)면 매매금액(dealAmount) 기준(TradeSearchCondition 문서 참고). */
+    /**
+     * RENT면 보증금(depositAmount), 그 외(SALE·미지정)면 매매금액(dealAmount) 기준(TradeSearchCondition
+     * 문서 참고). rentType은 dealCategory와 독립적으로 선택 가능한 필드라(레코드 컴포넌트가 서로
+     * nullable 여부를 강제하지 않음) rentType만 채워지고 dealCategory가 비어 있는 호출(예:
+     * rentType=WOLSE만 지정)도 RENT로 취급해야 한다 — 그렇지 않으면 RENT 행은 dealAmount가 보통
+     * NULL이라 금액 범위 필터가 0건을 내고 AMOUNT 정렬도 TradeSummaryResponse가 실제로 노출하는
+     * depositAmount가 아니라 dealAmount로 정렬되는 불일치가 생긴다(코드리뷰에서 지적됨).
+     */
     private NumberPath<Long> amountPath(TradeSearchCondition condition) {
-        return condition.dealCategory() == DealCategory.RENT ? trade.depositAmount : trade.dealAmount;
+        boolean isRent = condition.dealCategory() == DealCategory.RENT || condition.rentType() != null;
+        return isRent ? trade.depositAmount : trade.dealAmount;
     }
 
     private OrderSpecifier<?> orderSpecifier(TradeSearchCondition condition) {

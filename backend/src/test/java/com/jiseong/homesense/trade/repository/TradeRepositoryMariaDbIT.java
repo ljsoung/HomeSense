@@ -178,6 +178,50 @@ class TradeRepositoryMariaDbIT {
         assertThat(page.getContent()).extracting(TradeSummaryResponse::tradeId).doesNotContain(sale.getTradeId());
     }
 
+    /**
+     * 코드리뷰(Codex, P2)에서 지적된 회귀 — rentType은 dealCategory와 독립적으로 선택 가능한
+     * 필드라 dealCategory 없이 rentType만 지정하는 호출(예: 프론트가 "월세" 탭만 선택)도 유효하다.
+     * amountPath()가 condition.dealCategory()만 보고 RENT 여부를 판단했다면, 이 케이스에서
+     * dealAmount(RENT 행은 보통 NULL)를 기준으로 걸러 금액 범위 필터가 0건을 내고 AMOUNT 정렬도
+     * 실제 노출 금액(depositAmount)과 다른 컬럼을 봤을 것이다.
+     */
+    @Test
+    void search_dealCategory_없이_rentType만_지정해도_depositAmount로_필터링된다() {
+        Trade wolse = tradeRepository.saveAndFlush(baseTrade()
+                .dealCategory(DealCategory.RENT).rentType(RentType.WOLSE)
+                .dealAmount(null).depositAmount(1000L).monthlyRentAmount(50L).dedupHash("h-wolse-only").build());
+        Trade sale = tradeRepository.saveAndFlush(baseTrade().dealAmount(30000L).dedupHash("h-sale-only").build());
+
+        TradeSearchCondition condition = new TradeSearchCondition(
+                null, null, null, RentType.WOLSE, null, null, 500L, 2000L, TradeSortCondition.LATEST);
+
+        Page<TradeSummaryResponse> page = tradeRepository.search(condition, PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).extracting(TradeSummaryResponse::tradeId)
+                .containsExactly(wolse.getTradeId())
+                .doesNotContain(sale.getTradeId());
+        assertThat(page.getContent().get(0).amount()).isEqualTo(1000L);
+    }
+
+    @Test
+    void search_dealCategory_없이_rentType만_지정해도_AMOUNT_정렬이_depositAmount_기준이다() {
+        Trade cheaperDeposit = tradeRepository.saveAndFlush(baseTrade()
+                .dealCategory(DealCategory.RENT).rentType(RentType.WOLSE)
+                .dealAmount(null).depositAmount(1000L).monthlyRentAmount(50L).dedupHash("h-cheap-deposit").build());
+        Trade pricierDeposit = tradeRepository.saveAndFlush(baseTrade()
+                .dealCategory(DealCategory.RENT).rentType(RentType.WOLSE)
+                .dealAmount(null).depositAmount(5000L).monthlyRentAmount(30L).dedupHash("h-pricey-deposit").build());
+
+        TradeSearchCondition condition = new TradeSearchCondition(
+                null, null, null, RentType.WOLSE, null, null, null, null, TradeSortCondition.AMOUNT);
+
+        Page<TradeSummaryResponse> page = tradeRepository.search(condition, PageRequest.of(0, 10));
+
+        // AMOUNT 정렬은 오름차순 — dealAmount(둘 다 NULL)로 정렬됐다면 순서가 결정되지 않았을 것이다.
+        assertThat(page.getContent()).extracting(TradeSummaryResponse::tradeId)
+                .containsExactly(cheaperDeposit.getTradeId(), pricierDeposit.getTradeId());
+    }
+
     @Test
     void search_금액순은_오름차순_면적순은_내림차순으로_정렬한다() {
         Trade cheaper = tradeRepository.saveAndFlush(baseTrade()
