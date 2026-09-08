@@ -75,8 +75,9 @@ public class RecentViewService {
         }
 
         User user = userId != null ? userRepository.getReferenceById(userId) : null;
+        String actorSessionId = userId != null ? null : sessionId;
         Complex complex = complexRepository.getReferenceById(target.complexId());
-        recentViewRepository.save(RecentView.record(user, sessionId, complex, target.housingType()));
+        recentViewRepository.save(RecentView.record(user, actorSessionId, complex, target.housingType()));
         evictOverflow(userId, sessionId);
     }
 
