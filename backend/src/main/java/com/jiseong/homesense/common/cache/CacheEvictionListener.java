@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
  * 하는 안전장치다(활성 트랜잭션이 없으면 조용히 유실되는 게 기본 동작이므로).
  *
  * <ul>
- *   <li>TradeCacheEvictionEvent(BAT-LOD-01, 일 1회 이상) — complexDetail::{complexId}를 건별로
+ *   <li>TradeCacheEvictionEvent(BAT-LOD-01, 일 1회 이상) — complexDetailV2::{complexId}를 건별로
  *       evict하고, complexId가 하나라도 있으면 popularComplexes(인기 단지 순위) 전체를 evict한다.
  *       complexId 하나만으로 "어떤 limit으로 캐시된 popularComplexes 항목이 영향받는지"를 역산할 수
  *       없어 전체 clear()로 처리한다.</li>
@@ -37,13 +37,17 @@ import lombok.extern.slf4j.Slf4j;
  *       evict한다. 이 캐시를 TradeCacheEvictionEvent에 묶으면 정적 데이터를 매일 무효화하게 돼
  *       TTL을 길게 가져가려는 설계 의도가 깨지므로 반드시 이 이벤트에만 반응해야 한다.</li>
  * </ul>
+ *
+ * <p>{@code COMPLEX_DETAIL_CACHE}가 {@code complexDetail}이 아니라 {@code complexDetailV2}인 이유는
+ * {@link com.jiseong.homesense.complex.service.ComplexDetailCache} 참고 — housingType 필드 추가로
+ * 캐시 이름을 버전업했다.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class CacheEvictionListener {
 
-    private static final String COMPLEX_DETAIL_CACHE = "complexDetail";
+    private static final String COMPLEX_DETAIL_CACHE = "complexDetailV2";
     private static final String POPULAR_COMPLEXES_CACHE = "popularComplexes";
     private static final String REGION_AUTOCOMPLETE_CACHE = "regionAutocomplete";
 

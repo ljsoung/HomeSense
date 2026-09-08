@@ -30,7 +30,8 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * SVC-CPX-01. 단지 검색·인기단지·상세·지도 범위 조회를 담당한다. 조회 트래픽이 가장 높은 도메인이라
- * getDetail()/getPopular()에 COM-CACHE-01 캐시를 적용한다(TTL 24h) — 무효화는 BAT-LOD-01이 발행하는
+ * getDetail()/getPopular()에 COM-CACHE-01 캐시(complexDetailV2/popularComplexes)를 적용한다(TTL 24h)
+ * — 무효화는 BAT-LOD-01이 발행하는
  * TradeCacheEvictionEvent를 CacheEvictionListener가 이미 구독하고 있어 별도 배선이 필요 없다.
  *
  * <p>설계서 3.6절("RCV 도메인과 협력")·2.2절("Service-to-Service 직접 호출을 허용") 그대로
