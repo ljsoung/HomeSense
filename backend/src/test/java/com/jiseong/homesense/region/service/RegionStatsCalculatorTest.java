@@ -41,21 +41,30 @@ class RegionStatsCalculatorTest {
                 .thenReturn(Optional.of(110_000.0));
         when(tradeRepository.findAverageSaleAmount(eq("1168010100"), eq(now.minusMonths(2)), eq(now.minusMonths(1))))
                 .thenReturn(Optional.of(100_000.0));
+        when(tradeRepository.findAveragePricePerPyeongForSale(eq("1168010100"), eq(now.minusMonths(1)), any()))
+                .thenReturn(Optional.of(3_000.0));
+        when(tradeRepository.countSaleTrades(eq("1168010100"), eq(now.minusMonths(1)), any())).thenReturn(4L);
 
         RegionStats stats = calculator.calculate("1168010100");
 
         assertThat(stats.avgPrice()).isEqualByComparingTo(new BigDecimal("110000"));
         assertThat(stats.changeRate()).isEqualByComparingTo(new BigDecimal("10.00"));
+        assertThat(stats.pricePerPyeong()).isEqualByComparingTo(new BigDecimal("3000"));
+        assertThat(stats.newTradeCount()).isEqualTo(4L);
     }
 
     @Test
     void 지난달_거래가_없으면_변동률은_null이다() {
         when(tradeRepository.findAverageSaleAmount(any(), any(), any())).thenReturn(Optional.empty());
+        when(tradeRepository.findAveragePricePerPyeongForSale(any(), any(), any())).thenReturn(Optional.empty());
+        when(tradeRepository.countSaleTrades(any(), any(), any())).thenReturn(0L);
 
         RegionStats stats = calculator.calculate("1168010100");
 
         assertThat(stats.avgPrice()).isNull();
         assertThat(stats.changeRate()).isNull();
+        assertThat(stats.pricePerPyeong()).isNull();
+        assertThat(stats.newTradeCount()).isEqualTo(0L);
     }
 
     @Test
@@ -65,10 +74,14 @@ class RegionStatsCalculatorTest {
                 .thenReturn(Optional.of(50_000.0));
         when(tradeRepository.findAverageSaleAmount(eq("1168010100"), eq(now.minusMonths(2)), eq(now.minusMonths(1))))
                 .thenReturn(Optional.empty());
+        when(tradeRepository.findAveragePricePerPyeongForSale(any(), any(), any())).thenReturn(Optional.of(1_500.0));
+        when(tradeRepository.countSaleTrades(any(), any(), any())).thenReturn(1L);
 
         RegionStats stats = calculator.calculate("1168010100");
 
         assertThat(stats.avgPrice()).isEqualByComparingTo(new BigDecimal("50000"));
         assertThat(stats.changeRate()).isNull();
+        assertThat(stats.pricePerPyeong()).isEqualByComparingTo(new BigDecimal("1500"));
+        assertThat(stats.newTradeCount()).isEqualTo(1L);
     }
 }

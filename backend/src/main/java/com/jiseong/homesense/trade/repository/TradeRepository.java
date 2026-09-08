@@ -51,4 +51,54 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
             """)
     Optional<Double> findAverageSaleAmount(@Param("legalDongCd") String legalDongCd,
             @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * SVC-FAV-01.getFavoriteRegions() — MY-02가 요구하는 "3.3㎡당 평균가"(전용면적 정규화, CLAUDE.md
+     * SVC-RGN-01 절의 "완결 필요" 항목). 거래 1건마다 평당가(dealAmount / (excluUseArea / 3.3058))로
+     * 정규화한 뒤 그 값들을 단순 평균한다 — 합계/합계(면적 가중 평균) 방식이 아니라 거래 단위 평균을
+     * 택했다: 특정 평형 거래 몇 건이 합계 방식에서 과대 대표되는 것을 피하고, 국내 부동산 서비스의
+     * "평당가 평균" 표현이 통상 거래 단위 평균을 가리키는 관행과도 맞는다(지성 확인 필요). 모집단
+     * 정의(매매·미취소·기간 내)는 findAverageSaleAmount()와 동일하다.
+     */
+    @Query("""
+            SELECT AVG(t.dealAmount / (t.excluUseArea / 3.3058))
+            FROM Trade t
+            WHERE t.legalDistrictCode.legalDongCd = :legalDongCd
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            """)
+    Optional<Double> findAveragePricePerPyeongForSale(@Param("legalDongCd") String legalDongCd,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * SVC-FAV-01.getFavoriteRegions() — MY-02가 요구하는 "신규거래 건수". findAverageSaleAmount()와
+     * 같은 모집단(매매·미취소·기간 내)의 건수를 센다.
+     */
+    @Query("""
+            SELECT COUNT(t)
+            FROM Trade t
+            WHERE t.legalDistrictCode.legalDongCd = :legalDongCd
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            """)
+    long countSaleTrades(@Param("legalDongCd") String legalDongCd,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * SVC-FAV-01.getFavoriteProperties() — 관심 매물의 "전월 대비 변동률"을 단지 단위로 계산한다.
+     * findAverageSaleAmount()와 같은 모집단 정의(매매·미취소·기간 내)를 legal_dong_cd 대신
+     * complex_id로 좁힌 버전이다.
+     */
+    @Query("""
+            SELECT AVG(t.dealAmount)
+            FROM Trade t
+            WHERE t.complex.complexId = :complexId
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            """)
+    Optional<Double> findAverageSaleAmountByComplex(@Param("complexId") Long complexId,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
 }

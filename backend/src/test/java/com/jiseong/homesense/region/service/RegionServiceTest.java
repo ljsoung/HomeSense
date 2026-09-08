@@ -97,7 +97,7 @@ class RegionServiceTest {
         FavoriteRegion favorite = FavoriteRegion.register(user, code);
         when(favoriteRegionRepository.findByUser_UserId(1L)).thenReturn(List.of(favorite));
         when(regionStatsCalculator.calculate("1168010100"))
-                .thenReturn(new RegionStats(new BigDecimal("110000"), new BigDecimal("10.00")));
+                .thenReturn(new RegionStats(new BigDecimal("110000"), new BigDecimal("10.00"), new BigDecimal("3000"), 2L));
 
         List<InterestRegionSummaryResponse> result = regionService.getInterestSummary(1L);
 

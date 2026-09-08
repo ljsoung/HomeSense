@@ -16,4 +16,7 @@ public interface NotificationSettingRepository extends JpaRepository<Notificatio
 
     Optional<NotificationSetting> findByUser_UserIdAndFavoriteRegion_FavoriteRegionId(
             Long userId, Long favoriteRegionId);
+
+    /** SVC-FAV-01.getFavoriteProperties() — MY-02 카드의 "알림조건 배지" 표시 여부. */
+    boolean existsByUser_UserIdAndFavoriteProperty_FavoritePropertyId(Long userId, Long favoritePropertyId);
 }

@@ -3,9 +3,9 @@ package com.jiseong.homesense.complex.service;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 
+import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.entity.Complex;
-import com.jiseong.homesense.complex.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 
 import lombok.RequiredArgsConstructor;
