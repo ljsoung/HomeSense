@@ -34,13 +34,14 @@ public class RegionStatsCalculator {
 
     public RegionStats calculate(String legalDongCd) {
         LocalDate now = LocalDate.now(KST);
+        LocalDate to = now.plusDays(1);
         LocalDate currentFrom = now.minusMonths(WINDOW_MONTHS);
         LocalDate previousFrom = now.minusMonths((long) WINDOW_MONTHS * 2);
 
-        BigDecimal currentAvg = averageSaleAmount(legalDongCd, currentFrom, now);
+        BigDecimal currentAvg = averageSaleAmount(legalDongCd, currentFrom, to);
         BigDecimal previousAvg = averageSaleAmount(legalDongCd, previousFrom, currentFrom);
-        BigDecimal pricePerPyeong = averagePricePerPyeong(legalDongCd, currentFrom, now);
-        long newTradeCount = tradeRepository.countSaleTrades(legalDongCd, currentFrom, now);
+        BigDecimal pricePerPyeong = averagePricePerPyeong(legalDongCd, currentFrom, to);
+        long newTradeCount = tradeRepository.countSaleTrades(legalDongCd, currentFrom, to);
 
         return new RegionStats(currentAvg, changeRate(currentAvg, previousAvg), pricePerPyeong, newTradeCount);
     }

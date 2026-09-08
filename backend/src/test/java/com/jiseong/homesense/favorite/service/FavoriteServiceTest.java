@@ -303,24 +303,41 @@ class FavoriteServiceTest {
 
         assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("1168010100")))
                 .isInstanceOf(DuplicateFavoriteRegionException.class);
-        verify(legalDistrictCodeRepository, never()).findById(any());
+        verify(legalDistrictCodeRepository, never())
+                .findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull(any());
     }
 
     @Test
     void addFavoriteRegion_존재하지_않는_법정동코드면_RegionNotFoundException을_던진다() {
         when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "9999999999"))
                 .thenReturn(false);
-        when(legalDistrictCodeRepository.findById("9999999999")).thenReturn(Optional.empty());
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("9999999999"))
+                .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("9999999999")))
                 .isInstanceOf(RegionNotFoundException.class);
     }
 
     @Test
+    void addFavoriteRegion_비활성이거나_대표행인_법정동코드면_RegionNotFoundException을_던진다() {
+        when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "1168000000"))
+                .thenReturn(false);
+        // isActive=false이거나 eupmyeondongName=null(시도/시군구 대표행)인 코드는 이 파생 쿼리가 아예
+        // 후보에서 제외한다 — findById()라면 통과시켰을 케이스다.
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("1168000000"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("1168000000")))
+                .isInstanceOf(RegionNotFoundException.class);
+        verify(favoriteRegionRepository, never()).save(any());
+    }
+
+    @Test
     void addFavoriteRegion_성공하면_저장하고_응답을_반환한다() {
         when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "1168010100"))
                 .thenReturn(false);
-        when(legalDistrictCodeRepository.findById("1168010100")).thenReturn(Optional.of(region("1168010100")));
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("1168010100"))
+                .thenReturn(Optional.of(region("1168010100")));
         when(userRepository.getReferenceById(1L)).thenReturn(User.builder().build());
 
         FavoriteRegionResponse response = favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("1168010100"));
@@ -334,7 +351,8 @@ class FavoriteServiceTest {
     void addFavoriteRegion_save시점에_UNIQUE_위반이_발생하면_DuplicateFavoriteRegionException으로_변환한다() {
         when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "1168010100"))
                 .thenReturn(false);
-        when(legalDistrictCodeRepository.findById("1168010100")).thenReturn(Optional.of(region("1168010100")));
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("1168010100"))
+                .thenReturn(Optional.of(region("1168010100")));
         when(userRepository.getReferenceById(1L)).thenReturn(User.builder().build());
         when(favoriteRegionRepository.save(any())).thenThrow(new DataIntegrityViolationException("dup"));
 

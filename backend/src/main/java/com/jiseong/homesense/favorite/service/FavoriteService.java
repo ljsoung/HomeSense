@@ -134,7 +134,11 @@ public class FavoriteService {
             throw new DuplicateFavoriteRegionException();
         }
 
-        LegalDistrictCode region = legalDistrictCodeRepository.findById(cmd.legalDongCd())
+        // findById()가 아니라 이 predicate를 쓴다 — 비활성 코드나 시도/시군구 대표행(계층 상위 행,
+        // eupmyeondongName=null)은 어떤 거래에도 매칭되지 않아 통계가 항상 빈 관심 지역이 등록되는
+        // 문제를 막는다(searchByNameContaining()이 자동완성에서 거는 조건과 동일, Codex 코드리뷰 P2).
+        LegalDistrictCode region = legalDistrictCodeRepository
+                .findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull(cmd.legalDongCd())
                 .orElseThrow(RegionNotFoundException::new);
 
         User user = userRepository.getReferenceById(userId);
@@ -172,10 +176,11 @@ public class FavoriteService {
     /** RegionStatsCalculator.calculate()와 같은 창·모집단(매매·미취소·최근 1개월 vs 그 이전 1개월)을 complex_id 기준으로 계산한다. */
     private BigDecimal calculatePropertyChangeRate(Long complexId) {
         LocalDate now = LocalDate.now(KST);
+        LocalDate to = now.plusDays(1);
         LocalDate currentFrom = now.minusMonths(WINDOW_MONTHS);
         LocalDate previousFrom = now.minusMonths((long) WINDOW_MONTHS * 2);
 
-        BigDecimal currentAvg = averageSaleAmount(complexId, currentFrom, now);
+        BigDecimal currentAvg = averageSaleAmount(complexId, currentFrom, to);
         BigDecimal previousAvg = averageSaleAmount(complexId, previousFrom, currentFrom);
         return changeRate(currentAvg, previousAvg);
     }
