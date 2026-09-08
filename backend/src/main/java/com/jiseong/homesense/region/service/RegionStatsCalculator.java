@@ -3,6 +3,7 @@ package com.jiseong.homesense.region.service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 import org.springframework.stereotype.Component;
 
@@ -22,11 +23,12 @@ import lombok.RequiredArgsConstructor;
 public class RegionStatsCalculator {
 
     private static final int WINDOW_MONTHS = 1;
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final TradeRepository tradeRepository;
 
     public RegionStats calculate(String legalDongCd) {
-        LocalDate now = LocalDate.now();
+        LocalDate now = LocalDate.now(KST);
         LocalDate currentFrom = now.minusMonths(WINDOW_MONTHS);
         LocalDate previousFrom = now.minusMonths((long) WINDOW_MONTHS * 2);
 

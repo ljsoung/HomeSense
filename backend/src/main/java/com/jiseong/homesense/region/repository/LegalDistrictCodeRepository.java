@@ -20,10 +20,18 @@ public interface LegalDistrictCodeRepository extends JpaRepository<LegalDistrict
     /**
      * SVC-RGN-01.autocomplete() — 시도/시군구/읍면동명 부분일치 검색(idx_legal_district_region_name).
      * query 2자 미만 차단은 Service 쪽 책임이라 여기서는 검사하지 않는다.
+     *
+     * <p>{@code eupmyeondongName IS NOT NULL}로 시도/시군구 대표행(계층 상위 행, LegalDistrictCodeLoader가
+     * 그 행들의 eupmyeondongName을 null로 채운다)을 제외하고 선택 가능한 읍면동(leaf) 행만 반환한다 —
+     * LegalDistrictMatcher.matchByTradeSggCd()는 eupmyeondongName이 umdNm과 일치하는 행에만 거래를
+     * 매칭시키므로, 대표행의 legal_dong_cd는 애초에 어떤 거래에도 연결될 수 없다. 이 필터 없이는 "강남구"
+     * 같은 검색어가 그 구의 대표행(예: 1168000000)을 후보로 내놓고, 그 코드를 실거래 검색이나
+     * getInterestSummary()에 넘기면 항상 0건이 되는 막다른 결과를 낳는다(Codex 코드리뷰 P1).
      */
     @Query("""
             SELECT c FROM LegalDistrictCode c
             WHERE c.isActive = true
+              AND c.eupmyeondongName IS NOT NULL
               AND (c.sidoName LIKE CONCAT('%', :query, '%')
                 OR c.sigunguName LIKE CONCAT('%', :query, '%')
                 OR c.eupmyeondongName LIKE CONCAT('%', :query, '%'))
