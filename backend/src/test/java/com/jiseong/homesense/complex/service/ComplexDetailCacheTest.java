@@ -13,9 +13,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.entity.Complex;
-import com.jiseong.homesense.complex.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 
 @ExtendWith(MockitoExtension.class)

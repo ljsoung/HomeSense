@@ -1,6 +1,7 @@
 package com.jiseong.homesense.region.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -16,6 +17,15 @@ public interface LegalDistrictCodeRepository extends JpaRepository<LegalDistrict
             String sidoName, String sigunguName, String eupmyeondongName);
 
     List<LegalDistrictCode> findByLegalDongCdStartingWithAndIsActiveTrue(String legalDongCdPrefix);
+
+    /**
+     * SVC-FAV-01.addFavoriteRegion() 전용 — 등록 가능한(선택 가능한) 행만 허용한다.
+     * findById()만으로는 비활성 코드나 시도/시군구 대표행(eupmyeondongName=null, 계층 상위 행)까지
+     * 그대로 통과시켜, 어떤 거래에도 매칭되지 않아 통계가 항상 빈 관심 지역이 등록될 수 있다 —
+     * searchByNameContaining()이 자동완성에서 거는 것과 같은 조건(isActive=true AND
+     * eupmyeondongName IS NOT NULL)을 여기서도 동일하게 강제한다(Codex 코드리뷰 P2).
+     */
+    Optional<LegalDistrictCode> findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull(String legalDongCd);
 
     /**
      * SVC-RGN-01.autocomplete() — 시도/시군구/읍면동명 부분일치 검색(idx_legal_district_region_name).
