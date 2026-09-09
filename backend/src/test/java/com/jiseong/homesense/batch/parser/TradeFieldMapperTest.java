@@ -183,4 +183,12 @@ class TradeFieldMapperTest {
         assertThatThrownBy(() -> mapper.mapToUnifiedModel(item, HousingType.VILLA, DealCategory.SALE, "15126467"))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    @Test
+    void supports는_아파트_매매만_true를_반환한다() {
+        assertThat(mapper.supports(HousingType.APT, DealCategory.SALE)).isTrue();
+        assertThat(mapper.supports(HousingType.APT, DealCategory.RENT)).isFalse();
+        assertThat(mapper.supports(HousingType.VILLA, DealCategory.SALE)).isFalse();
+        assertThat(mapper.supports(HousingType.VILLA, DealCategory.RENT)).isFalse();
+    }
 }

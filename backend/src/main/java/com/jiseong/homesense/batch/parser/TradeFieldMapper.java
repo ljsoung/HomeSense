@@ -31,9 +31,19 @@ public class TradeFieldMapper {
      */
     private static final DateTimeFormatter LEGACY_DATE_FORMAT = DateTimeFormatter.ofPattern("yy.MM.dd");
 
+    /**
+     * BAT-LOD-01 파이프라인(TradeIngestionPipeline)이 mapToUnifiedModel() 호출 전에 확인하는 게이트 —
+     * 여기서 false가 나오는 조합은 수집(BAT-CLC-01)·batch_log 기록은 그대로 하되 파싱 이후 단계는
+     * 건너뛴다. 연립다세대·전월세 필드 매핑이 추가되면 이 한 줄만 넓히면 되고, 파이프라인/오케스트레이터
+     * 쪽은 코드 변경이 필요 없다.
+     */
+    public boolean supports(HousingType housingType, DealCategory dealCategory) {
+        return housingType == HousingType.APT && dealCategory == DealCategory.SALE;
+    }
+
     public TradeDraft mapToUnifiedModel(
             RawTradeItem item, HousingType housingType, DealCategory dealCategory, String datasetId) {
-        if (housingType != HousingType.APT || dealCategory != DealCategory.SALE) {
+        if (!supports(housingType, dealCategory)) {
             throw new UnsupportedOperationException(
                     "현재는 아파트 매매(APT/SALE) 필드 매핑만 확정됐다 — 연립다세대·전월세는 실제 필드명이"
                             + " 기술문서로 재검증되지 않아 아직 구현하지 않았다 (요구사항정의서 4.2절 각주)");

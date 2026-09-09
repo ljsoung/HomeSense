@@ -47,4 +47,16 @@ public record TradeDraft(
         String legalDongCd,
         MatchMethod matchMethod,
         BigDecimal matchConfidence) {
+
+    /**
+     * BAT-MAT-01/02 매칭 결과 4개 필드만 채운 새 레코드를 만든다. {@code MatchResult}/{@code
+     * LegalDistrictCode} 타입을 직접 받지 않고 스칼라 값만 받아, 이 dto가 batch.matcher 패키지에
+     * 의존하지 않도록 유지한다.
+     */
+    public TradeDraft withMatch(String legalDongCd, Long complexId, MatchMethod matchMethod, BigDecimal matchConfidence) {
+        return new TradeDraft(housingType, dealCategory, rentType, datasetId, sggCd, umdNm, buildingName, jibun,
+                excluUseArea, floor, buildYear, dealDate, dealAmount, depositAmount, monthlyRentAmount, aptDong,
+                dealingType, agentSggNm, registrationDate, sellerType, buyerType, landLeaseYn, cancelYn, cancelDate,
+                complexId, legalDongCd, matchMethod, matchConfidence);
+    }
 }

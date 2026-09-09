@@ -22,8 +22,13 @@ public class LegalDistrictMatcher {
     /**
      * sggCdFromApi(5자리)를 앞자리로 갖는 활성 법정동코드 후보 중 읍면동명이 umdNm과 일치하는 행을 찾는다.
      * 후보가 여러 건이어도 읍면동명이 유일하면 정밀 매핑되고, 일치하는 행이 없으면 매칭 실패로 본다.
+     *
+     * <p>엔티티를 그대로 반환한다(코드 문자열로 축소하지 않음) — 호출자인 TradeIngestionPipeline이
+     * 곧바로 {@code ComplexMasterMatcher.matchComplex(TradeDraft, LegalDistrictCode)}에 이 결과를
+     * 넘기는데, 그 두 번째 인자가 이미 엔티티 타입이라 문자열로 한 번 축소했다가 다시 엔티티로 조회하는
+     * 왕복 쿼리를 만들 이유가 없다.
      */
-    public Optional<String> matchByTradeSggCd(String sggCdFromApi, String umdNm) {
+    public Optional<LegalDistrictCode> matchByTradeSggCd(String sggCdFromApi, String umdNm) {
         List<LegalDistrictCode> candidates =
                 legalDistrictCodeRepository.findByLegalDongCdStartingWithAndIsActiveTrue(sggCdFromApi);
 
@@ -34,7 +39,6 @@ public class LegalDistrictMatcher {
 
         return candidates.stream()
                 .filter(candidate -> targetEupmyeondong.equals(candidate.getEupmyeondongName()))
-                .map(LegalDistrictCode::getLegalDongCd)
                 .findFirst();
     }
 }
