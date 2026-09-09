@@ -122,6 +122,16 @@ class NotificationControllerTest {
     }
 
     @Test
+    void 알림설정_수정시_임계치가_소수_둘째자리를_가지면_400을_반환한다() throws Exception {
+        mockMvc.perform(put("/api/notifications/settings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"favoritePropertyId\":100,\"priceChangeThresholdPct\":0.04,"
+                                + "\"newTradeAlertYn\":true,\"emailAlertYn\":false}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     void 알림이력_조회는_type_파라미터를_그대로_전달한다() throws Exception {
         when(notificationService.getNotifications(eq(1L), eq(NotificationType.NEW_TRADE), any()))
                 .thenReturn(new PageImpl<>(List.of(new NotificationResponse(
