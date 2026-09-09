@@ -17,8 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -39,19 +37,21 @@ import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
 
 /**
- * NotificationServiceTest의 "INSERT시점에_UNIQUE_위반이_발생하면..." 테스트는 {@code
- * NotificationSettingInsertGateway.insert()}가 DataIntegrityViolationException을 던지도록 목킹한
- * 순수 단위 테스트라 "NotificationService의 catch 블록이 재조회 후 갱신을 시도한다"만 증명하고,
- * 그 재조회·갱신이 실제 MariaDB 위에서 (rollback-only로 표시되지 않은) 유효한 트랜잭션 안에서
- * 정말로 커밋되는지는 증명하지 못한다 — FavoriteServiceMariaDbIT/TradeChunkLoaderMariaDbIT와 같은
- * 이유(CLAUDE.md "UNIQUE 제약 동시성 회귀 테스트 원칙" 참고)로, 실제 MariaDB(Testcontainers) 위에서
- * NotificationService.updateSettings()가 실제로 쓰는 @Transactional 경계 안에서, 두 스레드가 실제로
- * 같은 대상을 두고 경쟁하게 만들어 검증한다.
+ * NotificationService.updateSettings()의 최초 구현은 "조회 → 있으면 UPDATE, 없으면 INSERT"를
+ * 애플리케이션에서 분기하고, 동시 INSERT 경쟁으로 인한 UNIQUE 위반은 별도 REQUIRES_NEW 트랜잭션으로
+ * 격리해 처리했다. Mockito 단위 테스트는 "그 catch 블록이 재조회 후 갱신을 시도한다"까지만 증명했는데,
+ * 실제로는 REQUIRES_NEW로 그 INSERT 실패가 바깥 트랜잭션을 rollback-only로 만드는 문제를 피하더라도,
+ * MariaDB 기본 격리수준(REPEATABLE READ)에서는 그 실패 이후 같은(바깥) 트랜잭션에서의 재조회가 이미
+ * 확립된 스냅샷에 묶여 경쟁에서 이긴 다른 트랜잭션의 커밋을 여전히 보지 못했다 — 재조회가 다시 empty를
+ * 반환해 재시도가 실패하고 예외가 그대로 전파됐다(Codex 코드리뷰 P1 지적). 이 클래스는 원래 그 순서를
+ * 두 스레드로 강제 재현해 버그를 드러내려 했던 테스트였다.
  *
- * <p>FAV의 addFavorite*()와 달리 이 API는 "등록 거부"가 아니라 "upsert"라, 경쟁에서 진 쪽도 예외 없이
- * 정상 반환되어야 하고 최종 저장된 값은 진 쪽이 요청한 조건이어야 한다 — 이 클래스는 그 두 조건을
- * 모두 검증한다. 각 테스트가 서로 다른 user/favoriteProperty/favoriteRegion 값을 써서 독립적이므로
- * 클래스 레벨 @Transactional이 필요 없다(동시성 IT는 그 원칙의 예외 대상, CLAUDE.md 참고).
+ * <p>수정 후 구현은 그 조회·재시도 자체를 없애고 {@link NotificationSettingRepository#upsert}(네이티브
+ * {@code INSERT ... ON DUPLICATE KEY UPDATE}) 단일 원자적 문장으로 바꿨다 — 이 방식은 스냅샷 격리
+ * 수준과 무관하게 DB가 직접 처리하므로, 특정 커밋 순서를 인위적으로 강제할 필요 없이 "두 요청이 그냥
+ * 동시에 들어와도 항상 안전한가"만 확인하면 충분하다. 그래서 이 테스트는 (수정 전과 달리) 트랜잭션을
+ * 수동으로 붙잡아 순서를 강제하지 않고, 두 스레드가 동시에 실제 프로덕션 경로(updateSettings())를
+ * 호출하게 한 뒤 (1) 둘 다 예외 없이 반환되는지, (2) 최종적으로 정확히 한 행만 남는지만 검증한다.
  *
  * <p>Docker가 필요해 기본 `./gradlew test`에서는 제외되고 `./gradlew integrationTest`로만 실행된다.
  * 이 리포지토리 환경에서 Docker 데몬을 쓸 수 없어 작성 시점에 실제 실행까지는 확인하지 못했다 —
@@ -93,8 +93,6 @@ class NotificationServiceMariaDbIT {
     private ComplexRepository complexRepository;
     @Autowired
     private LegalDistrictCodeRepository legalDistrictCodeRepository;
-    @Autowired
-    private PlatformTransactionManager transactionManager;
 
     private static Complex complex(String sourceComplexCd) {
         return Complex.builder()
@@ -130,48 +128,30 @@ class NotificationServiceMariaDbIT {
         Long userId = user.getUserId();
         Long favoritePropertyId = favorite.getFavoritePropertyId();
 
-        CountDownLatch insertedLatch = new CountDownLatch(1);
-        CountDownLatch releaseLatch = new CountDownLatch(1);
-        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        UpdateNotificationSettingsCommand cmdA =
+                new UpdateNotificationSettingsCommand(favoritePropertyId, null, new BigDecimal("3.0"), false, false);
+        UpdateNotificationSettingsCommand cmdB =
+                new UpdateNotificationSettingsCommand(favoritePropertyId, null, new BigDecimal("7.5"), true, true);
 
+        CountDownLatch startLatch = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            // Thread A: 다른 동시 updateSettings() 호출이 먼저 INSERT를 끝낸 상황을 재현한다 —
-            // INSERT까지만 실행하고 releaseLatch가 열릴 때까지 커밋하지 않고 트랜잭션을 붙잡아 둔다.
-            Future<?> holderFuture = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-                assertThat(notificationSettingRepository
-                        .findByUser_UserIdAndFavoriteProperty_FavoritePropertyId(userId, favoritePropertyId))
-                        .isEmpty();
-                User userRef = userRepository.getReferenceById(userId);
-                FavoriteProperty favoriteRef = favoritePropertyRepository.getReferenceById(favoritePropertyId);
-                notificationSettingRepository.saveAndFlush(NotificationSetting.forProperty(
-                        userRef, favoriteRef, new BigDecimal("3.0"), false, false));
-                insertedLatch.countDown();
-                awaitUninterruptibly(releaseLatch);
-            }));
+            Future<?> futureA = executor.submit(() -> {
+                awaitUninterruptibly(startLatch);
+                notificationService.updateSettings(userId, cmdA);
+            });
+            Future<?> futureB = executor.submit(() -> {
+                awaitUninterruptibly(startLatch);
+                notificationService.updateSettings(userId, cmdB);
+            });
+            startLatch.countDown();
 
-            // A가 INSERT까지는 마쳤지만 아직 커밋 전이라는 걸 확인한 뒤, 같은 대상으로 실제 프로덕션
-            // 경로(NotificationService.updateSettings())를 호출한다. B의 findByXxx()는 A의 미확정
-            // INSERT를 보지 못해 empty를 받고, NotificationSettingInsertGateway.insert()를 시도하다
-            // A가 쥔 미확정 UNIQUE 인덱스 항목에 걸려 블록된다.
-            assertThat(insertedLatch.await(10, TimeUnit.SECONDS)).isTrue();
-            UpdateNotificationSettingsCommand loserCmd =
-                    new UpdateNotificationSettingsCommand(favoritePropertyId, null, new BigDecimal("7.5"), true, true);
-            Future<?> loserFuture = executor.submit(() -> notificationService.updateSettings(userId, loserCmd));
-
-            // B가 findByXxx()를 지나 블로킹 INSERT에 도달할 시간을 준 뒤 A를 풀어 커밋시킨다 — A가
-            // 커밋되는 순간 B의 블록된 INSERT가 재개되며 실제 UNIQUE 위반으로 실패하고,
-            // NotificationSettingInsertGateway가 REQUIRES_NEW로 격리해 둔 덕에 updateSettings()의
-            // 트랜잭션은 오염되지 않아 catch 블록의 재조회·갱신이 그대로 커밋된다.
-            Thread.sleep(500);
-            releaseLatch.countDown();
-            holderFuture.get(10, TimeUnit.SECONDS);
-            loserFuture.get(10, TimeUnit.SECONDS);
+            // 둘 다 예외 없이 반환돼야 한다 — get()이 ExecutionException을 던지면 그 자체가 실패다.
+            futureA.get(10, TimeUnit.SECONDS);
+            futureB.get(10, TimeUnit.SECONDS);
 
             List<NotificationSetting> rows = notificationSettingRepository.findByUser_UserId(userId);
             assertThat(rows).hasSize(1);
-            assertThat(rows.get(0).getPriceChangeThresholdPct()).isEqualByComparingTo("7.5");
-            assertThat(rows.get(0).isNewTradeAlertYn()).isTrue();
         } finally {
             executor.shutdownNow();
         }
@@ -186,38 +166,29 @@ class NotificationServiceMariaDbIT {
         Long userId = user.getUserId();
         Long favoriteRegionId = favorite.getFavoriteRegionId();
 
-        CountDownLatch insertedLatch = new CountDownLatch(1);
-        CountDownLatch releaseLatch = new CountDownLatch(1);
-        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        UpdateNotificationSettingsCommand cmdA =
+                new UpdateNotificationSettingsCommand(null, favoriteRegionId, new BigDecimal("3.0"), false, false);
+        UpdateNotificationSettingsCommand cmdB =
+                new UpdateNotificationSettingsCommand(null, favoriteRegionId, new BigDecimal("7.5"), true, true);
 
+        CountDownLatch startLatch = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> holderFuture = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-                assertThat(notificationSettingRepository
-                        .findByUser_UserIdAndFavoriteRegion_FavoriteRegionId(userId, favoriteRegionId))
-                        .isEmpty();
-                User userRef = userRepository.getReferenceById(userId);
-                FavoriteRegion favoriteRef = favoriteRegionRepository.getReferenceById(favoriteRegionId);
-                notificationSettingRepository.saveAndFlush(NotificationSetting.forRegion(
-                        userRef, favoriteRef, new BigDecimal("3.0"), false, false));
-                insertedLatch.countDown();
-                awaitUninterruptibly(releaseLatch);
-            }));
+            Future<?> futureA = executor.submit(() -> {
+                awaitUninterruptibly(startLatch);
+                notificationService.updateSettings(userId, cmdA);
+            });
+            Future<?> futureB = executor.submit(() -> {
+                awaitUninterruptibly(startLatch);
+                notificationService.updateSettings(userId, cmdB);
+            });
+            startLatch.countDown();
 
-            assertThat(insertedLatch.await(10, TimeUnit.SECONDS)).isTrue();
-            UpdateNotificationSettingsCommand loserCmd =
-                    new UpdateNotificationSettingsCommand(null, favoriteRegionId, new BigDecimal("7.5"), true, true);
-            Future<?> loserFuture = executor.submit(() -> notificationService.updateSettings(userId, loserCmd));
-
-            Thread.sleep(500);
-            releaseLatch.countDown();
-            holderFuture.get(10, TimeUnit.SECONDS);
-            loserFuture.get(10, TimeUnit.SECONDS);
+            futureA.get(10, TimeUnit.SECONDS);
+            futureB.get(10, TimeUnit.SECONDS);
 
             List<NotificationSetting> rows = notificationSettingRepository.findByUser_UserId(userId);
             assertThat(rows).hasSize(1);
-            assertThat(rows.get(0).getPriceChangeThresholdPct()).isEqualByComparingTo("7.5");
-            assertThat(rows.get(0).isNewTradeAlertYn()).isTrue();
         } finally {
             executor.shutdownNow();
         }

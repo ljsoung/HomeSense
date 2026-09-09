@@ -3,7 +3,8 @@ package com.jiseong.homesense.notification.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,9 +18,9 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -43,7 +44,6 @@ import com.jiseong.homesense.notification.exception.NotificationNotFoundExceptio
 import com.jiseong.homesense.notification.repository.NotificationRepository;
 import com.jiseong.homesense.notification.repository.NotificationSettingRepository;
 import com.jiseong.homesense.user.entity.User;
-import com.jiseong.homesense.user.repository.UserRepository;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
@@ -56,17 +56,13 @@ class NotificationServiceTest {
     private FavoritePropertyRepository favoritePropertyRepository;
     @Mock
     private FavoriteRegionRepository favoriteRegionRepository;
-    @Mock
-    private UserRepository userRepository;
-    @Mock
-    private NotificationSettingInsertGateway notificationSettingInsertGateway;
 
     private NotificationService notificationService;
 
     @BeforeEach
     void setUp() {
         notificationService = new NotificationService(notificationSettingRepository, notificationRepository,
-                favoritePropertyRepository, favoriteRegionRepository, userRepository, notificationSettingInsertGateway);
+                favoritePropertyRepository, favoriteRegionRepository);
     }
 
     // ---- updateSettings: 대상 검증 ----
@@ -78,7 +74,8 @@ class NotificationServiceTest {
 
         assertThatThrownBy(() -> notificationService.updateSettings(1L, cmd))
                 .isInstanceOf(InvalidNotificationTargetException.class);
-        verify(notificationSettingInsertGateway, never()).insert(any());
+        verify(notificationSettingRepository, never())
+                .upsert(any(), any(), any(), any(), anyBoolean(), anyBoolean(), any());
     }
 
     @Test
@@ -88,7 +85,8 @@ class NotificationServiceTest {
 
         assertThatThrownBy(() -> notificationService.updateSettings(1L, cmd))
                 .isInstanceOf(MissingTargetException.class);
-        verify(notificationSettingInsertGateway, never()).insert(any());
+        verify(notificationSettingRepository, never())
+                .upsert(any(), any(), any(), any(), anyBoolean(), anyBoolean(), any());
     }
 
     @Test
@@ -114,7 +112,8 @@ class NotificationServiceTest {
 
         assertThatThrownBy(() -> notificationService.updateSettings(1L, cmd))
                 .isInstanceOf(AccessDeniedException.class);
-        verify(notificationSettingInsertGateway, never()).insert(any());
+        verify(notificationSettingRepository, never())
+                .upsert(any(), any(), any(), any(), anyBoolean(), anyBoolean(), any());
     }
 
     @Test
@@ -140,83 +139,59 @@ class NotificationServiceTest {
 
         assertThatThrownBy(() -> notificationService.updateSettings(1L, cmd))
                 .isInstanceOf(AccessDeniedException.class);
-        verify(notificationSettingInsertGateway, never()).insert(any());
+        verify(notificationSettingRepository, never())
+                .upsert(any(), any(), any(), any(), anyBoolean(), anyBoolean(), any());
     }
 
     // ---- updateSettings: upsert ----
 
+    /**
+     * "조회 → 있으면 UPDATE, 없으면 INSERT"를 애플리케이션에서 분기하지 않는다 — 존재 여부와 무관하게
+     * 항상 {@link NotificationSettingRepository#upsert} 하나(네이티브 {@code INSERT ... ON DUPLICATE
+     * KEY UPDATE})만 호출한다. 최초 구현은 존재 여부를 먼저 조회해 분기했었는데, 그 재조회가 MariaDB
+     * 기본 격리수준(REPEATABLE READ)의 트랜잭션 스냅샷에 묶여 경쟁에서 이긴 다른 트랜잭션의 커밋을
+     * 보지 못하는 문제가 있었다(Codex 코드리뷰 P1 지적, CLAUDE.md SVC-NTF-01 절 참고) — 원자적 upsert로
+     * 바꿔 이 문제 자체를 제거했다. 그 SQL 문장이 실제로 INSERT/UPDATE 둘 다 올바르게 처리하는지는
+     * Mockito로 증명할 수 없어 `NotificationServiceMariaDbIT`(Testcontainers)로 별도 검증한다.
+     */
     @Test
-    void updateSettings_기존설정이_없으면_새로_저장한다() {
+    void updateSettings_관심매물_대상이면_userId와_favoritePropertyId로_upsert를_호출한다() {
         User owner = mock(User.class);
         when(owner.getUserId()).thenReturn(1L);
         FavoriteProperty property = mock(FavoriteProperty.class);
-        when(property.getFavoritePropertyId()).thenReturn(100L);
         when(property.getUser()).thenReturn(owner);
         when(favoritePropertyRepository.findById(100L)).thenReturn(Optional.of(property));
-        when(notificationSettingRepository.findByUser_UserIdAndFavoriteProperty_FavoritePropertyId(1L, 100L))
-                .thenReturn(Optional.empty());
-        when(userRepository.getReferenceById(1L)).thenReturn(owner);
 
         UpdateNotificationSettingsCommand cmd =
                 new UpdateNotificationSettingsCommand(100L, null, new BigDecimal("5.0"), true, false);
         notificationService.updateSettings(1L, cmd);
 
-        verify(notificationSettingInsertGateway).insert(any(NotificationSetting.class));
+        ArgumentCaptor<Long> favoritePropertyIdCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> favoriteRegionIdCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(notificationSettingRepository).upsert(eq(1L), favoritePropertyIdCaptor.capture(),
+                favoriteRegionIdCaptor.capture(), eq(new BigDecimal("5.0")), eq(true), eq(false), any());
+        assertThat(favoritePropertyIdCaptor.getValue()).isEqualTo(100L);
+        assertThat(favoriteRegionIdCaptor.getValue()).isNull();
     }
 
     @Test
-    void updateSettings_기존설정이_있으면_갱신만_하고_새로_저장하지_않는다() {
+    void updateSettings_관심지역_대상이면_userId와_favoriteRegionId로_upsert를_호출한다() {
         User owner = mock(User.class);
         when(owner.getUserId()).thenReturn(1L);
         FavoriteRegion region = mock(FavoriteRegion.class);
-        when(region.getFavoriteRegionId()).thenReturn(200L);
         when(region.getUser()).thenReturn(owner);
         when(favoriteRegionRepository.findById(200L)).thenReturn(Optional.of(region));
-        when(userRepository.getReferenceById(1L)).thenReturn(owner);
-
-        NotificationSetting existing = NotificationSetting.forRegion(owner, region, new BigDecimal("5.0"), false, false);
-        when(notificationSettingRepository.findByUser_UserIdAndFavoriteRegion_FavoriteRegionId(1L, 200L))
-                .thenReturn(Optional.of(existing));
 
         UpdateNotificationSettingsCommand cmd =
                 new UpdateNotificationSettingsCommand(null, 200L, new BigDecimal("10.0"), true, true);
         notificationService.updateSettings(1L, cmd);
 
-        assertThat(existing.getPriceChangeThresholdPct()).isEqualByComparingTo("10.0");
-        assertThat(existing.isNewTradeAlertYn()).isTrue();
-        assertThat(existing.isEmailAlertYn()).isTrue();
-        verify(notificationSettingInsertGateway, never()).insert(any());
-    }
-
-    /**
-     * findByXxx() 조회 → INSERT 시도하는 흐름이라, 조회 이후 INSERT 이전에 다른 요청이 같은 대상으로
-     * 먼저 커밋을 끝낸 race condition을 DataIntegrityViolationException으로 재현한다 — 이 API는
-     * "등록 거부"가 아니라 "upsert"라 DuplicateXxxException으로 변환하지 않고 먼저 커밋된 값을
-     * 재조회해 요청받은 조건으로 갱신한다. INSERT 시도는 NotificationSettingInsertGateway가 REQUIRES_NEW로
-     * 격리하므로 실패해도 updateSettings()의 트랜잭션은 오염되지 않아 이 재조회가 안전하다
-     * (CLAUDE.md SVC-NTF-01 절 참고 — TradeChunkLoader.upsertOne()과 같은 이유).
-     */
-    @Test
-    void updateSettings_INSERT시점에_UNIQUE_위반이_발생하면_재조회하여_갱신한다() {
-        User owner = mock(User.class);
-        when(owner.getUserId()).thenReturn(1L);
-        FavoriteProperty property = mock(FavoriteProperty.class);
-        when(property.getFavoritePropertyId()).thenReturn(100L);
-        when(property.getUser()).thenReturn(owner);
-        when(favoritePropertyRepository.findById(100L)).thenReturn(Optional.of(property));
-        when(userRepository.getReferenceById(1L)).thenReturn(owner);
-
-        NotificationSetting winner = NotificationSetting.forProperty(owner, property, new BigDecimal("3.0"), false, false);
-        when(notificationSettingRepository.findByUser_UserIdAndFavoriteProperty_FavoritePropertyId(1L, 100L))
-                .thenReturn(Optional.empty(), Optional.of(winner));
-        doThrow(new DataIntegrityViolationException("dup")).when(notificationSettingInsertGateway).insert(any());
-
-        UpdateNotificationSettingsCommand cmd =
-                new UpdateNotificationSettingsCommand(100L, null, new BigDecimal("7.5"), true, true);
-        notificationService.updateSettings(1L, cmd);
-
-        assertThat(winner.getPriceChangeThresholdPct()).isEqualByComparingTo("7.5");
-        assertThat(winner.isNewTradeAlertYn()).isTrue();
+        ArgumentCaptor<Long> favoritePropertyIdCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> favoriteRegionIdCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(notificationSettingRepository).upsert(eq(1L), favoritePropertyIdCaptor.capture(),
+                favoriteRegionIdCaptor.capture(), eq(new BigDecimal("10.0")), eq(true), eq(true), any());
+        assertThat(favoritePropertyIdCaptor.getValue()).isNull();
+        assertThat(favoriteRegionIdCaptor.getValue()).isEqualTo(200L);
     }
 
     // ---- getSettings ----
