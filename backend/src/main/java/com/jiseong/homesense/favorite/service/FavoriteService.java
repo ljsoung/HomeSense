@@ -4,8 +4,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -31,6 +35,7 @@ import com.jiseong.homesense.favorite.exception.MissingComplexIdException;
 import com.jiseong.homesense.favorite.repository.FavoritePropertyRepository;
 import com.jiseong.homesense.favorite.repository.FavoriteRegionRepository;
 import com.jiseong.homesense.notification.repository.NotificationSettingRepository;
+import com.jiseong.homesense.region.dto.RegionStats;
 import com.jiseong.homesense.region.entity.LegalDistrictCode;
 import com.jiseong.homesense.region.exception.RegionNotFoundException;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
@@ -59,6 +64,14 @@ import lombok.RequiredArgsConstructor;
  * WHERE 절이 달라 RegionStatsCalculator를 그대로 재사용할 수 없고("도메인별 수직 패키지" 원칙,
  * SVC-TRD-01이 TradeSortCondition을 분리한 것과 같은 이유), 계산 자체는 몇 줄 되지 않아 별도
  * 컴포넌트로 추출하지 않고 이 클래스 안에 둔다.
+ *
+ * <p>getFavoriteProperties()/getFavoriteRegions() 모두 관심 항목 개수만큼 대표거래/평균가/알림설정
+ * 여부를 개별 조회하던 최초 구현이 페이지네이션도 관심 항목 상한도 없는 이 엔드포인트를 요청 1건당
+ * 수백~수천 개의 순차 DB 왕복으로 만드는 문제가 있었다(Codex 코드리뷰 P2 지적) — complex/legalDistrictCode는
+ * findByUser_UserId()의 JOIN FETCH로, 대표거래·평균가·알림설정 존재 여부는 각각 관심 항목 전체를
+ * 한 번에 묶어 집계하는 배치 쿼리(TradeRepositoryCustomImpl.findRecentTradesByComplexIds(),
+ * TradeRepository의 GROUP BY 집계 메서드들, NotificationSettingRepository.findFavoritePropertyIdsWithSetting(),
+ * RegionStatsCalculator.calculateBatch())로 바꿔 항목 수와 무관하게 고정된 쿼리 수만 낸다.
  */
 @Service
 @RequiredArgsConstructor
@@ -79,8 +92,29 @@ public class FavoriteService {
 
     @Transactional(readOnly = true)
     public List<FavoritePropertySummaryResponse> getFavoriteProperties(Long userId) {
-        return favoritePropertyRepository.findByUser_UserId(userId).stream()
-                .map(favorite -> buildPropertySummary(userId, favorite))
+        List<FavoriteProperty> favorites = favoritePropertyRepository.findByUser_UserId(userId);
+        if (favorites.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> complexIds = favorites.stream()
+                .map(favorite -> favorite.getComplex().getComplexId())
+                .distinct()
+                .toList();
+        List<Long> favoritePropertyIds = favorites.stream().map(FavoriteProperty::getFavoritePropertyId).toList();
+
+        Map<Long, Trade> recentTrades = tradeRepository.findRecentTradesByComplexIds(complexIds);
+        Map<Long, BigDecimal> changeRates = calculatePropertyChangeRates(complexIds);
+        Set<Long> propertyIdsWithSetting = new HashSet<>(
+                notificationSettingRepository.findFavoritePropertyIdsWithSetting(userId, favoritePropertyIds));
+
+        return favorites.stream()
+                .map(favorite -> {
+                    Long complexId = favorite.getComplex().getComplexId();
+                    return FavoritePropertySummaryResponse.of(favorite, recentTrades.get(complexId),
+                            changeRates.get(complexId),
+                            propertyIdsWithSetting.contains(favorite.getFavoritePropertyId()));
+                })
                 .toList();
     }
 
@@ -123,9 +157,20 @@ public class FavoriteService {
 
     @Transactional(readOnly = true)
     public List<FavoriteRegionSummaryResponse> getFavoriteRegions(Long userId) {
-        return favoriteRegionRepository.findByUser_UserId(userId).stream()
+        List<FavoriteRegion> favorites = favoriteRegionRepository.findByUser_UserId(userId);
+        if (favorites.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> legalDongCds = favorites.stream()
+                .map(favorite -> favorite.getLegalDistrictCode().getLegalDongCd())
+                .distinct()
+                .toList();
+        Map<String, RegionStats> statsByRegion = regionStatsCalculator.calculateBatch(legalDongCds);
+
+        return favorites.stream()
                 .map(favorite -> FavoriteRegionSummaryResponse.of(favorite,
-                        regionStatsCalculator.calculate(favorite.getLegalDistrictCode().getLegalDongCd())))
+                        statsByRegion.get(favorite.getLegalDistrictCode().getLegalDongCd())))
                 .toList();
     }
 
@@ -162,32 +207,35 @@ public class FavoriteService {
         favoriteRegionRepository.delete(favorite);
     }
 
-    private FavoritePropertySummaryResponse buildPropertySummary(Long userId, FavoriteProperty favorite) {
-        Long complexId = favorite.getComplex().getComplexId();
-        Trade recentTrade = tradeRepository
-                .findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(complexId)
-                .orElse(null);
-        BigDecimal changeRate = calculatePropertyChangeRate(complexId);
-        boolean hasNotificationSetting = notificationSettingRepository
-                .existsByUser_UserIdAndFavoriteProperty_FavoritePropertyId(userId, favorite.getFavoritePropertyId());
-        return FavoritePropertySummaryResponse.of(favorite, recentTrade, changeRate, hasNotificationSetting);
-    }
-
-    /** RegionStatsCalculator.calculate()와 같은 창·모집단(매매·미취소·최근 1개월 vs 그 이전 1개월)을 complex_id 기준으로 계산한다. */
-    private BigDecimal calculatePropertyChangeRate(Long complexId) {
+    /**
+     * RegionStatsCalculator.calculateBatch()와 같은 이유(N+1 제거, Codex 코드리뷰 P2 지적) — 관심
+     * 매물 개수만큼 findAverageSaleAmountByComplex()를 반복 호출하던 것을, complexIds 전체를 GROUP BY
+     * 쿼리 2회(현재·전월 구간)로만 집계하도록 바꿨다. 반환 Map은 complexIds의 모든 id를 키로 포함한다.
+     */
+    private Map<Long, BigDecimal> calculatePropertyChangeRates(List<Long> complexIds) {
         LocalDate now = LocalDate.now(KST);
         LocalDate to = now.plusDays(1);
         LocalDate currentFrom = now.minusMonths(WINDOW_MONTHS);
         LocalDate previousFrom = now.minusMonths((long) WINDOW_MONTHS * 2);
 
-        BigDecimal currentAvg = averageSaleAmount(complexId, currentFrom, to);
-        BigDecimal previousAvg = averageSaleAmount(complexId, previousFrom, currentFrom);
-        return changeRate(currentAvg, previousAvg);
+        Map<Long, BigDecimal> currentAvgMap = toAvgMap(
+                tradeRepository.findAverageSaleAmountGroupedByComplex(complexIds, currentFrom, to));
+        Map<Long, BigDecimal> previousAvgMap = toAvgMap(
+                tradeRepository.findAverageSaleAmountGroupedByComplex(complexIds, previousFrom, currentFrom));
+
+        // Collectors.toMap()은 매핑값이 null이면 내부적으로 Map.merge()를 타 NPE를 던진다
+        // (changeRate()는 평균가가 없는 단지에 대해 null을 정상 반환한다) — HashMap에 직접 put한다.
+        Map<Long, BigDecimal> changeRates = new HashMap<>();
+        for (Long id : complexIds.stream().distinct().toList()) {
+            changeRates.put(id, changeRate(currentAvgMap.get(id), previousAvgMap.get(id)));
+        }
+        return changeRates;
     }
 
-    private BigDecimal averageSaleAmount(Long complexId, LocalDate from, LocalDate to) {
-        Optional<Double> avg = tradeRepository.findAverageSaleAmountByComplex(complexId, from, to);
-        return avg.map(value -> BigDecimal.valueOf(value).setScale(0, RoundingMode.HALF_UP)).orElse(null);
+    private Map<Long, BigDecimal> toAvgMap(List<Object[]> rows) {
+        return rows.stream().collect(Collectors.toMap(
+                row -> (Long) row[0],
+                row -> BigDecimal.valueOf((Double) row[1]).setScale(0, RoundingMode.HALF_UP)));
     }
 
     private BigDecimal changeRate(BigDecimal currentAvg, BigDecimal previousAvg) {

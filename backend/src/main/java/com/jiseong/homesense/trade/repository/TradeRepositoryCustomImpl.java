@@ -1,6 +1,8 @@
 package com.jiseong.homesense.trade.repository;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -20,6 +22,7 @@ import com.jiseong.homesense.trade.entity.Trade;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.core.types.dsl.NumberPath;
+import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 
 import lombok.RequiredArgsConstructor;
@@ -89,6 +92,40 @@ class TradeRepositoryCustomImpl implements TradeRepositoryCustom {
                 .where(where)
                 .orderBy(trade.dealDate.desc(), trade.tradeId.desc())
                 .fetch();
+    }
+
+    @Override
+    public Map<Long, Trade> findRecentTradesByComplexIds(List<Long> complexIds) {
+        if (complexIds.isEmpty()) {
+            return Map.of();
+        }
+
+        QTrade subTrade = new QTrade("subTrade");
+        QTrade tieBreakTrade = new QTrade("tieBreakTrade");
+
+        // ComplexRepositoryCustomImpl.search()와 같은 2단 동률 판정(MAX(dealDate) → MAX(tradeId))을
+        // 단지별로 반복 호출하는 대신 outer Trade 행 자체에 상관 서브쿼리로 걸어, complexIds 전체의
+        // 대표 거래를 한 번의 쿼리로 뽑는다.
+        var maxDealDateSubquery = JPAExpressions
+                .select(subTrade.dealDate.max())
+                .from(subTrade)
+                .where(subTrade.complex.complexId.eq(trade.complex.complexId).and(subTrade.cancelYn.isFalse()));
+
+        var representativeTradeIdSubquery = JPAExpressions
+                .select(tieBreakTrade.tradeId.max())
+                .from(tieBreakTrade)
+                .where(tieBreakTrade.complex.complexId.eq(trade.complex.complexId)
+                        .and(tieBreakTrade.cancelYn.isFalse())
+                        .and(tieBreakTrade.dealDate.eq(maxDealDateSubquery)));
+
+        List<Trade> rows = queryFactory
+                .selectFrom(trade)
+                .where(trade.complex.complexId.in(complexIds)
+                        .and(trade.cancelYn.isFalse())
+                        .and(trade.tradeId.eq(representativeTradeIdSubquery)))
+                .fetch();
+
+        return rows.stream().collect(Collectors.toMap(t -> t.getComplex().getComplexId(), t -> t));
     }
 
     private BooleanBuilder filters(TradeSearchCondition condition) {

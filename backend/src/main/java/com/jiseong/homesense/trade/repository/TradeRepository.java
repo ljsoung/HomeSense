@@ -101,4 +101,61 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
             """)
     Optional<Double> findAverageSaleAmountByComplex(@Param("complexId") Long complexId,
             @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * SVC-FAV-01.getFavoriteProperties() 배치 버전 — findAverageSaleAmountByComplex()를 관심 매물
+     * 개수만큼 반복 호출하는 대신, 대상 complex_id 전체를 한 번의 GROUP BY 쿼리로 집계한다(N+1 제거,
+     * Codex 코드리뷰 P2 지적). 각 행은 [complexId(Long), avgDealAmount(Double)]이다 — 거래가 없는
+     * complex_id는 결과 행 자체가 없으므로 호출부에서 Map으로 모은 뒤 없는 키를 null로 취급해야 한다.
+     */
+    @Query("""
+            SELECT t.complex.complexId, AVG(t.dealAmount)
+            FROM Trade t
+            WHERE t.complex.complexId IN :complexIds
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            GROUP BY t.complex.complexId
+            """)
+    List<Object[]> findAverageSaleAmountGroupedByComplex(@Param("complexIds") List<Long> complexIds,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** SVC-FAV-01.getFavoriteRegions() 배치 버전 — findAverageSaleAmount()의 GROUP BY 집계판. */
+    @Query("""
+            SELECT t.legalDistrictCode.legalDongCd, AVG(t.dealAmount)
+            FROM Trade t
+            WHERE t.legalDistrictCode.legalDongCd IN :legalDongCds
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            GROUP BY t.legalDistrictCode.legalDongCd
+            """)
+    List<Object[]> findAverageSaleAmountGroupedByLegalDongCd(@Param("legalDongCds") List<String> legalDongCds,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** SVC-FAV-01.getFavoriteRegions() 배치 버전 — findAveragePricePerPyeongForSale()의 GROUP BY 집계판. */
+    @Query("""
+            SELECT t.legalDistrictCode.legalDongCd, AVG(t.dealAmount / (t.excluUseArea / 3.3058))
+            FROM Trade t
+            WHERE t.legalDistrictCode.legalDongCd IN :legalDongCds
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            GROUP BY t.legalDistrictCode.legalDongCd
+            """)
+    List<Object[]> findAveragePricePerPyeongGroupedByLegalDongCd(@Param("legalDongCds") List<String> legalDongCds,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** SVC-FAV-01.getFavoriteRegions() 배치 버전 — countSaleTrades()의 GROUP BY 집계판. */
+    @Query("""
+            SELECT t.legalDistrictCode.legalDongCd, COUNT(t)
+            FROM Trade t
+            WHERE t.legalDistrictCode.legalDongCd IN :legalDongCds
+              AND t.dealCategory = com.jiseong.homesense.trade.entity.DealCategory.SALE
+              AND t.cancelYn = false
+              AND t.dealDate >= :from AND t.dealDate < :to
+            GROUP BY t.legalDistrictCode.legalDongCd
+            """)
+    List<Object[]> countSaleTradesGroupedByLegalDongCd(@Param("legalDongCds") List<String> legalDongCds,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
 }

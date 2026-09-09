@@ -14,7 +14,9 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -244,11 +246,12 @@ class FavoriteServiceTest {
                 .datasetId("15126468").sggCd("11680").complex(complex)
                 .excluUseArea(new BigDecimal("59.90")).dealDate(LocalDate.of(2026, 1, 10))
                 .dealAmount(100_000L).cancelYn(false).dedupHash("hash-1").build();
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(10L))
-                .thenReturn(Optional.of(recentTrade));
-        when(tradeRepository.findAverageSaleAmountByComplex(eq(10L), any(), any())).thenReturn(Optional.empty());
-        when(notificationSettingRepository.existsByUser_UserIdAndFavoriteProperty_FavoritePropertyId(1L, null))
-                .thenReturn(true);
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(10L)))
+                .thenReturn(Map.of(10L, recentTrade));
+        when(tradeRepository.findAverageSaleAmountGroupedByComplex(eq(List.of(10L)), any(), any()))
+                .thenReturn(List.of());
+        when(notificationSettingRepository.findFavoritePropertyIdsWithSetting(eq(1L), any()))
+                .thenReturn(Collections.singletonList(null));
 
         List<FavoritePropertySummaryResponse> result = favoriteService.getFavoriteProperties(1L);
 
@@ -263,9 +266,9 @@ class FavoriteServiceTest {
         Complex complex = complex(10L, "아파트");
         FavoriteProperty favorite = FavoriteProperty.register(owner, complex, HousingType.APT);
         when(favoritePropertyRepository.findByUser_UserId(1L)).thenReturn(List.of(favorite));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(10L))
-                .thenReturn(Optional.empty());
-        when(tradeRepository.findAverageSaleAmountByComplex(eq(10L), any(), any())).thenReturn(Optional.empty());
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(10L))).thenReturn(Map.of());
+        when(tradeRepository.findAverageSaleAmountGroupedByComplex(eq(List.of(10L)), any(), any()))
+                .thenReturn(List.of());
 
         List<FavoritePropertySummaryResponse> result = favoriteService.getFavoriteProperties(1L);
 
@@ -280,14 +283,14 @@ class FavoriteServiceTest {
         Complex complex = complex(10L, "아파트");
         FavoriteProperty favorite = FavoriteProperty.register(owner, complex, HousingType.APT);
         when(favoritePropertyRepository.findByUser_UserId(1L)).thenReturn(List.of(favorite));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(10L))
-                .thenReturn(Optional.empty());
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(10L))).thenReturn(Map.of());
 
         LocalDate now = LocalDate.now(KST);
-        when(tradeRepository.findAverageSaleAmountByComplex(eq(10L), eq(now.minusMonths(1)), any()))
-                .thenReturn(Optional.of(110_000.0));
-        when(tradeRepository.findAverageSaleAmountByComplex(eq(10L), eq(now.minusMonths(2)), eq(now.minusMonths(1))))
-                .thenReturn(Optional.of(100_000.0));
+        when(tradeRepository.findAverageSaleAmountGroupedByComplex(eq(List.of(10L)), eq(now.minusMonths(1)), any()))
+                .thenReturn(Collections.singletonList(new Object[] {10L, 110_000.0}));
+        when(tradeRepository.findAverageSaleAmountGroupedByComplex(
+                eq(List.of(10L)), eq(now.minusMonths(2)), eq(now.minusMonths(1))))
+                .thenReturn(Collections.singletonList(new Object[] {10L, 100_000.0}));
 
         List<FavoritePropertySummaryResponse> result = favoriteService.getFavoriteProperties(1L);
 
@@ -401,8 +404,8 @@ class FavoriteServiceTest {
         User owner = mock(User.class);
         FavoriteRegion favorite = FavoriteRegion.register(owner, region("1168010100"));
         when(favoriteRegionRepository.findByUser_UserId(1L)).thenReturn(List.of(favorite));
-        when(regionStatsCalculator.calculate("1168010100")).thenReturn(
-                new RegionStats(new BigDecimal("110000"), new BigDecimal("10.00"), new BigDecimal("3000"), 4L));
+        when(regionStatsCalculator.calculateBatch(List.of("1168010100"))).thenReturn(Map.of("1168010100",
+                new RegionStats(new BigDecimal("110000"), new BigDecimal("10.00"), new BigDecimal("3000"), 4L)));
 
         List<FavoriteRegionSummaryResponse> result = favoriteService.getFavoriteRegions(1L);
 
