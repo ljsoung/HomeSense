@@ -78,4 +78,28 @@ class CacheEvictionListenerTest {
 
         verify(cacheManager).getCache("complexDetailV2");
     }
+
+    @Test
+    void 캐시_인프라_장애로_evict가_실패해도_예외를_전파하지_않는다() {
+        // 회귀 테스트: TradeDataLoader.loadBatch()는 청크가 전부 커밋된 뒤에만 이 이벤트를 발행한다.
+        // 여기서 예외가 새어나가면 publishEvent() 호출자가 이미 계산해 둔 LoadResult를 반환하지 못하고
+        // 예외로 대체돼, BAT-SCH-01이 이미 커밋된 적재 건을 "0건 처리"로 batch_log에 잘못 기록한다
+        // (Codex 코드리뷰 P2 지적).
+        Cache complexDetailCache = mock(Cache.class);
+        when(cacheManager.getCache("complexDetailV2")).thenReturn(complexDetailCache);
+        when(cacheManager.getCache("popularComplexes")).thenThrow(new RuntimeException("Redis 연결 실패"));
+
+        listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L), Set.of()));
+
+        verify(complexDetailCache).evict(1L);
+    }
+
+    @Test
+    void 법정동코드_재적재_캐시_무효화가_실패해도_예외를_전파하지_않는다() {
+        when(cacheManager.getCache("regionAutocomplete")).thenThrow(new RuntimeException("Redis 연결 실패"));
+
+        listener().onLegalDistrictCodeReloaded(new LegalDistrictCodeReloadedEvent());
+
+        verify(cacheManager).getCache("regionAutocomplete");
+    }
 }

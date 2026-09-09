@@ -53,22 +53,41 @@ public class CacheEvictionListener {
 
     private final CacheManager cacheManager;
 
+    /**
+     * 이 이벤트는 관련 trade 행이 이미 커밋된 뒤에만 발행된다(TradeDataLoader.loadBatch()가 청크 처리를
+     * 모두 마친 뒤 발행) — evict 실패(예: Redis 장애로 인한 RuntimeException)가 그대로 새어나가면
+     * publishEvent() 호출자(TradeDataLoader.loadBatch())가 이미 계산해 둔 실제 처리 건수(LoadResult)를
+     * 반환하지 못하고 예외로 대체된다. BAT-SCH-01(TradeIngestionPipeline 경유)이 이 예외를 잡아 해당
+     * 데이터셋을 "0건 처리, 0건 에러"로 batch_log에 기록하는데, 실제로는 trade 테이블에 이미 반영된
+     * 적재 결과와 모순돼 운영자가 batch_log만 보고 부분/전체 성공을 놓치게 된다(Codex 코드리뷰 P2 지적).
+     * 캐시 무효화는 최악의 경우 TTL(24h) 동안 최신화가 늦어질 뿐인 부수 효과라 커밋된 적재 결과의
+     * 정확한 기록보다 우선할 수 없다 — 그래서 evict 실패는 여기서 흡수하고 로그만 남긴다.
+     */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onTradeLoaded(TradeCacheEvictionEvent event) {
         if (event.complexIds().isEmpty()) {
             return;
         }
 
-        event.complexIds().forEach(this::evictComplexDetail);
-        clearCache(POPULAR_COMPLEXES_CACHE);
-
-        log.info("COM-CACHE-01 트레이드 적재발 캐시 무효화 완료: complexIds={}", event.complexIds().size());
+        try {
+            event.complexIds().forEach(this::evictComplexDetail);
+            clearCache(POPULAR_COMPLEXES_CACHE);
+            log.info("COM-CACHE-01 트레이드 적재발 캐시 무효화 완료: complexIds={}", event.complexIds().size());
+        } catch (RuntimeException e) {
+            log.error("COM-CACHE-01 트레이드 적재발 캐시 무효화 실패 — 이미 커밋된 적재 결과에는 영향 없음, "
+                    + "캐시는 TTL 만료까지 stale할 수 있다: complexIds={}", event.complexIds().size(), e);
+        }
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onLegalDistrictCodeReloaded(LegalDistrictCodeReloadedEvent event) {
-        clearCache(REGION_AUTOCOMPLETE_CACHE);
-        log.info("COM-CACHE-01 법정동코드 재적재발 캐시 무효화 완료: cache={}", REGION_AUTOCOMPLETE_CACHE);
+        try {
+            clearCache(REGION_AUTOCOMPLETE_CACHE);
+            log.info("COM-CACHE-01 법정동코드 재적재발 캐시 무효화 완료: cache={}", REGION_AUTOCOMPLETE_CACHE);
+        } catch (RuntimeException e) {
+            log.error("COM-CACHE-01 법정동코드 재적재발 캐시 무효화 실패 — 캐시는 TTL 만료까지 stale할 수 있다: cache={}",
+                    REGION_AUTOCOMPLETE_CACHE, e);
+        }
     }
 
     private void evictComplexDetail(Long complexId) {
