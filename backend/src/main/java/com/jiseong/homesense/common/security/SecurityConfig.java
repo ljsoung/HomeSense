@@ -30,7 +30,8 @@ import lombok.RequiredArgsConstructor;
  * 아니라 이 엔드포인트 하나만 정확히 매칭한다. SVC-FAV-01의 /api/favorites/**는 여섯 엔드포인트
  * 전부(GET/POST/DELETE)가 회원별 개인화 데이터라 CLAUDE.md가 "관심등록"을 인증 필수 목록에
  * 명시적으로 나열한 대로 경로 전체를 막는다 — /api/users/**와 같은 패턴(하나만 골라 막을 필요가
- * 없는 도메인 전용 base path). 미인증 접근은 Spring Security 기본 401 대신
+ * 없는 도메인 전용 base path). SVC-NTF-01의 /api/notifications/**도 네 엔드포인트 전부가 회원별
+ * 알림 설정·이력이라 같은 이유로 경로 전체를 막는다. 미인증 접근은 Spring Security 기본 401 대신
  * {@link RestAuthenticationEntryPoint}로 COM-RES-01 포맷을 유지한다.
  */
 @Configuration
@@ -56,6 +57,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/users/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/regions/interest-summary").authenticated()
                         .requestMatchers("/api/favorites/**").authenticated()
+                        .requestMatchers("/api/notifications/**").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(restAuthenticationEntryPoint))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
