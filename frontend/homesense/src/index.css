@@ -11,3 +11,26 @@ body {
   font-family: var(--font-sans);
   color-scheme: light;
 }
+
+/* 드론 항공뷰 배경의 은은한 Ken Burns 효과 — 부모의 overflow-hidden이 확대분을 잘라내 카드 레이아웃엔 영향이 없다. */
+@keyframes aerial-pan {
+  0% {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: scale(1.08) translate3d(-1.5%, -1%, 0);
+  }
+  100% {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+}
+
+.animate-aerial-pan {
+  animation: aerial-pan 26s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-aerial-pan {
+    animation: none;
+  }
+}

@@ -56,7 +56,11 @@ export function LoginPage() {
 
   return (
     <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden px-4 py-10">
-      <img src={loginBackground} alt="" className="absolute inset-0 h-full w-full object-cover" />
+      <img
+        src={loginBackground}
+        alt=""
+        className="animate-aerial-pan absolute inset-0 h-full w-full object-cover will-change-transform"
+      />
       <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/38 to-black/60" />
 
       <div className="relative z-10 flex w-full max-w-[440px] flex-col items-start rounded-[24px] bg-white p-6 shadow-[0_24px_64px_rgba(0,0,0,0.22)] sm:p-10">
