@@ -36,6 +36,8 @@ import com.jiseong.homesense.batch.entity.BatchLog;
 import com.jiseong.homesense.batch.errorhandler.CollectRequest;
 import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
+import com.jiseong.homesense.batch.loader.LoadResult;
+import com.jiseong.homesense.batch.loader.TradeIngestionPipeline;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
 import com.jiseong.homesense.common.config.RetryQueueProperties;
@@ -65,6 +67,9 @@ class BatchExecutionOrchestratorTest {
     @Mock
     private AuditLogger auditLogger;
 
+    @Mock
+    private TradeIngestionPipeline tradeIngestionPipeline;
+
     // 실제 조합(housingType×dealCategory)마다 등록된 데이터셋을 그대로 알고 있어야 하는 테스트(구조적
     // 오류의 대표 데이터셋 귀속)가 있어 목이 아니라 실제 구현을 쓴다 — RealEstateApiCollectorTest와 동일 관례.
     private final DatasetRegistry datasetRegistry = new DatasetRegistry();
@@ -75,13 +80,18 @@ class BatchExecutionOrchestratorTest {
     @BeforeEach
     void setUp() {
         lenient().when(legalDistrictCodeRepository.findDistinctActiveSggCd()).thenReturn(List.of(SGG_CD));
+        // 이 클래스의 테스트는 BAT-LOD-01 파이프라인 내부 로직(파싱/매칭/적재)이 아니라 오케스트레이터의
+        // 조합 순회·재시도·배치로그 기록만 검증 대상이라, 파이프라인은 항상 빈 결과를 반환하도록 목킹한다
+        // — 실제 파이프라인 동작(성공/에러 카운트 반영 등)은 TradeIngestionPipelineTest가 검증한다.
+        lenient().when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(0, 0, 0, 0));
         BatchSchedulerProperties properties = new BatchSchedulerProperties(List.of(HousingType.APT));
         // 백오프를 0분으로 둬 재시도 큐 처리가 테스트를 분 단위로 지연시키지 않게 한다 —
         // 실제 백오프 스케줄(1,5,30분)은 RetryQueueManagerTest에서 별도로 검증한다.
         retryQueueManager = new RetryQueueManager(new RetryQueueProperties(List.of(0L, 0L, 0L), 999_999L));
         orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
                 batchLogRepository, properties, eventPublisher, new ApiCallThrottle(), retryQueueManager,
-                auditLogger);
+                auditLogger, tradeIngestionPipeline);
     }
 
     private static ApiResponseXml success(String datasetId) {

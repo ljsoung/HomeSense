@@ -24,6 +24,8 @@ import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
 import com.jiseong.homesense.batch.errorhandler.RetryFailureDetail;
 import com.jiseong.homesense.batch.errorhandler.RetryOutcome;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
+import com.jiseong.homesense.batch.loader.LoadResult;
+import com.jiseong.homesense.batch.loader.TradeIngestionPipeline;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
 import com.jiseong.homesense.common.logging.AuditLogger;
@@ -67,6 +69,7 @@ class BatchExecutionOrchestrator {
     private final ApiCallThrottle apiCallThrottle;
     private final RetryQueueManager retryQueueManager;
     private final AuditLogger auditLogger;
+    private final TradeIngestionPipeline tradeIngestionPipeline;
 
     private int consecutiveAbortBatchCount = 0;
 
@@ -254,18 +257,36 @@ class BatchExecutionOrchestrator {
 
     /**
      * ApiResponseXml은 조합 하나(APT+SALE이면 기본·상세 2개 데이터셋)의 페이지를 이어붙인 것이라,
-     * batch_log의 단일 dataset_id 컬럼에 맞춰 데이터셋별로 나눠 한 행씩 기록한다. 이 레이어는
-     * XML 페이지 단위까지만 알고 있어 processedCount는 페이지 수를 기록한다(실제 항목 수는 BAT-PRS-01 책임).
+     * batch_log의 단일 dataset_id 컬럼에 맞춰 데이터셋별로 나눠 한 행씩 기록한다. 각 데이터셋의 페이지
+     * body를 TradeIngestionPipeline(BAT-PRS-01→BAT-MAT-01/02→BAT-LOD-01)에 그대로 넘겨 실제로
+     * trade 테이블에 적재하고, 그 결과(LoadResult)를 processedCount/errorCount에 기록한다.
      */
     private void logSuccess(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd,
                              ApiResponseXml response) {
-        Map<String, Long> pageCountByDataset = response.pages().stream()
-                .collect(Collectors.groupingBy(DatasetPage::datasetId, LinkedHashMap::new, Collectors.counting()));
-        pageCountByDataset.forEach((datasetId, pageCount) -> {
-            BatchLog batchLog = BatchLog.start(housingType, dealCategory, sggCd, dealYmd, datasetId);
-            batchLog.finish("000", null, true, pageCount.intValue(), 0);
-            batchLogRepository.save(batchLog);
-        });
+        Map<String, List<String>> bodiesByDataset = response.pages().stream()
+                .collect(Collectors.groupingBy(DatasetPage::datasetId, LinkedHashMap::new,
+                        Collectors.mapping(DatasetPage::body, Collectors.toList())));
+        bodiesByDataset.forEach(
+                (datasetId, bodies) -> ingestAndLog(housingType, dealCategory, sggCd, dealYmd, datasetId, bodies));
+    }
+
+    /**
+     * tradeIngestionPipeline.process()가 예상 못한 런타임 예외를 던지면(버그 등) 이 데이터셋만 실패로
+     * 기록하고 다음 데이터셋·조합은 계속 진행한다 — processCombination()의 catch 목록
+     * (OpenApiResultCodeException 등)은 API 호출 실패만 다루므로, 여기서 새는 예외는 그 catch를
+     * 비껴가 orchestrate()의 조합 순회 전체를 멈춰버린다.
+     */
+    private void ingestAndLog(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd,
+                               String datasetId, List<String> bodies) {
+        BatchLog batchLog = BatchLog.start(housingType, dealCategory, sggCd, dealYmd, datasetId);
+        try {
+            LoadResult result = tradeIngestionPipeline.process(housingType, dealCategory, datasetId, bodies);
+            batchLog.finish("000", null, true, result.processedCount(), result.errorCount());
+        } catch (RuntimeException e) {
+            log.error("BAT-LOD-01 파이프라인 처리 실패, 이 데이터셋만 실패로 기록하고 계속 진행한다: datasetId={}", datasetId, e);
+            batchLog.finish("000", truncate(e.getMessage()), false, 0, 0);
+        }
+        batchLogRepository.save(batchLog);
     }
 
     private void logFailure(HousingType housingType, DealCategory dealCategory, String sggCd, String dealYmd,
