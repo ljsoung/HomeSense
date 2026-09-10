@@ -82,6 +82,8 @@ export function LoginPage() {
             autoComplete="email"
             placeholder="you@example.com"
             error={hasServerError}
+            aria-invalid={hasServerError}
+            aria-describedby={hasServerError ? 'login-error' : undefined}
             {...register('email', { onChange: clearServerError })}
           />
 
@@ -98,6 +100,8 @@ export function LoginPage() {
               autoComplete="current-password"
               placeholder="비밀번호 입력"
               error={hasServerError}
+              aria-invalid={hasServerError}
+              aria-describedby={hasServerError ? 'login-error' : undefined}
               endAdornment={
                 <button
                   type="button"
@@ -111,7 +115,7 @@ export function LoginPage() {
               {...register('password', { onChange: clearServerError })}
             />
             {hasServerError && (
-              <div className="flex items-center gap-1.5 text-[12px] text-[#fb2c36]">
+              <div id="login-error" role="alert" className="flex items-center gap-1.5 text-[12px] text-[#fb2c36]">
                 <AlertCircleIcon className="size-3.5 shrink-0" />
                 <span>{serverError}</span>
               </div>
