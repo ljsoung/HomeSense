@@ -17,8 +17,8 @@ import lombok.extern.slf4j.Slf4j;
  * BAT-LOD-01. 정제·매칭이 끝난 TradeDraft 목록을 dedup_hash 기준 upsert로 적재한다.
  * "정제·매칭이 끝났다"는 것은 complexId/legalDongCd/matchMethod/matchConfidence가 이미 채워져 있다는
  * 뜻이다 — 이 클래스는 그 전제를 그대로 신뢰할 뿐, BAT-MAT-01(LegalDistrictMatcher)→BAT-MAT-02
- * (ComplexMasterMatcher)를 실제로 체이닝해 TradeDraft에 매칭 결과를 채워 넘기는 오케스트레이션
- * (Spring Batch Step 배선 또는 임시 코디네이터)은 이 클래스의 책임이 아니다 — 별도 후속 작업이다.
+ * (ComplexMasterMatcher)를 실제로 체이닝해 TradeDraft에 매칭 결과를 채워 넘기는 오케스트레이션은
+ * {@link com.jiseong.homesense.batch.loader.TradeIngestionPipeline}이 담당한다.
  * 500건 청크 단위로 TradeChunkLoader에 위임해 트랜잭션을 나누고, 한 청크의 커밋 실패가 다른 청크나
  * 전체 loadBatch 호출을 막지 않도록 청크 경계에서 예외를 흡수한다.
  */
