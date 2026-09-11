@@ -83,13 +83,20 @@ export function SignupPage() {
     setEmailCheck({ status: 'idle' });
   };
 
+  // 서버 필드 에러는 해당 필드 값이 바뀌기 전까지 유지되고, 값이 바뀌면 지워진다(CLAUDE.md
+  // "서버 제출 에러 vs 클라이언트 검증 결과" 판단 기록 참고) — 세 필드(email/password/nickname)
+  // 모두 이 규칙을 따른다.
+  const clearServerFieldError = (field: 'email' | 'password' | 'nickname') => {
+    setServerFieldErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
   // 이메일 입력값이 바뀔 때만 호출한다 — resetEmailCheck() 자체는 409 핸들러에서도
   // (새 서버 에러를 막 세팅한 직후) 호출되므로, 거기서 serverFieldErrors.email까지 지워버리면
   // 방금 표시하려던 에러가 같은 틱에 사라진다. "값이 바뀌었다"는 이 핸들러에서만 이전 서버
   // 에러(중복/필드 검증 실패)를 함께 지워, 다른 이메일을 확인했을 때 옛 에러가 남아있지 않게 한다.
   const handleEmailChange = () => {
     resetEmailCheck();
-    setServerFieldErrors((prev) => ({ ...prev, email: undefined }));
+    clearServerFieldError('email');
   };
 
   async function handleCheckEmail() {
@@ -262,7 +269,7 @@ export function SignupPage() {
                   {showPassword ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
                 </button>
               }
-              {...register('password')}
+              {...register('password', { onChange: () => clearServerFieldError('password') })}
             />
           </div>
           <PasswordChecklist password={password} />
@@ -308,7 +315,7 @@ export function SignupPage() {
           status={nicknameFieldStatus}
           aria-invalid={nicknameFieldStatus === 'error'}
           aria-describedby={nicknameHint ? 'nickname-hint' : undefined}
-          {...register('nickname')}
+          {...register('nickname', { onChange: () => clearServerFieldError('nickname') })}
         />
         {nicknameHint && <FieldHint id="nickname-hint" status={nicknameHint.status} message={nicknameHint.message} />}
 
