@@ -1,6 +1,12 @@
+export interface ApiFieldError {
+  field: string;
+  message: string;
+}
+
 export interface ApiError {
   code: string;
   message: string;
+  fieldErrors?: ApiFieldError[];
 }
 
 export interface ApiSuccessResponse<T> {

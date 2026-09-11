@@ -1,14 +1,15 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
+import { Input, type FieldStatus } from './Input';
 
 interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
   labelAction?: ReactNode;
-  error?: boolean;
+  status?: FieldStatus;
   endAdornment?: ReactNode;
 }
 
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function TextField(
-  { label, labelAction, error = false, endAdornment, className = '', id, ...props },
+  { label, labelAction, status = 'default', endAdornment, id, ...props },
   ref,
 ) {
   return (
@@ -19,17 +20,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
         </label>
         {labelAction}
       </div>
-      <div className="relative">
-        <input
-          ref={ref}
-          id={id}
-          className={`h-11 w-full rounded-[14px] border bg-white px-4 text-[14px] text-[#101828] outline-none transition-colors placeholder:text-[#99a1af] focus:border-brand ${
-            error ? 'border-[#ff6467]' : 'border-[#e5e7eb]'
-          } ${endAdornment ? 'pr-11' : ''} ${className}`}
-          {...props}
-        />
-        {endAdornment && <div className="absolute inset-y-0 right-3.5 flex items-center">{endAdornment}</div>}
-      </div>
+      <Input ref={ref} id={id} status={status} endAdornment={endAdornment} {...props} />
     </div>
   );
 });
