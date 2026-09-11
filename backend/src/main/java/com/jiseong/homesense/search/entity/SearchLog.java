@@ -19,6 +19,13 @@ import lombok.NoArgsConstructor;
  * 불필요하다(CLAUDE.md "사용하지 않는 컬럼은 추가하지 않는다" 원칙과 같은 판단). 향후 주체별 분석이
  * 필요해지면 user_id/session_id 컬럼 추가를 검토한다.
  *
+ * <p>이 엔티티가 매핑하는 테이블의 DDL은 {@code src/main/resources/schema/search_log.sql}에 커밋돼
+ * 있다({@code .gitignore}가 DB 덤프 유출 방지로 {@code *.sql}을 전면 차단하면서도 {@code **&#47;schema/*.sql}은
+ * 예외로 이미 열어뒀다) — {@code spring.jpa.hibernate.ddl-auto=validate}라 이 파일을 대상 DB에 먼저
+ * 적용하지 않으면 애플리케이션 기동 자체가 실패한다(PR 리뷰 P1 지적: DDL이 gitignore된 CLAUDE.md에만
+ * 적혀 있어 이 커밋만으로는 배포 불가능했다 — 그 문서는 로컬 전용이라 다른 환경에 배포할 때는 아무도
+ * 볼 수 없는 내용이었다).
+ *
  * <p>searchedAt은 RecentView.viewedAt과 달리 명시적으로 KST로 계산한다 — RecentView.viewedAt은 정렬
  * 용도(최신순)로만 쓰여 서버 타임존이 달라도 상대적 순서만 맞으면 문제가 없지만, searchedAt은
  * {@link com.jiseong.homesense.search.service.SearchService#getPopularKeywords(int)}가 별도로 계산한
