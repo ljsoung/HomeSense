@@ -1,6 +1,7 @@
 package com.jiseong.homesense.common.cache;
 
 import java.time.Duration;
+import java.util.Map;
 
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
@@ -41,12 +42,19 @@ import org.springframework.data.redis.serializer.RedisSerializer;
  * 분기(예: RecentViewService.record()의 스킵 처리)를 타 버릴 수 있다(Codex 코드리뷰 지적,
  * {@link com.jiseong.homesense.complex.service.ComplexDetailCache} 참고). 캐시 이름을 올려 옛
  * 엔트리를 아예 다시 읽지 않게 하고, 옛 엔트리는 각자의 TTL로 자연 만료되게 두면 된다.
+ *
+ * <p>{@code popularKeywords}(SVC-SEARCH-01, 신규 제안 — CLAUDE.md API-SEARCH-01 절 참고)는 이 세 캐시와
+ * 무효화 트리거 자체가 다르다 — 검색 실행마다 evict하면 쓰기가 빈번해 캐시 이득이 없으므로 evict
+ * 트리거를 두지 않고 짧은 TTL(1시간) 만료로만 자연 갱신되게 한다. 기본 TTL(24h)을 그대로 쓰면 신규
+ * 급상승 키워드가 하루 종일 반영되지 않아 "인기 검색어" 취지에 맞지 않아 별도 TTL을 건다.
  */
 @Configuration
 @EnableCaching
 public class CacheConfig {
 
     private static final Duration DEFAULT_TTL = Duration.ofHours(24);
+    private static final Duration POPULAR_KEYWORDS_TTL = Duration.ofHours(1);
+    private static final String POPULAR_KEYWORDS_CACHE = "popularKeywords";
 
     @Bean
     public RedisCacheConfiguration redisCacheConfiguration() {
@@ -65,6 +73,8 @@ public class CacheConfig {
                                            RedisCacheConfiguration redisCacheConfiguration) {
         return RedisCacheManager.builder(redisConnectionFactory)
                 .cacheDefaults(redisCacheConfiguration)
+                .withInitialCacheConfigurations(Map.of(
+                        POPULAR_KEYWORDS_CACHE, redisCacheConfiguration.entryTtl(POPULAR_KEYWORDS_TTL)))
                 .build();
     }
 }

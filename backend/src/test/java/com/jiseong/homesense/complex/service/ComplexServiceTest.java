@@ -35,6 +35,7 @@ import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.recentview.service.RecentViewService;
+import com.jiseong.homesense.search.service.SearchService;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.Trade;
@@ -51,12 +52,15 @@ class ComplexServiceTest {
     private ComplexDetailCache complexDetailCache;
     @Mock
     private RecentViewService recentViewService;
+    @Mock
+    private SearchService searchService;
 
     private ComplexService complexService;
 
     @BeforeEach
     void setUp() {
-        complexService = new ComplexService(complexRepository, tradeRepository, complexDetailCache, recentViewService);
+        complexService = new ComplexService(
+                complexRepository, tradeRepository, complexDetailCache, recentViewService, searchService);
     }
 
     private static Complex complex(Long id) {
@@ -98,6 +102,22 @@ class ComplexServiceTest {
         Page<ComplexSummaryResponse> result = complexService.search(condition, pageable);
 
         assertThat(result).isSameAs(expected);
+    }
+
+    /**
+     * SVC-CPX-01.search()가 SVC-SEARCH-01.record()를 호출하는지 검증한다(신규 제안, CLAUDE.md
+     * API-SEARCH-01 절 참고) — SVC-RCV-01과 같은 계층 협력 패턴.
+     */
+    @Test
+    void search_SVC_SEARCH_01_record를_호출해_검색어를_기록한다() {
+        ComplexSearchCondition condition = new ComplexSearchCondition(
+                null, null, null, null, null, null, null, null, null, null, null, null, "강남구");
+        Pageable pageable = PageRequest.of(0, 10);
+        when(complexRepository.search(condition, pageable)).thenReturn(new PageImpl<>(List.of()));
+
+        complexService.search(condition, pageable);
+
+        verify(searchService).record("강남구");
     }
 
     @Test
