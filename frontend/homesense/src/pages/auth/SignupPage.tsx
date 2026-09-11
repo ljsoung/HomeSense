@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { EyeIcon } from '../../components/icons/EyeIcon';
@@ -69,7 +69,16 @@ export function SignupPage() {
   const nicknameTouched = nickname.length > 0;
   const nicknameValid = isValidNickname(nickname);
 
-  const resetEmailCheck = () => setEmailCheck({ status: 'idle' });
+  // 이메일 중복확인은 비동기라 응답 순서가 요청 순서와 다르게 도착할 수 있다 — 이 카운터를
+  // "가장 최근 요청/편집"의 식별자로 써서, 늦게 도착한 응답이 그 사이 편집된 최신 상태를
+  // 덮어쓰지 않게 막는다(예: A 조회 중 B로 수정 후 B가 먼저 끝나도, 나중에 도착한 A의 결과가
+  // B의 상태를 덮어쓰면 안 됨).
+  const emailCheckRequestId = useRef(0);
+
+  const resetEmailCheck = () => {
+    emailCheckRequestId.current += 1;
+    setEmailCheck({ status: 'idle' });
+  };
 
   async function handleCheckEmail() {
     const value = email.trim();
@@ -80,15 +89,22 @@ export function SignupPage() {
       setEmailCheck({ status: 'invalid' });
       return;
     }
+    const requestId = ++emailCheckRequestId.current;
     setEmailCheck({ status: 'checking' });
     try {
       const result = await checkEmail(value);
+      if (requestId !== emailCheckRequestId.current) {
+        return; // 그 사이 값이 바뀌었거나 새 요청이 시작됨 — 이 응답은 폐기
+      }
       setEmailCheck(
         result.duplicate
           ? { status: 'duplicate', checkedEmail: value, message: '이미 사용 중인 이메일입니다' }
           : { status: 'available', checkedEmail: value },
       );
     } catch {
+      if (requestId !== emailCheckRequestId.current) {
+        return;
+      }
       setEmailCheck({ status: 'error', message: EMAIL_CHECK_FAILED_MESSAGE });
     }
   }
