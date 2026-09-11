@@ -83,6 +83,15 @@ export function SignupPage() {
     setEmailCheck({ status: 'idle' });
   };
 
+  // 이메일 입력값이 바뀔 때만 호출한다 — resetEmailCheck() 자체는 409 핸들러에서도
+  // (새 서버 에러를 막 세팅한 직후) 호출되므로, 거기서 serverFieldErrors.email까지 지워버리면
+  // 방금 표시하려던 에러가 같은 틱에 사라진다. "값이 바뀌었다"는 이 핸들러에서만 이전 서버
+  // 에러(중복/필드 검증 실패)를 함께 지워, 다른 이메일을 확인했을 때 옛 에러가 남아있지 않게 한다.
+  const handleEmailChange = () => {
+    resetEmailCheck();
+    setServerFieldErrors((prev) => ({ ...prev, email: undefined }));
+  };
+
   async function handleCheckEmail() {
     const value = email.trim();
     if (emailCheck.status === 'checking' || value.length === 0) {
@@ -217,7 +226,7 @@ export function SignupPage() {
               className="flex-1"
               aria-invalid={emailFieldStatus === 'error'}
               aria-describedby={emailHint ? 'email-hint' : undefined}
-              {...register('email', { onChange: resetEmailCheck, onBlur: handleCheckEmail })}
+              {...register('email', { onChange: handleEmailChange, onBlur: handleCheckEmail })}
             />
             <button
               type="button"
