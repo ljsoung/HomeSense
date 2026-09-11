@@ -67,7 +67,10 @@ export function SignupPage() {
   const passwordConfirmTouched = passwordConfirm.length > 0;
   const passwordConfirmValid = passwordConfirmTouched && passwordConfirm === password;
   const nicknameTouched = nickname.length > 0;
-  const nicknameValid = isValidNickname(nickname);
+  // 실제로 서버에 보내는 값(onSubmit의 values.nickname.trim())과 동일한 값을 검증해야 한다 —
+  // 원본 문자열로만 검사하면 " a"(2자, 통과) 같은 값이 trim 후 "a"(1자)가 돼 서버에서 거부되거나,
+  // 반대로 끝에 공백이 붙은 유효한 12자 닉네임이 raw 길이(13자) 때문에 부당하게 막힐 수 있다.
+  const nicknameValid = isValidNickname(nickname.trim());
 
   // 이메일 중복확인은 비동기라 응답 순서가 요청 순서와 다르게 도착할 수 있다 — 이 카운터를
   // "가장 최근 요청/편집"의 식별자로 써서, 늦게 도착한 응답이 그 사이 편집된 최신 상태를
