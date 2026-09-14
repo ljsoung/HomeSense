@@ -51,13 +51,13 @@ export function Gnb() {
         <div className="flex shrink-0 items-center gap-1.5">
           {isAuthenticated ? (
             <>
-              <button
-                type="button"
+              <Link
+                to="/notifications"
                 aria-label="알림"
                 className="flex size-9 items-center justify-center rounded-full text-[#4a5565] hover:bg-[#f7f8fa]"
               >
                 <BellIcon className="size-[18px]" />
-              </button>
+              </Link>
               <Link to="/my" className="flex items-center gap-2 rounded-full py-1 pr-3 pl-1 hover:bg-[#f7f8fa]">
                 <span className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
                   {(user?.nickname ?? ' ').charAt(0)}

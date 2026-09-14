@@ -28,9 +28,9 @@ export function MobileHeader() {
             <Link to="/my" className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
               {(user?.nickname ?? ' ').charAt(0)}
             </Link>
-            <button type="button" aria-label="알림" className="flex size-9 items-center justify-center text-[#4a5565]">
+            <Link to="/notifications" aria-label="알림" className="flex size-9 items-center justify-center text-[#4a5565]">
               <BellIcon className="size-5" />
-            </button>
+            </Link>
           </div>
         ) : (
           <Link to="/login" className="text-[13.5px] font-semibold text-brand">
