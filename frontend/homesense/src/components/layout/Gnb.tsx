@@ -16,6 +16,17 @@ const NAV_LINKS = [
  * (로그인) 또는 로그인/회원가입 버튼(비로그인)으로 갈린다(Figma 데스크톱 로그인 3:2 / 로그아웃
  * 4:1232 노드로 각각 확인). 아바타는 로그아웃 버튼이 아니라 MY-01(마이페이지, 자리표시)로
  * 이동한다 — Figma 정적 목업엔 드롭다운/로그아웃 어포던스가 없어 임의로 만들지 않았다.
+ *
+ * `/notifications`(벨 아이콘 + 중앙 네비 "알림" 텍스트 링크 둘 다)는 MY-04(알림 이력)로 연결한다
+ * — MY-03(알림 설정)이 아니다. `NotificationController.getNotifications()`/`NotificationResponse`의
+ * Javadoc이 명시적으로 "MY-04 알림 이력"이라 적어 뒀고(`GET/PUT /api/notifications/settings`만
+ * MY-03), 벨 아이콘은 관례적으로 알림 이력(피드)로 연결되는 것과도 맞는다 — 처음엔 이 Javadoc을
+ * 확인하지 않고 MY-03으로 잘못 연결했었다(CLAUDE.md SCR-HOME-01 절 판단 기록 참고). 모바일은 UI
+ * 정의서 4.1/4.2절 설계(모바일 알림 진입점은 헤더가 아니라 하단 탭 "마이" 배지)에 따라 이 벨을
+ * 아예 두지 않는다(`MobileHeader` 참고) — 데스크톱 GNB에 벨을 남겨둔 것은 Figma 데스크톱 로그인
+ * 프레임(3:2)이 중앙 네비 "알림" 텍스트 링크와 별개로 빨간 점 배지가 붙은 벨 아이콘을 명시적으로
+ * 함께 그려 뒀기 때문이다 — 다만 이 둘의 공존이 UI정의서와 정확히 합치하는지는 원문을 직접 확인하지
+ * 못해 완결 필요로 남긴다.
  */
 export function Gnb() {
   const { isAuthenticated, user } = useAuth();

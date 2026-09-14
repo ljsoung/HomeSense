@@ -17,7 +17,10 @@ export function AppRouter() {
         <Route path="/map" element={<PlaceholderPage programId="MAP-01" title="지도로 보기" />} />
         <Route path="/my" element={<PlaceholderPage programId="MY-01" title="마이페이지" />} />
         <Route path="/favorites" element={<PlaceholderPage programId="MY-02" title="관심목록" />} />
-        <Route path="/notifications" element={<PlaceholderPage programId="MY-03" title="알림" />} />
+        {/* NotificationController.getNotifications()/NotificationResponse Javadoc이 "MY-04 알림
+            이력"이라고 명시한다 — MY-03은 별개 화면(알림 설정, GET/PUT /api/notifications/settings).
+            처음엔 이 구분을 확인하지 않고 MY-03으로 잘못 연결했었다(CLAUDE.md SCR-HOME-01 절 참고). */}
+        <Route path="/notifications" element={<PlaceholderPage programId="MY-04" title="알림 이력" />} />
       </Routes>
     </BrowserRouter>
   );

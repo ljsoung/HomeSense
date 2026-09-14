@@ -1,14 +1,16 @@
 import { Link } from 'react-router-dom';
-import { BellIcon } from '../icons/BellIcon';
 import { HomeIcon } from '../icons/HomeIcon';
 import { useAuth } from '../../features/auth/useAuth';
 
 /**
- * 모바일 헤더(md 미만) — Figma 모바일 로그인(24:6736) 헤더는 우측에 아바타(이름 없이 원형만)+벨
- * 아이콘 두 개를 보여주지만, 모바일 비로그인(24:7370) 헤더 우측은 아이콘 하나뿐이라 정확한
- * 글리프를 원본 SVG로 확인하지 못했다(해당 프레임은 download_assets 호출 대상이 아니었음) —
- * 데스크톱 비로그인 GNB와 기능적으로 동일하도록 "로그인" 텍스트 링크로 대체했다(추측 아이콘을
- * 임의로 그리지 않기 위한 판단, CLAUDE.md SCR-HOME-01 절 참고).
+ * 모바일 헤더(md 미만) — Figma 모바일 로그인(24:6736) 헤더 우측에는 아바타 옆에 아이콘이 하나 더
+ * 있었지만 그 글리프를 원본 SVG로 확인한 적이 없었다(추정으로 벨 아이콘을 그려 넣었었다). 이후
+ * UI정의서 2.3/4.1/4.2절(모바일 알림 진입점은 GNB 벨이 아니라 하단 탭 "마이" 아이콘의 배지여야
+ * 하고, 하단 탭 5개를 넘기지 않기 위해 알림을 별도 탭으로 두지 않는다는 명시적 설계)을 근거로
+ * 이 헤더 벨을 완전히 제거했다 — 확인 안 된 아이콘을 추측으로 유지하는 것과, 스펙에 없는 진입점을
+ * 만드는 것 두 가지 문제를 한 번에 해소한다(CLAUDE.md SCR-HOME-01 절 판단 기록 참고). "마이" 탭
+ * 배지 자체는 API-NTF-01에 미읽음 카운트 전용 엔드포인트가 없어 이번 범위에서 구현하지 않았다 —
+ * 완결 필요.
  */
 export function MobileHeader() {
   const { isAuthenticated, user } = useAuth();
@@ -24,14 +26,9 @@ export function MobileHeader() {
         </Link>
 
         {isAuthenticated ? (
-          <div className="flex items-center gap-1.5">
-            <Link to="/my" className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
-              {(user?.nickname ?? ' ').charAt(0)}
-            </Link>
-            <Link to="/notifications" aria-label="알림" className="flex size-9 items-center justify-center text-[#4a5565]">
-              <BellIcon className="size-5" />
-            </Link>
-          </div>
+          <Link to="/my" className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
+            {(user?.nickname ?? ' ').charAt(0)}
+          </Link>
         ) : (
           <Link to="/login" className="text-[13.5px] font-semibold text-brand">
             로그인
