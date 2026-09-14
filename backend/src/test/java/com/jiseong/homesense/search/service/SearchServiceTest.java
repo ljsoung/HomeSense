@@ -111,4 +111,29 @@ class SearchServiceTest {
 
         assertThatCode(() -> searchService.record("강남구")).doesNotThrowAnyException();
     }
+
+    /** search_log.keyword가 VARCHAR(100)이라 그대로 저장하면 flush 시점에 길이 제약 위반이 난다(Codex PR 리뷰 P2). */
+    @Test
+    void record_keyword가_100자를_넘으면_100자로_잘라서_저장한다() {
+        String tooLong = "가".repeat(150);
+
+        searchService.record(tooLong);
+
+        ArgumentCaptor<SearchLog> captor = ArgumentCaptor.forClass(SearchLog.class);
+        verify(searchLogRepository).save(captor.capture());
+        assertThat(captor.getValue().getKeyword()).hasSize(100);
+        assertThat(captor.getValue().getKeyword()).isEqualTo("가".repeat(100));
+    }
+
+    /** trim 이후 길이를 기준으로 잘라야 한다 — trim 전 길이로 판단하면 정상 길이 keyword도 잘못 잘릴 수 있다. */
+    @Test
+    void record_trim_이후_길이가_100자_이하면_자르지_않는다() {
+        String exactly100 = "가".repeat(100);
+
+        searchService.record("  " + exactly100 + "  ");
+
+        ArgumentCaptor<SearchLog> captor = ArgumentCaptor.forClass(SearchLog.class);
+        verify(searchLogRepository).save(captor.capture());
+        assertThat(captor.getValue().getKeyword()).isEqualTo(exactly100);
+    }
 }

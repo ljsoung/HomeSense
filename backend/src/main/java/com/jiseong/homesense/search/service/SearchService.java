@@ -38,6 +38,9 @@ public class SearchService {
     /** "인기"의 집계 창 — 최근 이 기간 내 검색 빈도 기준(신규 제안, 지성 확인 필요). */
     private static final int WINDOW_DAYS = 7;
 
+    /** search_log.keyword 컬럼 길이(schema/search_log.sql VARCHAR(100))와 반드시 일치해야 한다. */
+    private static final int MAX_KEYWORD_LENGTH = 100;
+
     private final SearchLogRepository searchLogRepository;
 
     @Cacheable(cacheNames = "popularKeywords", key = "#limit")
@@ -64,6 +67,14 @@ public class SearchService {
      * 로깅 실패가 검색 자체를 실패시키면 안 되므로 예외를 삼키고 COM-LOG-01(SLF4J)로만 남긴다 —
      * 예외가 나도 기본 {@code SimpleAsyncUncaughtExceptionHandler}가 로그만 남기고 호출자에게
      * 전파되지 않는다(AsyncConfig 참고).
+     *
+     * <p>{@code search_log.keyword}는 {@code VARCHAR(100)}이라(schema/search_log.sql), trim 이후
+     * {@link #MAX_KEYWORD_LENGTH}를 넘는 값은 저장 전에 잘라낸다 — 자르지 않으면 MariaDB가 flush/commit
+     * 시점에 길이 제약 위반으로 이 INSERT만 실패시키고, 그 실패는 위 catch도 아니라(비동기 트랜잭션
+     * 커밋은 이 메서드 반환 이후에 일어난다) 검색 응답에는 전혀 티가 나지 않으면서 해당 검색어의 로그만
+     * 조용히 유실돼 인기 검색어 집계가 눈에 띄지 않게 틀어진다(Codex PR 리뷰 P2 지적). 검색 자체는
+     * keyword 길이를 제한하지 않으므로(ComplexSearchRequest에 @Size 없음, 이번 범위는 로깅 전용이라
+     * 실제 검색 요청을 거부할 이유가 없다) 요청을 400으로 막지 않고 로깅 쪽에서만 방어한다.
      */
     @Async
     @Transactional
@@ -72,7 +83,11 @@ public class SearchService {
             return;
         }
         try {
-            searchLogRepository.save(SearchLog.record(keyword.trim()));
+            String trimmed = keyword.trim();
+            String truncated = trimmed.length() > MAX_KEYWORD_LENGTH
+                    ? trimmed.substring(0, MAX_KEYWORD_LENGTH)
+                    : trimmed;
+            searchLogRepository.save(SearchLog.record(truncated));
         } catch (RuntimeException e) {
             log.error("SVC-SEARCH-01 검색어 기록 실패 — 검색 응답 자체에는 영향 없음: keyword={}", keyword, e);
         }
