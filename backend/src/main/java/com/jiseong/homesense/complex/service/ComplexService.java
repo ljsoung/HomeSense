@@ -23,6 +23,7 @@ import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.recentview.dto.RecentViewTarget;
 import com.jiseong.homesense.recentview.service.RecentViewService;
+import com.jiseong.homesense.search.service.SearchService;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
 
@@ -39,6 +40,11 @@ import lombok.RequiredArgsConstructor;
  * 걸면 캐시 히트마다 기록이 스킵되므로, 캐시 조회는 {@link ComplexDetailCache}라는 별도 빈으로
  * 분리했다 — 같은 클래스 안에 캐시 전용 메서드를 따로 둬도 self-invocation이라 프록시를 안 거쳐
  * {@code @Cacheable}이 무력화되기 때문이다(CLAUDE.md SVC-RCV-01 절 참고).
+ *
+ * <p>search()도 같은 계층 협력 패턴으로 SVC-SEARCH-01.record()를 호출한다(신규 제안, CLAUDE.md
+ * API-SEARCH-01 절 참고) — 검색 실행마다 원문 keyword를 인기검색어 집계용으로 남긴다. record()가
+ * {@code @Async}라 이 클래스의 {@code @Transactional(readOnly = true)} 경계와 무관하게 별도
+ * 트랜잭션에서 실행된다(SearchService.record() 참고).
  */
 @Service
 @RequiredArgsConstructor
@@ -55,8 +61,10 @@ public class ComplexService {
     private final TradeRepository tradeRepository;
     private final ComplexDetailCache complexDetailCache;
     private final RecentViewService recentViewService;
+    private final SearchService searchService;
 
     public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, Pageable pageable) {
+        searchService.record(condition.keyword());
         return complexRepository.search(condition, pageable);
     }
 
