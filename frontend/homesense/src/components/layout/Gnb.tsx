@@ -1,5 +1,4 @@
 import { Link, useLocation } from 'react-router-dom';
-import { BellIcon } from '../icons/BellIcon';
 import { HomeIcon } from '../icons/HomeIcon';
 import { useAuth } from '../../features/auth/useAuth';
 
@@ -17,16 +16,16 @@ const NAV_LINKS = [
  * 4:1232 노드로 각각 확인). 아바타는 로그아웃 버튼이 아니라 MY-01(마이페이지, 자리표시)로
  * 이동한다 — Figma 정적 목업엔 드롭다운/로그아웃 어포던스가 없어 임의로 만들지 않았다.
  *
- * `/notifications`(벨 아이콘 + 중앙 네비 "알림" 텍스트 링크 둘 다)는 MY-04(알림 이력)로 연결한다
- * — MY-03(알림 설정)이 아니다. `NotificationController.getNotifications()`/`NotificationResponse`의
- * Javadoc이 명시적으로 "MY-04 알림 이력"이라 적어 뒀고(`GET/PUT /api/notifications/settings`만
- * MY-03), 벨 아이콘은 관례적으로 알림 이력(피드)로 연결되는 것과도 맞는다 — 처음엔 이 Javadoc을
- * 확인하지 않고 MY-03으로 잘못 연결했었다(CLAUDE.md SCR-HOME-01 절 판단 기록 참고). 모바일은 UI
- * 정의서 4.1/4.2절 설계(모바일 알림 진입점은 헤더가 아니라 하단 탭 "마이" 배지)에 따라 이 벨을
- * 아예 두지 않는다(`MobileHeader` 참고) — 데스크톱 GNB에 벨을 남겨둔 것은 Figma 데스크톱 로그인
- * 프레임(3:2)이 중앙 네비 "알림" 텍스트 링크와 별개로 빨간 점 배지가 붙은 벨 아이콘을 명시적으로
- * 함께 그려 뒀기 때문이다 — 다만 이 둘의 공존이 UI정의서와 정확히 합치하는지는 원문을 직접 확인하지
- * 못해 완결 필요로 남긴다.
+ * 알림 진입점은 중앙 네비의 "알림" 텍스트 링크 하나뿐이다(`/notifications` → MY-04 알림 이력 —
+ * `NotificationController.getNotifications()`/`NotificationResponse` Javadoc이 명시적으로
+ * "MY-04 알림 이력"이라 적어 뒀다, MY-03은 별개 화면인 알림 설정). 한때 이 옆에 별도 벨 아이콘도
+ * 있었다 — Figma 데스크톱 로그인 프레임(3:2)이 중앙 네비 텍스트 링크와 별개로 빨간 점 배지가 붙은
+ * 벨을 그려 둬서, "픽셀 증거는 있다"는 이유로 완결 필요로 남겨둔 채 유지했었다. 이후 UI정의서
+ * 원문(2.3절/4.1절)을 대조한 결과 GNB 구성은 "로고 / 주메뉴(지역·단지 검색·지도로 보기·관심목록·
+ * 알림) / 우측 영역(비로그인: 로그인·회원가입, 로그인: 프로필 아이콘)"으로만 정의돼 있고 벨은 전혀
+ * 언급되지 않는다는 게 확인돼 제거했다 — CLAUDE.md가 스스로 못박은 "코드와 문서가 어긋나면 문서가
+ * 맞다" 원칙대로, Figma 픽셀은 6개 근거 문서(요구사항/엔티티/테이블/UI/프로그램목록/프로그램설계
+ * 정의서) 밖의 참고 자료일 뿐이라 문서 쪽을 따랐다(CLAUDE.md SCR-HOME-01 절 판단 기록 참고).
  */
 export function Gnb() {
   const { isAuthenticated, user } = useAuth();
@@ -61,21 +60,12 @@ export function Gnb() {
 
         <div className="flex shrink-0 items-center gap-1.5">
           {isAuthenticated ? (
-            <>
-              <Link
-                to="/notifications"
-                aria-label="알림"
-                className="flex size-9 items-center justify-center rounded-full text-[#4a5565] hover:bg-[#f7f8fa]"
-              >
-                <BellIcon className="size-[18px]" />
-              </Link>
-              <Link to="/my" className="flex items-center gap-2 rounded-full py-1 pr-3 pl-1 hover:bg-[#f7f8fa]">
-                <span className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
-                  {(user?.nickname ?? ' ').charAt(0)}
-                </span>
-                <span className="text-[13px] font-medium text-[#364153]">{user?.nickname ?? ''}</span>
-              </Link>
-            </>
+            <Link to="/my" className="flex items-center gap-2 rounded-full py-1 pr-3 pl-1 hover:bg-[#f7f8fa]">
+              <span className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
+                {(user?.nickname ?? ' ').charAt(0)}
+              </span>
+              <span className="text-[13px] font-medium text-[#364153]">{user?.nickname ?? ''}</span>
+            </Link>
           ) : (
             <>
               <Link to="/login" className="rounded-[10px] px-3 py-1.5 text-[13.5px] font-medium text-[#364153] hover:bg-[#f7f8fa]">
