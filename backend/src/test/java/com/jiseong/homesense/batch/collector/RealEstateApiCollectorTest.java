@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.InstanceOfAssertFactories.type;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -32,7 +35,11 @@ class RealEstateApiCollectorTest {
     private MockRestServiceServer mockServer;
 
     private RealEstateApiCollector newCollector() {
-        restClientBuilder = RestClient.builder();
+        restClientBuilder = RestClient.builder()
+                // OpenApiRestClientConfig.openApiRestClient()와 동일하게 구성한다 — 이 핸들러가
+                // 없으면 이 테스트가 실제 RestClient 구성과 어긋난 채로 통과해, 운영에서만 재현되는
+                // HTTP 4xx 경로(아래 게이트웨이_오류가_HTTP_403_상태로_와도... 테스트 참고)를 놓친다.
+                .defaultStatusHandler(HttpStatusCode::isError, (request, response) -> { });
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         RestClient restClient = restClientBuilder.build();
         return new RealEstateApiCollector(
@@ -189,6 +196,40 @@ class RealEstateApiCollectorTest {
                         + "?serviceKey=" + ENCODED_SERVICE_KEY
                         + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
                 .andRespond(withSuccess(gatewayErrorXml, MediaType.APPLICATION_XML));
+
+        assertThatThrownBy(() -> collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401"))
+                .asInstanceOf(type(OpenApiResultCodeException.class))
+                .satisfies(e -> {
+                    assertThat(e.resultCode()).isEqualTo("30");
+                    assertThat(e.judgment()).isEqualTo(ErrorCodeJudgment.ABORT_BATCH);
+                });
+        mockServer.verify();
+    }
+
+    @Test
+    void 게이트웨이_오류가_HTTP_403_상태로_와도_ABORT_BATCH로_판정한다() {
+        // 회귀 테스트: 실제 data.go.kr은 서비스키 미등록/만료(returnReasonCode 30/31) 오류를 200 OK가
+        // 아니라 HTTP 403으로 내려준다(2026-09-14 실제 호출로 확인). RestClient의 기본 동작은 4xx/5xx에서
+        // body()가 반환되기 전에 HttpClientErrorException을 던지므로, OpenApiXmlReader가 본문의
+        // returnReasonCode를 아예 읽지 못하고 이 예외가 BatchExecutionOrchestrator의
+        // RestClientException catch절(일시적 전송 계층 실패)로 흘러들어가 즉시 ABORT_BATCH돼야 할
+        // 오류가 RETRY로 오분류됐었다(운영에서 배치가 3시간 가까이 블로킹 재시도를 반복한 원인).
+        String gatewayErrorXml = """
+                <OpenAPI_ServiceResponse>
+                    <cmmMsgHeader>
+                        <errMsg>SERVICE ERROR</errMsg>
+                        <returnAuthMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</returnAuthMsg>
+                        <returnReasonCode>30</returnReasonCode>
+                    </cmmMsgHeader>
+                </OpenAPI_ServiceResponse>
+                """;
+        RealEstateApiCollector collector = newCollector();
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN)
+                        .body(gatewayErrorXml)
+                        .contentType(MediaType.APPLICATION_XML));
 
         assertThatThrownBy(() -> collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401"))
                 .asInstanceOf(type(OpenApiResultCodeException.class))
