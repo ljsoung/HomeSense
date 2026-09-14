@@ -6,7 +6,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StreamUtils;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
 import com.jiseong.homesense.batch.errorhandler.ApiErrorCodeClassifier;
@@ -81,9 +85,40 @@ public class RealEstateApiCollector {
                 + "&numOfRows=" + NUM_OF_ROWS
                 + "&pageNo=" + pageNo;
 
+        // retrieve().body()가 아니라 exchange()를 쓴다 — 서비스키 미등록/만료(resultCode 30/31) 같은
+        // 게이트웨이 레벨 오류는 data.go.kr이 200 OK가 아니라 HTTP 4xx로 내려주는데(returnReasonCode
+        // 봉투), retrieve()의 기본 동작은 4xx/5xx에서 본문을 읽기도 전에 예외를 던져 그 봉투를
+        // OpenApiXmlReader가 아예 볼 수 없다. 그렇다고 모든 오류 상태에서 예외 없이 본문을 통과시키면
+        // 이번엔 진짜 일시적 전송 계층 실패(429/5xx, 게이트웨이 봉투가 아닌 일반 오류 페이지)까지
+        // BatchExecutionOrchestrator의 재시도 큐를 못 타고 구조적 실패로 오분류된다(P1 코드리뷰
+        // 지적). exchange()로 응답 본문을 정확히 한 번만 읽어, 그 내용이 게이트웨이 오류 봉투로
+        // 판정 가능할 때만 통과시키고 그 외의 오류 상태는 원래 RestClientException을 그대로 던져
+        // 재시도 경로를 유지한다.
         return restClient.get()
                 .uri(URI.create(uri))
-                .retrieve()
-                .body(String.class);
+                .exchange((request, response) -> {
+                    byte[] bodyBytes = StreamUtils.copyToByteArray(response.getBody());
+                    String body = new String(bodyBytes, StandardCharsets.UTF_8);
+                    HttpStatusCode status = response.getStatusCode();
+                    if (!status.isError() || looksLikeGatewayErrorEnvelope(body)) {
+                        return body;
+                    }
+                    if (status.is4xxClientError()) {
+                        throw HttpClientErrorException.create(status, response.getStatusText(),
+                                response.getHeaders(), bodyBytes, StandardCharsets.UTF_8);
+                    }
+                    throw HttpServerErrorException.create(status, response.getStatusText(),
+                            response.getHeaders(), bodyBytes, StandardCharsets.UTF_8);
+                });
+    }
+
+    /**
+     * data.go.kr 게이트웨이 오류 봉투(OpenAPI_ServiceResponse/cmmMsgHeader/returnReasonCode) 또는
+     * 정상 응답 봉투(response/header/resultCode)로 판정 가능한 본문인지 가볍게 확인한다 — 엄격한
+     * XML 파싱은 OpenApiXmlReader의 책임이라 여기서는 태그 존재 여부만 본다. 이 검사를 통과하지
+     * 못하면(진짜 일시적 전송 계층 오류) 예외를 그대로 던진다.
+     */
+    private static boolean looksLikeGatewayErrorEnvelope(String body) {
+        return body != null && (body.contains("resultCode") || body.contains("returnReasonCode"));
     }
 }

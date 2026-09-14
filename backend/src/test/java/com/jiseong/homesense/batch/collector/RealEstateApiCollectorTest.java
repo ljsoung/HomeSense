@@ -11,9 +11,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
 import com.jiseong.homesense.batch.errorhandler.ApiErrorCodeClassifier;
@@ -35,11 +36,11 @@ class RealEstateApiCollectorTest {
     private MockRestServiceServer mockServer;
 
     private RealEstateApiCollector newCollector() {
-        restClientBuilder = RestClient.builder()
-                // OpenApiRestClientConfig.openApiRestClient()와 동일하게 구성한다 — 이 핸들러가
-                // 없으면 이 테스트가 실제 RestClient 구성과 어긋난 채로 통과해, 운영에서만 재현되는
-                // HTTP 4xx 경로(아래 게이트웨이_오류가_HTTP_403_상태로_와도... 테스트 참고)를 놓친다.
-                .defaultStatusHandler(HttpStatusCode::isError, (request, response) -> { });
+        // OpenApiRestClientConfig.openApiRestClient()와 동일하게 구성한다 — HTTP 상태 코드에 따른
+        // 판단(게이트웨이 오류 봉투 통과/일시적 전송 계층 실패 유지)은 이제 빈 레벨의
+        // defaultStatusHandler가 아니라 RealEstateApiCollector.requestPage()의 exchange() 호출부가
+        // 직접 하므로, 여기서도 별도 상태 핸들러 없이 기본 RestClient만 빌드한다.
+        restClientBuilder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         RestClient restClient = restClientBuilder.build();
         return new RealEstateApiCollector(
@@ -237,6 +238,52 @@ class RealEstateApiCollectorTest {
                     assertThat(e.resultCode()).isEqualTo("30");
                     assertThat(e.judgment()).isEqualTo(ErrorCodeJudgment.ABORT_BATCH);
                 });
+        mockServer.verify();
+    }
+
+    @Test
+    void 게이트웨이_봉투가_아닌_HTTP_503은_구조적_실패가_아니라_RestClientException으로_전파된다() {
+        // 회귀 테스트(P1 코드리뷰) — OpenApiRestClientConfig의 상태 핸들러가 모든 오류 상태를
+        // 예외 없이 통과시키던 이전 구현에서는, 이런 본문 없는 502/503(로드밸런서·프록시가 대신
+        // 내려주는 일반 오류 페이지, resultCode/returnReasonCode 어느 태그도 없음)도 그대로
+        // 통과돼 OpenApiXmlReader가 봉투를 못 찾아 OpenApiResponseException을 던졌다.
+        // BatchExecutionOrchestrator는 이 예외를 재시도 큐에 넣지 않는 구조적 실패로 기록해,
+        // 원래는 RETRY 대상이어야 할 일시적 전송 계층 실패가 그대로 유실됐다. 지금은 본문이
+        // 게이트웨이 봉투 형식이 아니면 RestClientException(HttpServerErrorException)이 그대로
+        // 던져져야 한다 — processCombination()의 RestClientException catch절이 이 조합을
+        // 재시도 큐에 적재한다.
+        RealEstateApiCollector collector = newCollector();
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE)
+                        .body("<html><body>503 Service Unavailable</body></html>")
+                        .contentType(MediaType.TEXT_HTML));
+
+        assertThatThrownBy(() -> collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401"))
+                .isInstanceOf(HttpServerErrorException.class)
+                .isNotInstanceOf(OpenApiResponseException.class);
+        mockServer.verify();
+    }
+
+    @Test
+    void 게이트웨이_봉투가_아닌_HTTP_429는_구조적_실패가_아니라_RestClientException으로_전파된다() {
+        // 위 503 테스트와 같은 회귀를 4xx 경로(HttpClientErrorException)에서도 확인한다 — 이 예외는
+        // requestPage()의 exchange() 안에서 status.is4xxClientError()와 is5xxServerError() 두 분기
+        // 중 어느 쪽을 타는지가 갈리는 지점이라, 5xx 경로가 통과한다고 4xx 경로도 통과한다고 코드
+        // 리딩만으로 단정할 수 없어 별도로 확인해둔다. 429는 data.go.kr의 트래픽 초과(resultCode
+        // 22, RETRY 판정)와 별개로 순수 전송 계층에서 로드밸런서 등이 내려줄 수 있는 상태다.
+        RealEstateApiCollector collector = newCollector();
+        mockServer.expect(requestTo("https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+                        + "?serviceKey=" + ENCODED_SERVICE_KEY
+                        + "&LAWD_CD=11680&DEAL_YMD=202401&numOfRows=1000&pageNo=1"))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS)
+                        .body("Too Many Requests")
+                        .contentType(MediaType.TEXT_PLAIN));
+
+        assertThatThrownBy(() -> collector.collect(HousingType.APT, DealCategory.RENT, "11680", "202401"))
+                .isInstanceOf(HttpClientErrorException.class)
+                .isNotInstanceOf(OpenApiResponseException.class);
         mockServer.verify();
     }
 

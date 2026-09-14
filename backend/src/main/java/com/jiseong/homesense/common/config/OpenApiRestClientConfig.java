@@ -11,13 +11,19 @@ import org.apache.hc.core5.util.Timeout;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
  * BAT-CLC-01(RealEstateApiCollector)이 쓰는 국토부 Open API 전용 RestClient를 구성한다.
  * 평균 응답 500ms/30TPS 제약(요구사항정의서 7.1절)을 고려해 타임아웃과 커넥션 풀을 둔다.
+ *
+ * <p>HTTP 상태 코드에 따른 처리(게이트웨이 오류 봉투 판정, 일시적 전송 계층 실패의 재시도 경로
+ * 보존)는 이 빈 레벨의 {@code defaultStatusHandler}가 아니라 유일한 소비자인
+ * {@code RealEstateApiCollector.requestPage()}가 {@code exchange()}로 응답 본문을 정확히 한 번만
+ * 읽어 직접 판단한다 — 본문을 먼저 들여다본 뒤 그대로 통과시키려면 같은 스트림을 다시 읽어야
+ * 하는데, 운영 HTTP 클라이언트(Apache HttpClient)든 테스트의 MockRestServiceServer든 응답
+ * 스트림은 기본적으로 한 번만 읽을 수 있어 이 지점에서 재구성하지 않는다.
  */
 @Configuration
 @EnableConfigurationProperties(DataGoKrProperties.class)
@@ -50,18 +56,6 @@ public class OpenApiRestClientConfig {
 
         return RestClient.builder()
                 .requestFactory(new HttpComponentsClientHttpRequestFactory(httpClient))
-                // 서비스키 미등록/만료(resultCode 30/31) 같은 게이트웨이 레벨 오류는 data.go.kr이
-                // 200 OK + XML 본문이 아니라 HTTP 4xx 상태로 내려준다 — RestClient의 기본 동작은
-                // 4xx/5xx에서 body()를 반환하기 전에 HttpClientErrorException을 던지므로,
-                // RealEstateApiCollector.requestPage()가 그 본문(OpenApiXmlReader가 읽어야 할
-                // returnReasonCode)을 아예 받지 못하고 예외만 받는다. 이 예외는
-                // BatchExecutionOrchestrator의 RestClientException catch절(일시적 전송 계층 실패)로
-                // 흘러들어가 RETRY로 오분류되고, 즉시 ABORT_BATCH돼야 할 서비스키 오류가 조합마다
-                // 1→5→30분 블로킹 재시도를 반복하게 된다(실제로 이 문제로 배치가 3시간 가까이
-                // 멈춘 것처럼 보였다). 모든 상태 코드에서 예외 없이 본문을 그대로 반환하도록 기본
-                // 상태 핸들러를 무력화해, resultCode/returnReasonCode 기반 판정(ApiErrorCodeClassifier)이
-                // HTTP 상태와 무관하게 항상 실행되게 한다.
-                .defaultStatusHandler(HttpStatusCode::isError, (request, response) -> { })
                 .build();
     }
 }
