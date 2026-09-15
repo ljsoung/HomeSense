@@ -70,5 +70,3 @@ dump.sql
 coverage/
 *.exec
 htmlcov/
-
-CLAUDE.md
