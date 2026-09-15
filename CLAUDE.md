@@ -577,7 +577,22 @@ APT+SALE(15126469/15126468)은 단 한 건도 기록되지 않았고, 조합 순
 XML 파싱(BAT-PRS-01)→법정동/단지 매칭(BAT-MAT-01/02)→적재(BAT-LOD-01)를 실제로 체이닝하는 코드는 각 컴포넌트가 완성된 뒤에도 한동안 없었다 — `BatchExecutionOrchestrator`는 `collector.collect()`만 호출하고 페이지 수를 `batch_log`에 기록할 뿐이었다. `batch.loader.TradeIngestionPipeline`(public, `TradeDataLoader`와 같은 레벨)이 이 연결을 담당한다: `BatchExecutionOrchestrator.logSuccess()`가 `ApiResponseXml`의 페이지를 `datasetId`별로 묶어 `TradeIngestionPipeline.process(housingType, dealCategory, datasetId, pageBodies)`를 데이터셋마다 호출하고, 반환된 `LoadResult`를 그대로 `batch_log`의 `processed_count`/`error_count`에 기록한다(이전엔 이 두 컬럼에 페이지 수를 대신 넣는 임시값이었다).
 
 - **데이터셋 단위로 나눠 호출하는 이유(합쳐서 한 번에 부르지 않는 이유):** APT+SALE은 기본(15126469)·상세(15126468) 두 데이터셋이 한 조합으로 묶여 들어온다. `DedupHashCalculator`가 `datasetId`를 해시에 넣지 않으므로 같은 거래가 두 데이터셋에 나타나도 같은 `dedup_hash`로 수렴하고 `TradeChunkLoader.upsertOne()`이 이미 "먼저 들어온 건 INSERT, 나중 건 UPDATE"를 보장한다 — 나눠서 두 번 `loadBatch()`를 불러도 합쳐서 한 번 부르는 것과 최종 결과가 같다. 대신 나누면 `batch_log`가 이미 데이터셋 단위 행(`dataset_id` 컬럼)이라 데이터셋마다 정확한 카운트를 그대로 기록할 수 있다.
-- **`TradeFieldMapper.supports(housingType, dealCategory)` 게이트:** 현재 APT+SALE만 `true`다. `application.properties`의 `housing-types=APT` 설정과 무관하게 `BatchExecutionOrchestrator`는 `DealCategory.values()`(SALE+RENT)를 조건 없이 순회하므로 APT+RENT 조합도 매일 수집되는데, 이 조합의 필드 매핑은 아직 실 API로 재검증되지 않았다(요구사항정의서 4.2절 각주). `TradeIngestionPipeline`은 이 게이트가 `false`면 파싱 자체를 시도하지 않고 info 로그만 남기고 빈 `LoadResult`를 반환한다 — 수집(BAT-CLC-01)·`batch_log` 기록은 그대로 되지만 적재는 조용히 건너뛴다. 연립다세대·전월세 필드 매핑이 추가되면 `TradeFieldMapper.supports()`만 넓히면 되고 파이프라인/오케스트레이터는 코드 변경이 필요 없다.
+- **`TradeFieldMapper.supports(housingType, dealCategory)` 게이트 — 아파트 전월세(APT/RENT)는 2026-09-15에 확정, 연립다세대(VILLA)는 매매·전월세 둘 다 2단계로 미룸.** `TradeIngestionPipeline`은 이 게이트가 `false`면 파싱 자체를 시도하지 않고 info 로그만 남기고 빈 `LoadResult`를 반환한다 — 수집(BAT-CLC-01)·`batch_log` 기록은 그대로 되지만 적재는 조용히 건너뛴다. `application.properties`의 `housing-types=APT` 설정과 무관하게 `BatchExecutionOrchestrator`는 `DealCategory.values()`(SALE+RENT)를 조건 없이 순회하므로 APT+RENT 조합은 매일 수집되고 있었는데, `supports()`가 APT+SALE에만 `true`를 반환해(RENT 필드 매핑 자체가 없었음) 전량 스킵되고 있었다 — `SELECT COUNT(*) FROM trade WHERE deal_category='RENT'`가 0건으로 실측 확인됨. **이 근본 원인은 "잘못된 필드명으로 `MalformedTradeItemException`이 나서 스킵된다"가 아니라 애초에 매핑을 시도조차 하지 않는 명시적 게이트였다는 점에 유의하라** — 사용자가 "가설 A"로 짐작한 결과(0건)는 맞았지만 메커니즘은 달랐다.
+
+  data.go.kr 공식 Swagger 스펙(`https://www.data.go.kr/data/{15126474,15126473}/openapi.do`에 임베딩된 `swaggerJson`을 직접 fetch, 제3자 블로그·라이브러리로 교차 확인도 완료)으로 두 RENT 데이터셋의 실제 필드명을 모두 확정했다 — **다만 실제로 구현·활성화한 건 아파트(15126474)뿐이다:**
+
+  | 데이터셋 | 필드 | 비고 |
+  | --- | --- | --- |
+  | 아파트 전월세(15126474, `RTMSDataSvcAptRent`) — **구현·활성화 완료** | `sggCd`·`umdNm`·`aptNm`·`jibun`·`excluUseAr`·`dealYear`·`dealMonth`·`dealDay`·`deposit`(보증금액, 만원)·`monthlyRent`(월세금액, 만원)·`floor`·`buildYear`·`contractTerm`·`contractType`·`useRRRight`·`preDeposit`·`preMonthlyRent` | `aptDong`/`dealingGbn`/`estateAgentSggNm`/`rgstDate`/`slerGbn`/`buyerGbn`/`landLeaseholdGbn`/`cdealType`/`cdealDay`는 공식 스펙에 **없음**(SALE 전용 개념) |
+  | 연립다세대 전월세(15126473, `RTMSDataSvcRHRent`) — **필드명만 확정, 구현은 2단계로 보류** | 위와 동일 구조 | 단지명 필드가 `aptNm`이 아니라 **`mhouseNm`**(연립다세대명) — 2단계 착수 시 이 값을 바로 가져다 쓰면 된다 |
+
+  JEONSE/WOLSE 판정은 `monthlyRent`가 "0"이면 JEONSE, 0보다 크면 WOLSE다 — 공식 스펙 description에는 명시되지 않지만 이 데이터셋을 다루는 독립된 두 소스(라이브러리 소스코드, 실사용 블로그)가 동일하게 기술하는 업계 표준 관행이다. `contractTerm`/`contractType`/`useRRRight`/`preDeposit`/`preMonthlyRent`는 `TradeDraft`/`trade`에 대응 컬럼이 없어 매핑하지 않는다("사용하지 않는 컬럼은 추가하지 않는다" 원칙, FR-3.3은 `monthlyRentAmount` 표시만 요구).
+
+  **VILLA/RENT를 함께 열지 않은 이유(코드리뷰 지적으로 축소, 최초엔 VILLA/RENT까지 같이 구현했었다) — 요구사항정의서 9장 2단계 로드맵과의 충돌.** 이 문서의 "개발 단계" 절은 2단계(연립다세대 확장)를 "신규 프로그램 0개, 1단계 프로그램의 housingType 파라미터 범위를 APT에서 APT,VILLA로 넓히기만 하면 된다"고 명시한다 — SALE/RENT를 나눠 순차 활성화하는 설계가 아니라 **VILLA 전체(SALE+RENT)를 한 시점에 함께 연다는 전제**다. RENT 필드명이 먼저 확정됐다고 VILLA/RENT만 먼저 열면 이 전제가 깨져, 정작 2단계를 시작할 때 "VILLA/RENT는 이미 되는데 왜 VILLA/SALE만 막혀 있지?" 하는 혼란을 남긴다. 그래서 `supports()`는 `dealCategory==RENT`여도 `housingType==APT`일 때만 `true`이고, VILLA는 매매·전월세 모두 여전히 `UnsupportedOperationException`을 던진다. `TradeFieldMapper.mapRentToUnifiedModel()`은 이제 housingType 분기 없이 `aptNm`만 읽는다(어차피 `supports()`가 APT만 통과시켜 이 메서드는 항상 housingType=APT로만 호출된다) — VILLA 분기를 미리 심어두는 대신, 2단계에서 VILLA/SALE 필드명을 마저 확정할 때 이 표의 `mhouseNm`을 그대로 가져다 함께 추가하면 된다.
+
+  **"대응 데이터셋" 표(위 배치 파이프라인 절) 표기 불일치 — 참고용 전체 목록이지 1단계 구현 범위가 아님.** 그 표의 헤더는 "4종"인데 실제 행은 5개(연립다세대 전월세 15126473 포함)라 사소한 문서 내 불일치가 있다 — 이 표는 국토부 API 4종 데이터셋(아파트 매매 기본/상세는 1조합으로 묶여 행이 5개가 된다) 전체를 참고용으로 나열한 것이지, "연립다세대 전월세도 1단계 범위"라는 뜻이 아니다. 실제 1단계 구현 범위는 이 절(`TradeFieldMapper.supports()`)이 최종 권위다.
+
+  **검증:** `TradeFieldMapperTest`(Mockito)에 APT+RENT의 JEONSE/WOLSE 케이스, 보증금 누락 시 예외 케이스, VILLA+RENT가 VILLA+SALE과 마찬가지로 여전히 예외를 던지는 회귀 테스트를 추가했다. 실제 배치 재실행(Docker + 국토부 API 실 호출)으로 `trade.deal_category='RENT'` 행이 실제로 적재되는지는 이번 세션 범위 밖이라 확인하지 못했다 — 다음에 배치를 재실행하면 `processed_count > 0`과 실제 RENT 행 적재를 재확인하라.
 - **파싱/매핑 에러의 단위:** 페이지 하나가 통째로 파싱 실패(`TradeXmlParsingException`)하면 그 페이지만 스킵하고 나머지 페이지는 계속 처리한다. 항목 하나가 매핑 실패(`MalformedTradeItemException`)해도 그 항목만 스킵한다(`TradeChunkLoader.loadChunk()`가 개별 draft 예외를 스킵하는 것과 같은 결). 둘 다 `LoadResult`의 `errorCount`에 합산된다.
 - **법정동/단지 매칭 실패는 에러가 아니다:** FR-2.5 목표 성공률(98.9% 이상)이 이미 100% 미만을 전제하므로, 매칭 실패 draft도 그대로 로더에 넘어가 `complex_id`/`legal_dong_cd`가 `NULL`인 채로 적재된다(`TradeChunkLoader`의 참조 헬퍼가 이미 null-safe).
 - **`LegalDistrictMatcher.matchByTradeSggCd()` 반환 타입이 설계서와 다르다** — 아래 "BAT-MAT-01/BAT-MAT-02 구현 결정 사항" 표 참고.
@@ -593,6 +608,43 @@ XML 파싱(BAT-PRS-01)→법정동/단지 매칭(BAT-MAT-01/02)→적재(BAT-LOD
 | `ComplexMasterMatcher.matchComplex()` 파라미터 | 설계서 4.5절: `MatchResult matchComplex(TradeDraft draft)` 단일 인자 — `draft.legalDongCd()`가 이미 채워져 있다고 가정하는 시그니처로 읽힌다 | `MatchResult matchComplex(TradeDraft draft, LegalDistrictCode legalDistrictCode)` 2인자 | 단일 인자로는 위 문제가 메서드 내부로 옮겨질 뿐 해결되지 않는다 — `draft.legalDongCd()`는 BAT-MAT-01이 채우기 전까지 `null`이라 이 메서드가 스스로 `LegalDistrictCode`를 조회해야 하는데, 그러면 BAT-MAT-01(`LegalDistrictMatcher`)의 조회 로직(활성 코드 필터링 등)을 BAT-MAT-02 안에 다시 구현하거나 `LegalDistrictMatcher`를 이 메서드가 직접 의존하는 형태가 된다. 대신 호출자(`TradeIngestionPipeline`)가 BAT-MAT-01 결과를 그대로 전달하는 2인자 형태를 택해 두 매처의 책임을 분리했다 — `legalDistrictCode`가 `null`이면(법정동 매칭 자체가 실패) "법정동코드 매핑 실패로 후보 지역을 특정할 수 없음" 사유로 로깅까지 마친 `unmatched()`를 곧바로 반환한다(`ComplexMasterMatcher.java`). |
 
 **주의 — BAT-MAT-02의 다른 판단들도 같은 식으로 미문서화됐을 수 있다.** 위 2인자 시그니처가 원래 구현 커밋(`0ddf0e4`)부터 있었는데도 근거가 커밋 메시지에도 CLAUDE.md에도 전혀 남아있지 않았다는 건, 그 커밋 시점에 내려진 다른 판단(지번 정규식의 "산" 접두 처리, 트라이그램 유사도 임계치 0.500/신뢰도 매핑 구간 0.600~0.850의 근거 등 `ComplexMasterMatcher.java` 안의 매직넘버들)도 같은 이유로 누락됐을 가능성이 있다는 뜻이다. 지금 전수 감사할 필요는 없지만, 다음에 `ComplexMasterMatcher`/BAT-MAT-02를 다시 열어볼 일이 생기면 — 특히 그 매직넘버들을 건드릴 때 — 커밋 로그(`git log -- .../ComplexMasterMatcher.java`)에 근거가 남아있는지 먼저 확인하라. 없다면 "왜 이 값인지" 자체가 유실된 상태라는 뜻이므로, 바꾸기 전에 지성에게 확인이 필요하다.
+
+### BAT-MAT-02 버그 수정 (2026-09-15) — 실 DB 데이터로 확정한 1차 필터링·지번 매칭 결함 2건
+
+**버그 A — `complex.sigungu` ↔ `legal_district_code.sigungu_name` 표기 불일치로 "시+구" 구조 도시의 1차 필터링 후보가 항상 0건이었다.** `ComplexMasterMatcher.matchComplex()`가 `complexRepository.findBySidoAndSigunguAndDongRi()`에 `legalDistrictCode.getSigunguName()`을 가공 없이 그대로 넘겼는데, 실제 로컬 DB(`complex` 21,680건/`legal_district_code` 20,555건)를 직접 조회해 보니 두 원천의 표기가 "시+구" 구조 도시(구가 설치된 시)에서 체계적으로 다르다 — K-apt 단지 기본정보 xlsx 유래 `complex.sigungu`는 "수원장안구"(공백 없음, "시" 생략)인데 행정안전부 법정동코드 CSV 유래 `legal_district_code.sigungu_name`은 "수원시 장안구"(공백 있음, "시" 유지)다. 수원·성남·안양·부천·안산·고양·용인·청주·천안·창원·전주·포항 등 구가 설치된 모든 시에서 동일 패턴으로 재현되고, 반대로 구가 없는 단일 시/군(목포시 등)과 광역시 소속 구(종로구 등)는 원래도 표기가 같아 문제가 없었다.
+
+**수정:** `ComplexMasterMatcher.normalizeSigungu(String raw)` 신설 — 공백 제거 후 문자열 끝이 아닌 위치의 "시"만 제거한다("목포시"처럼 "시"가 마지막 글자면 보존). `legal_district_code.sigungu_name`에만 SQL 파라미터 바인딩 직전(애플리케이션 레벨)에 적용하고 `complex.sigungu`(xlsx 원본)는 절대 건드리지 않는다 — 두 원천 모두 정부 원본 표기를 DB에 그대로 보존해야 하므로 정규화는 비교 시점에만 수행한다. `idx_complex_region(sido, sigungu, dong_ri)` 인덱스는 정규화가 파라미터 바인딩 이전에 일어나므로 그대로 탄다. 세종특별자치시(구 자체 없음, 양쪽 다 `sigungu(_name)=NULL`)는 애초에 문제가 아니었다 — Spring Data 파생 쿼리가 null 파라미터를 자동으로 `IS NULL`로 바인딩해 이미 정상 매칭된다.
+
+**근거(무효화 조건):** 정규화 규칙은 `complex.sigungu`(distinct 253건)와 `legal_district_code.sigungu_name`(distinct 264건) 전체를 정규화해 교차 검증했다 — 사용자가 예시로 든 수원·성남·청주·천안·창원·안양·부천·안산·고양·용인·전주·포항은 이 규칙 하나로 완전히 해소된다. **K-apt xlsx의 시군구 표기 규칙(공백 없음·"시" 생략)이 향후 데이터 갱신 시 바뀌면 이 규칙도 재검증이 필요하다** — 예를 들어 xlsx가 어느 시점부터 "수원시 장안구"처럼 공백을 포함해 표기하기 시작하면 이 정규화가 오히려 불일치를 만든다.
+
+**잔여 불일치 2,399개 단지(전체의 ~11%) — 표기 문제가 아니라 데이터 시점 차이, 이번 범위 밖으로 확정(지성 승인):**
+
+| 그룹 | 단지 수 | 원인 |
+| --- | --- | --- |
+| `전남광주통합특별시` | 1,615 | `complex.sido` 자체가 광주+전남을 합친 통합 표기(xlsx가 최신 행정구역 반영). `legal_district_code`는 아직 `광주광역시`/`전라남도`로 분리된 구버전 — **sido 레벨부터 불일치**해 sigungu 정규화로는 해결 불가 |
+| 화성시 신설 일반구(동탄/병점/효행/만세구) | 422 | `legal_district_code`에 이 구들이 아예 없고 `화성시`만 있음(신설구가 별도 법정동코드를 받았는지 미확인) |
+| 인천 신설 자치구(검단/서해/영종/제물포구) | 362 | `legal_district_code`가 구 개편 이전(서구/동구/중구 등) 상태 |
+
+세 그룹 모두 xlsx(2026-08 스냅샷, 최신 행정구역 반영)와 legal_district_code CSV(구버전) 사이의 데이터 시점 차이다. 실제 수정(법정동코드 CSV 재적재, 또는 sido/sigungu 별도 매핑 테이블)은 후속 과제로 남긴다 — 광주-전남 sido 매핑은 검증 안 된 최근(2026년) 행정 개편을 전제하고, 화성/인천 신설구가 실제로 별도 법정동코드를 받았는지도 확인되지 않아 지금 하드코딩하면 회귀 위험이 있다고 판단했다(지성 확인 후 범위 제외 승인).
+
+**버그 B — `legal_dong_address`가 실제로는 "...동리 지번 단지명" 형태라 지번 뒤에 단지명이 이어 붙는데, 예전 정규식이 문자열 끝($) anchor라 EXACT가 전국 0건이었다.** 클래스 javadoc과 이 문서는 이 컬럼이 "시도 시군구 동리 지번"으로 끝난다고 가정했지만, 실 DB(예: complex_id=19 "종로청계힐스테이트", `legal_dong_address`="서울특별시 종로구 숭인동 766 종로청계힐스테이트")를 조회해 보니 지번 뒤에 단지명이 그대로 붙어 있었다 — 대응 실거래(jibun="766")가 지번 완전일치임에도 `$` anchor가 절대 매치되지 않아 SIMILAR(0.850)로 오분류됐다. **기존 `ComplexMasterMatcherTest`의 모든 fixture가 단지명 없이 지번으로 끝나는 비현실적 주소("서울특별시 강남구 역삼동 123-4")를 썼던 게 이 버그가 발견되지 않은 이유다** — "legal_dong_address가 전체 주소여도 EXACT로 매칭한다"는 이름의 회귀 테스트조차 실제 데이터 형태를 반영하지 않아 이 버그를 전혀 잡지 못했다.
+
+**수정:** `Complex.dongRi`(이미 엔티티에 존재)로 주소 안에서 동리 텍스트가 끝나는 위치를 먼저 찾고, 그 바로 뒤에서 지번 토큰을 시작 앵커(`Matcher.lookingAt()`)로 추출하는 `extractJibunFromAddress(Complex)`로 교체했다 — 단지명이 무엇으로 시작하든 영향받지 않는다. `draft.jibun()`(API 원본의 단일 토큰)은 `normalizeStandaloneJibun(String)`으로 전체 일치(`matches()`)를 그대로 검사한다. 콤마로 여러 지번이 나열된 주소(예: 필지 두 곳에 걸친 단지, complex_id=13139)는 시작 앵커 특성상 첫 번째 지번만 추출되는데, 매칭 실패로 치지 않고 그 지번으로 EXACT를 시도하는 관대한 폴백으로 남겨뒀다(SVC-CPX-01/TRD-01의 기존 "조회 API의 관대한 폴백" 철학과 일치).
+
+**부차 발견(수정 대상 아님, 알려진 한계로 기록) — trade.jibun의 블록-로트 표기(162건)는 매칭 대상 자체가 못 된다.** `trade.jibun` 35,177건 중 162건(0.46%)이 `"가-238"`, `"BL-91-2"` 같은 블록-로트 표기(신도시 택지지구)다. `complex.legal_dong_address`에는 이런 표기가 전혀 없어(표본 확인) 지번 매칭이 원천적으로 불가능하다 — 버그가 아니라 알려진 한계다. "산" 접두 지번(36건)은 기존 로직이 이미 정상 처리하고 있었다(재확인 완료, 수정 불필요).
+
+**검증 1(Mockito) — 최초 검증.** `ComplexMasterMatcherTest`(14건 — 기존 8건 fixture를 실제 주소 형태로 교정 + 신규 6건: 실제 사례(종로청계힐스테이트) EXACT 재현, 콤마 다중지번 폴백, 블록-로트 비매칭, 시+구/단일시군/광역시구 정규화 3종). 코드리뷰 지적: 수정 원인 자체가 "실제 데이터 형태가 fixture와 다르다"였는데, 검증이 손으로 고른 사례 1건 + 그걸 본뜬 fixture로만 이뤄져 "Mockito로는 영속성 컨텍스트/실 데이터 버그를 못 잡는다"는 이 프로젝트 스스로의 원칙(UNIQUE 제약 동시성 절 등)과 같은 함정에 빠질 위험이 있었다.
+
+**검증 2(실 DB 전수 검증, 2026-09-15 추가) — `complex` 21,680건 전체에 수정된 `extractJibunFromAddress()` 로직을 그대로 재현해 돌렸다.** 배치 재실행이나 API 호출 없이 기존 테이블 데이터(`complex_id`/`dong_ri`/`legal_dong_address`)만으로 가능한 검증이라 비용이 거의 들지 않았다 — Python으로 Java 정규식·로직을 그대로 옮겨 21,680행 전체에 적용했다(스크래치 스크립트, 저장소에 커밋되지 않음).
+
+- **성공률 98.953%(21,453/21,680)** — FR-2.5 목표(98.9% 이상)와 사실상 일치. 다만 이 수치는 "이 complex가 EXACT로 매칭될 수 있는 지번을 주소에서 뽑아낼 수 있는가"이지 FR-2.5가 측정하는 "실제 trade-to-complex 매칭 성공률"과 같은 지표는 아니다(1차 지역 필터링·trade 쪽 지번 포맷·SIMILAR 폴백 등 다른 변수가 더 있다) — 그래도 상한선이 목표치에 근접한다는 건 강한 신호다.
+- **실패 227건(1.05%) 원인 재확인 — 애초 "블록-로트 표기 때문"이라던 추정이 틀렸다.** 실 데이터를 까보니 블록-로트 표기는 `complex.legal_dong_address`에 단 한 건도 없었고, 실패는 전부 **complex 마스터 원본 데이터 자체의 결측**이었다:
+  - **218건**: `legal_dong_address`에 지번 숫자 자체가 없음 — 동리 뒤가 공백 두 칸 후 바로 단지명/인근 역명으로 이어진다(예: `"...망우동  신내역 힐데스하임아파트"`). xlsx 원본에 지번이 미기재된 것으로 보인다.
+  - **9건**: `dong_ri` 자체가 NULL — 대부분 필지 여러 곳에 걸친 콤마 구분 다중주소(위 "동리 뒤에 여러 지번이 콤마로 나열" 사례와 같은 패턴)라 외부 xlsx 적재 과정이 단일 `dong_ri` 값을 못 뽑은 것으로 보인다. **세종특별자치시(216건, `sigungu=NULL`)와는 무관하다** — 세종 complex는 `dong_ri`가 정상적으로 채워져 있다(처음엔 두 NULL을 같은 원인으로 착각했었다, 코드리뷰에서 정정됨).
+  
+  두 유형 모두 `extractJibunFromAddress()` 로직의 결함이 아니라 complex 마스터 원본의 결측이라 EXACT가 원천적으로 불가능하고 SIMILAR/미매칭으로 정상적으로 떨어진다 — 버그가 아니라 알려진 한계로 남긴다.
+
+실제 배치 재실행(Docker + 국토부 API 실 호출)으로 `trade.match_method='EXACT'`가 실제로 0건에서 벗어나는지는 이번 세션 범위 밖이라 못 했다 — 다음에 배치를 재실행하면 이것과, "시+구" 도시(수원/성남/청주 등)의 `complex_id` 매칭률이 오르는지 재확인하라.
 
 **남은 절차:** 이 두 시그니처는 이제 실제로 서로를 호출하며 검증됐으니(`TradeIngestionPipelineTest`), 프로그램 설계서 4.4/4.5절을 이 표대로 갱신하는 것이 다음 문서 동기화 시점의 할 일이다 — 지금은 CLAUDE.md에 근거를 남기는 것으로 갈음한다.
 
