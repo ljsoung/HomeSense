@@ -27,10 +27,15 @@ import lombok.RequiredArgsConstructor;
 public class ComplexMasterMatcher {
 
     /**
-     * legal_dong_address는 "시도 시군구 동리 지번" 형태의 전체 주소이고 draft의 지번은 순번호만 오므로,
-     * 접두사 길이와 무관하게 문자열 끝(마지막 토큰)에서 지번을 추출한다.
+     * legal_dong_address는 실제로는 "시도 시군구 동리 지번 단지명" 형태다 — 지번 뒤에 단지명이 그대로
+     * 이어 붙는다(실 DB 데이터로 확인, 예: "서울특별시 종로구 숭인동 766 종로청계힐스테이트"). 예전에는
+     * 이 컬럼이 지번으로 끝난다고 가정해 문자열 끝($)에 anchor한 정규식을 썼는데, 그 가정이 틀려
+     * match_method=EXACT가 전국 0건이 되는 원인이었다(dongRi 뒤에서 지번을 추출하는
+     * {@link #extractJibunFromAddress(Complex)}로 대체). draft.jibun()은 단일 토큰이라
+     * {@link #normalizeStandaloneJibun(String)}으로 전체 일치를 그대로 검사한다.
      */
-    private static final Pattern JIBUN_PATTERN = Pattern.compile("(?:^|\\s)(산)?\\s*([0-9]+(-[0-9]+)?)$");
+    private static final Pattern JIBUN_LEADING_PATTERN = Pattern.compile("^(산)?\\s*([0-9]+(-[0-9]+)?)");
+    private static final Pattern JIBUN_STANDALONE_PATTERN = Pattern.compile("^(산)?\\s*([0-9]+(-[0-9]+)?)$");
     private static final int NGRAM_SIZE = 3;
 
     private static final BigDecimal EXACT_CONFIDENCE = new BigDecimal("1.000");
@@ -59,17 +64,17 @@ public class ComplexMasterMatcher {
         }
 
         List<Complex> candidates = complexRepository.findBySidoAndSigunguAndDongRi(
-                legalDistrictCode.getSidoName(), legalDistrictCode.getSigunguName(),
+                legalDistrictCode.getSidoName(), normalizeSigungu(legalDistrictCode.getSigunguName()),
                 legalDistrictCode.getEupmyeondongName());
         if (candidates.isEmpty()) {
             return unmatched(draft, "동일 시도/시군구/동리에 단지 후보 없음");
         }
 
-        Optional<String> draftJibun = normalizeJibun(draft.jibun());
+        Optional<String> draftJibun = normalizeStandaloneJibun(draft.jibun());
         List<Complex> jibunMatches = draftJibun.isEmpty()
                 ? List.of()
                 : candidates.stream()
-                        .filter(candidate -> draftJibun.equals(normalizeJibun(candidate.getLegalDongAddress())))
+                        .filter(candidate -> draftJibun.equals(extractJibunFromAddress(candidate)))
                         .toList();
 
         if (!jibunMatches.isEmpty()) {
@@ -91,19 +96,65 @@ public class ComplexMasterMatcher {
     }
 
     /**
+     * "시+구" 구조 도시(수원/성남/청주 등)에서 xlsx 유래 complex.sigungu(예: "수원장안구", 공백 없음·
+     * "시" 생략)와 CSV 유래 legal_district_code.sigungu_name(예: "수원시 장안구", 공백 있음·"시" 유지)의
+     * 표기가 달라 1차 필터링 후보가 항상 0건이 되던 문제를 해결한다(BAT-MAT-02 1차 필터링, 실 DB로
+     * 확인). 공백을 제거한 뒤, 문자열 끝이 아닌 위치의 "시"만 제거한다 — "목포시"처럼 "시"가 마지막
+     * 글자면 보존해 단일 시/군 표기는 그대로 둔다. legal_district_code 쪽(CSV 유래) 값에만 적용하고
+     * complex.sigungu(xlsx 원본)는 절대 건드리지 않는다 — 두 원천 모두 정부 원본 표기를 그대로 DB에
+     * 보존해야 하므로 정규화는 비교 시점에만 수행한다.
+     */
+    private String normalizeSigungu(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String noSpace = raw.replaceAll("\\s+", "");
+        return noSpace.replaceAll("시(?=.)", "");
+    }
+
+    /**
+     * draft.jibun()은 API 원본의 단일 토큰이라("123-4", "산 45-6" 등) 전체 일치로 검사한다.
      * "산" 접두 여부까지 일치해야 같은 지번으로 본다 — 산번지와 일반 지번은 다른 필지다.
      */
-    private Optional<String> normalizeJibun(String raw) {
+    private Optional<String> normalizeStandaloneJibun(String raw) {
         if (raw == null) {
             return Optional.empty();
         }
-        Matcher matcher = JIBUN_PATTERN.matcher(raw.trim());
-        if (!matcher.find()) {
+        Matcher matcher = JIBUN_STANDALONE_PATTERN.matcher(raw.trim());
+        if (!matcher.matches()) {
             return Optional.empty();
         }
+        return Optional.of(jibunKey(matcher));
+    }
+
+    /**
+     * legal_dong_address는 "...동리 지번 단지명" 형태로 지번 뒤에 단지명이 그대로 이어 붙는다 —
+     * candidate.dongRi로 동리 텍스트가 끝나는 위치를 먼저 찾고, 그 바로 뒤에서 지번 토큰만 시작
+     * 앵커(lookingAt)로 추출한다. 단지명이 숫자로 시작하든 아니든 뒤에 남는 텍스트는 매치 대상이
+     * 아니므로 영향받지 않는다.
+     */
+    private Optional<String> extractJibunFromAddress(Complex candidate) {
+        String address = candidate.getLegalDongAddress();
+        String dongRi = candidate.getDongRi();
+        if (address == null || dongRi == null) {
+            return Optional.empty();
+        }
+        int idx = address.indexOf(dongRi);
+        if (idx < 0) {
+            return Optional.empty();
+        }
+        String remainder = address.substring(idx + dongRi.length()).trim();
+        Matcher matcher = JIBUN_LEADING_PATTERN.matcher(remainder);
+        if (!matcher.lookingAt()) {
+            return Optional.empty();
+        }
+        return Optional.of(jibunKey(matcher));
+    }
+
+    private String jibunKey(Matcher matcher) {
         boolean isMountainLot = matcher.group(1) != null;
         String number = matcher.group(2).replaceAll("\\s+", "");
-        return Optional.of((isMountainLot ? "산" : "") + number);
+        return (isMountainLot ? "산" : "") + number;
     }
 
     private boolean isNameExactMatch(String draftName, String complexName) {
