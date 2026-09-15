@@ -330,7 +330,18 @@ export function SignupPage() {
                 <>
                   <span className="font-semibold text-brand underline lg:no-underline">이용약관</span>
                   <span> 및 </span>
-                  <span className="font-semibold text-brand underline lg:no-underline">개인정보처리방침</span>
+                  {/* 체크박스 전체(Checkbox.tsx)가 하나의 <label>로 감싸여 있어, 이 링크를 클릭해도
+                      부모 label의 클릭 토글이 함께 발생한다 — 정책 열람이 동의 체크박스 상태에
+                      영향을 주면 안 되므로 stopPropagation으로 그 토글만 막는다(페이지 이동 자체는
+                      막지 않는다). "이용약관"은 실제 화면이 아직 없어 링크로 만들지 않았다(완결 필요,
+                      CLAUDE.md 참고). */}
+                  <Link
+                    to="/privacy"
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-semibold text-brand underline lg:no-underline"
+                  >
+                    개인정보처리방침
+                  </Link>
                   <span>에 동의합니다 </span>
                   <span className="text-[#99a1af]">(필수)</span>
                 </>

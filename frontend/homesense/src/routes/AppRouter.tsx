@@ -3,6 +3,7 @@ import { PlaceholderPage } from '../pages/PlaceholderPage';
 import { LoginPage } from '../pages/auth/LoginPage';
 import { SignupPage } from '../pages/auth/SignupPage';
 import { HomePage } from '../pages/home/HomePage';
+import { PrivacyPolicyPage } from '../pages/legal/PrivacyPolicyPage';
 
 export function AppRouter() {
   return (
@@ -11,6 +12,7 @@ export function AppRouter() {
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route path="/forgot-password" element={<PlaceholderPage programId="AUTH-03" title="비밀번호 찾기" />} />
         <Route path="/search" element={<PlaceholderPage programId="SRCH-01" title="지역·단지 검색" />} />
         <Route path="/complexes/:id" element={<PlaceholderPage programId="DTL-01" title="단지 상세" />} />
