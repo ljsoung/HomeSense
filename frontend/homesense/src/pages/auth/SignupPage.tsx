@@ -334,10 +334,21 @@ export function SignupPage() {
                       부모 label의 클릭 토글이 함께 발생한다 — 정책 열람이 동의 체크박스 상태에
                       영향을 주면 안 되므로 stopPropagation으로 그 토글만 막는다(페이지 이동 자체는
                       막지 않는다). "이용약관"은 실제 화면이 아직 없어 링크로 만들지 않았다(완결 필요,
-                      CLAUDE.md 참고). */}
+                      CLAUDE.md 참고).
+                      새 탭(target="_blank")으로 여는 것도 의도적이다 — 같은 탭에서 이동하면
+                      react-router가 SignupPage를 언마운트해 react-hook-form 값·이메일 중복확인
+                      상태·체크박스가 전부 초기화되고, 뒤로가기로 돌아와도 복구되지 않아 작성 중이던
+                      가입 폼 전체를 다시 입력해야 했다(코드리뷰 P1 지적). 폼 상태를
+                      localStorage/sessionStorage에 저장해 복원하는 대안도 검토했지만 비밀번호 필드를
+                      브라우저 저장소에 잠시라도 남기는 건 그 자체로 보안상 바람직하지 않다 — 새 탭으로
+                      열면 이 탭의 SignupPage가 언마운트되지 않아 상태 손실 자체가 애초에 발생하지
+                      않는다. */}
                   <Link
                     to="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
+                    aria-label="개인정보처리방침 (새 탭에서 열림)"
                     className="font-semibold text-brand underline lg:no-underline"
                   >
                     개인정보처리방침
