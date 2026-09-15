@@ -14,6 +14,7 @@ import com.jiseong.homesense.batch.parser.dto.RawTradeItem;
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.RentType;
 
 class TradeFieldMapperTest {
 
@@ -166,15 +167,7 @@ class TradeFieldMapperTest {
     }
 
     @Test
-    void 전월세_데이터셋은_아직_구현하지_않아_예외를_던진다() {
-        RawTradeItem item = itemWith(Map.of());
-
-        assertThatThrownBy(() -> mapper.mapToUnifiedModel(item, HousingType.APT, DealCategory.RENT, "15126474"))
-                .isInstanceOf(UnsupportedOperationException.class);
-    }
-
-    @Test
-    void 연립다세대는_단지명_태그가_미확정이라_아파트_태그로_조용히_매핑하지_않고_예외를_던진다() {
+    void 연립다세대_매매_데이터셋은_아직_구현하지_않아_예외를_던진다() {
         // 회귀 테스트: housingType을 검사하지 않던 시절에는 VILLA 매매도 aptNm을 그대로 읽어
         // buildingName == null인 채로 "성공"한 TradeDraft를 만들어냈고, 그 결과 BAT-MAT-02의
         // 단지명 매칭(EXACT 재확인·SIMILAR)이 VILLA 건에 대해 항상 무력화됐다.
@@ -185,10 +178,76 @@ class TradeFieldMapperTest {
     }
 
     @Test
-    void supports는_아파트_매매만_true를_반환한다() {
+    void supports는_아파트_매매와_전월세_연립다세대_전월세를_true로_반환한다() {
         assertThat(mapper.supports(HousingType.APT, DealCategory.SALE)).isTrue();
-        assertThat(mapper.supports(HousingType.APT, DealCategory.RENT)).isFalse();
+        assertThat(mapper.supports(HousingType.APT, DealCategory.RENT)).isTrue();
+        assertThat(mapper.supports(HousingType.VILLA, DealCategory.RENT)).isTrue();
         assertThat(mapper.supports(HousingType.VILLA, DealCategory.SALE)).isFalse();
-        assertThat(mapper.supports(HousingType.VILLA, DealCategory.RENT)).isFalse();
+    }
+
+    private static RawTradeItem rentItemWith(Map<String, String> overrides) {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("sggCd", "11680");
+        fields.put("umdNm", "역삼동");
+        fields.put("aptNm", "역삼래미안");
+        fields.put("mhouseNm", "역삼연립");
+        fields.put("jibun", "123-4");
+        fields.put("excluUseAr", "84.99");
+        fields.put("dealYear", "2024");
+        fields.put("dealMonth", "1");
+        fields.put("dealDay", "15");
+        fields.put("deposit", "50,000");
+        fields.put("monthlyRent", "0");
+        fields.put("floor", "10");
+        fields.put("buildYear", "2005");
+        fields.putAll(overrides);
+        return new RawTradeItem(fields);
+    }
+
+    @Test
+    void 아파트_전월세_중_월세금액이_0이면_전세로_매핑하고_월세금액은_null이다() {
+        TradeDraft draft = mapper.mapToUnifiedModel(
+                rentItemWith(Map.of()), HousingType.APT, DealCategory.RENT, "15126474");
+
+        assertThat(draft.housingType()).isEqualTo(HousingType.APT);
+        assertThat(draft.dealCategory()).isEqualTo(DealCategory.RENT);
+        assertThat(draft.rentType()).isEqualTo(RentType.JEONSE);
+        assertThat(draft.buildingName()).isEqualTo("역삼래미안");
+        assertThat(draft.dealAmount()).isNull();
+        assertThat(draft.depositAmount()).isEqualTo(50_000L);
+        assertThat(draft.monthlyRentAmount()).isNull();
+        assertThat(draft.dealDate()).isEqualTo(LocalDate.of(2024, 1, 15));
+        assertThat(draft.aptDong()).isNull();
+        assertThat(draft.dealingType()).isNull();
+        assertThat(draft.cancelYn()).isFalse();
+        assertThat(draft.cancelDate()).isNull();
+    }
+
+    @Test
+    void 아파트_전월세_중_월세금액이_0보다_크면_월세로_매핑한다() {
+        TradeDraft draft = mapper.mapToUnifiedModel(
+                rentItemWith(Map.of("monthlyRent", "50")), HousingType.APT, DealCategory.RENT, "15126474");
+
+        assertThat(draft.rentType()).isEqualTo(RentType.WOLSE);
+        assertThat(draft.depositAmount()).isEqualTo(50_000L);
+        assertThat(draft.monthlyRentAmount()).isEqualTo(50L);
+    }
+
+    @Test
+    void 연립다세대_전월세는_mhouseNm에서_단지명을_읽는다() {
+        TradeDraft draft = mapper.mapToUnifiedModel(
+                rentItemWith(Map.of()), HousingType.VILLA, DealCategory.RENT, "15126473");
+
+        assertThat(draft.housingType()).isEqualTo(HousingType.VILLA);
+        assertThat(draft.buildingName()).isEqualTo("역삼연립");
+        assertThat(draft.rentType()).isEqualTo(RentType.JEONSE);
+    }
+
+    @Test
+    void 전월세_보증금이_없으면_MalformedTradeItemException을_던진다() {
+        RawTradeItem missingDeposit = rentItemWith(Map.of("deposit", ""));
+
+        assertThatThrownBy(() -> mapper.mapToUnifiedModel(missingDeposit, HousingType.APT, DealCategory.RENT, "15126474"))
+                .isInstanceOf(MalformedTradeItemException.class);
     }
 }
