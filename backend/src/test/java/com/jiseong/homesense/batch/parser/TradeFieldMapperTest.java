@@ -178,10 +178,21 @@ class TradeFieldMapperTest {
     }
 
     @Test
-    void supports는_아파트_매매와_전월세_연립다세대_전월세를_true로_반환한다() {
+    void 연립다세대_전월세_데이터셋도_2단계까지_구현하지_않아_예외를_던진다() {
+        // 요구사항정의서 9장 2단계 로드맵은 연립다세대를 SALE/RENT 순차 활성화가 아니라
+        // housingType 파라미터 범위를 APT에서 APT,VILLA로 한 번에 넓히는 것으로 명시한다 —
+        // VILLA/RENT만 먼저 열면 이 원칙이 깨지므로 VILLA/SALE과 함께 열릴 때까지 막아둔다.
+        RawTradeItem item = itemWith(Map.of());
+
+        assertThatThrownBy(() -> mapper.mapToUnifiedModel(item, HousingType.VILLA, DealCategory.RENT, "15126473"))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void supports는_아파트_매매와_아파트_전월세만_true를_반환한다() {
         assertThat(mapper.supports(HousingType.APT, DealCategory.SALE)).isTrue();
         assertThat(mapper.supports(HousingType.APT, DealCategory.RENT)).isTrue();
-        assertThat(mapper.supports(HousingType.VILLA, DealCategory.RENT)).isTrue();
+        assertThat(mapper.supports(HousingType.VILLA, DealCategory.RENT)).isFalse();
         assertThat(mapper.supports(HousingType.VILLA, DealCategory.SALE)).isFalse();
     }
 
@@ -190,7 +201,6 @@ class TradeFieldMapperTest {
         fields.put("sggCd", "11680");
         fields.put("umdNm", "역삼동");
         fields.put("aptNm", "역삼래미안");
-        fields.put("mhouseNm", "역삼연립");
         fields.put("jibun", "123-4");
         fields.put("excluUseAr", "84.99");
         fields.put("dealYear", "2024");
@@ -231,16 +241,6 @@ class TradeFieldMapperTest {
         assertThat(draft.rentType()).isEqualTo(RentType.WOLSE);
         assertThat(draft.depositAmount()).isEqualTo(50_000L);
         assertThat(draft.monthlyRentAmount()).isEqualTo(50L);
-    }
-
-    @Test
-    void 연립다세대_전월세는_mhouseNm에서_단지명을_읽는다() {
-        TradeDraft draft = mapper.mapToUnifiedModel(
-                rentItemWith(Map.of()), HousingType.VILLA, DealCategory.RENT, "15126473");
-
-        assertThat(draft.housingType()).isEqualTo(HousingType.VILLA);
-        assertThat(draft.buildingName()).isEqualTo("역삼연립");
-        assertThat(draft.rentType()).isEqualTo(RentType.JEONSE);
     }
 
     @Test
