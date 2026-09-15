@@ -286,9 +286,21 @@ export const privacySections: PrivacySection[] = [
           <li>비밀번호는 BCrypt 알고리즘을 이용한 단방향(복호화 불가능) 암호화 방식으로 저장합니다.</li>
           <li>이용자와의 통신 구간은 HTTPS를 통해 암호화되어 전송됩니다.</li>
           <li>
-            JWT(JSON Web Token) 기반의 인증 체계를 사용하며, 로그아웃 또는 토큰 재발급 시 기존 Refresh
-            Token을 즉시 폐기하여 재사용을 방지합니다.
+            JWT(JSON Web Token) 기반의 인증 체계를 사용하며, 로그아웃 시 해당 Refresh Token을 즉시 폐기하여
+            재사용을 방지합니다. 다만 Access Token 재발급(로그인 상태 유지) 자체는 제출된 Refresh Token을
+            새로 교체하거나 폐기하지 않으므로, 로그아웃하지 않는 한 유효기간이 만료될 때까지 계속 재사용될
+            수 있습니다.
           </li>
+          {/* P2 코드리뷰 대응(2026-09-15) — 원문은 "로그아웃 또는 토큰 재발급 시 기존 Refresh Token을
+              즉시 폐기"라고 적었으나, AuthService.refreshAccessToken()을 직접 확인한 결과 유효한
+              Refresh Token이 제출되면 새 Access Token만 발급할 뿐(jwtTokenProvider.createAccessToken()),
+              stored.revoke()를 호출하지도 않고 새 Refresh Token을 발급하지도 않는다 — 즉 제출한 Refresh
+              Token은 폐기되지 않고 그대로 재사용 가능한 상태로 남는다. revoke()를 실제로 호출하는 곳은
+              logout()뿐이다. "재발급 시에도 폐기된다"는 문장은 모든 토큰 재발급 호출에 대해 거짓인
+              진술이었다 — 로테이션/폐기 로직을 새로 구현하는 대신(백엔드 인증 흐름을 바꾸는 별도 기능
+              결정이라 정책 문구 수정 세션에서 임의로 만들지 않음) 실제 동작(로그아웃 시에만 폐기, 재발급은
+              폐기·교체 없음)에 맞춰 문구를 좁혔다. Refresh Token 로테이션 도입은 완결 필요로
+              CLAUDE.md에 남긴다. */}
           <li>
             서비스 관리자 권한과 일반 회원 권한을 분리(Role 기반 접근 제어)하여, 개인정보에 접근할 수 있는
             인력을 최소화하고 있습니다.
