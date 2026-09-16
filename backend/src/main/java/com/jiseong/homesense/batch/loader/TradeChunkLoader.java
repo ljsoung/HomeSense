@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
-import com.jiseong.homesense.trade.repository.TradeRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,13 +23,20 @@ import lombok.extern.slf4j.Slf4j;
  * 그대로 적재한다 — "조회 → INSERT 실패 시 재조회 후 UPDATE 재시도" 방식(TradeInsertGateway로 INSERT만
  * REQUIRES_NEW 격리)은 MariaDB REPEATABLE READ 스냅샷 문제로 실 배치에서 처리 대상의 2.2%가 유실되는
  * 결함이 있어 삭제했다(TradeRepository#upsert javadoc 참고).
+ *
+ * <p><b>단, 그 upsert 호출 자체는 {@link TradeUpsertGateway}를 통해 청크 트랜잭션과 별도로 격리한다</b>
+ * (Codex 코드리뷰 P1 지적, 2026-09-16) — UNIQUE 경쟁이 아닌 다른 제약 위반(오버사이즈 값, UNSIGNED
+ * 음수, 잘못된 FK 등)이 한 건이라도 발생하면 JPA 스펙상 그 순간 트랜잭션이 rollback-only로 표시되고,
+ * 아래 루프의 try/catch가 그 건만 스킵한 것처럼 보여도 loadChunk() 커밋 시점에
+ * {@code UnexpectedRollbackException}이 터져 이 청크(최대 500건) 전체가 롤백된다 — 딱 한 건의 나쁜
+ * 데이터가 청크 전체를 무효화하는 셈이다. {@link TradeUpsertGateway} javadoc에 근거를 자세히 남겼다.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 class TradeChunkLoader {
 
-    private final TradeRepository tradeRepository;
+    private final TradeUpsertGateway tradeUpsertGateway;
     private final DedupHashCalculator dedupHashCalculator;
 
     /**
@@ -78,7 +84,7 @@ class TradeChunkLoader {
      */
     private boolean upsertOne(TradeDraft draft) {
         String dedupHash = dedupHashCalculator.calculate(draft);
-        int affectedRows = tradeRepository.upsert(
+        int affectedRows = tradeUpsertGateway.upsert(
                 draft.housingType().name(),
                 draft.dealCategory().name(),
                 draft.rentType() == null ? null : draft.rentType().name(),

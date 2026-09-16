@@ -1084,6 +1084,36 @@ mysql -u root homesense < schema_all.sql
 - **영향 범위(실측)**: 처리 대상의 2.2%(150,485건 중 3,352건)가 유실되고 있었다 — 전부 이 경로였다(같은 배치 실행에서 발생한 에러 3,352건 전수가 `TradeChunkLoader`발 에러, 다른 원인(파싱·매핑 오류 등)은 0건).
 - **검증**: `TradeChunkLoaderTest`(Mockito, upsert 반환값 1/2에 따른 inserted/updated 집계, 예외 시 스킵) 재작성. `TradeChunkLoaderMariaDbIT`(Testcontainers)도 원자적 upsert에 맞춰 단순화했다 — 예전처럼 `CountDownLatch`로 커밋 순서를 인위적으로 강제할 필요가 없어져, 두 스레드가 순서 강제 없이 동시에 같은 dedup_hash를 놓고 경쟁해도 정확히 한 행만 남는지만 확인한다(SVC-NTF-01의 `NotificationServiceMariaDbIT`가 같은 이유로 단순화된 것과 동일한 결). **이번 세션은 Docker가 실제로 가동 중이라 `./gradlew integrationTest`로 직접 실행해 통과를 확인했다** — 이 저장소의 다른 여러 MariaDB IT와 달리 "작성만 하고 Docker 부재로 미실행"이 아니라 실제로 그린을 확인한 드문 사례다.
 
+### BAT-LOD-01 후속 버그 수정 (2026-09-16, PR 리뷰 지적) — 원자적 upsert가 옛 게이트웨이의 "부수적" 격리 효과까지 함께 없앴다
+
+바로 위 절이 삭제한 `TradeInsertGateway`(REQUIRES_NEW로 INSERT만 격리하던 옛 게이트웨이)는 UNIQUE
+경쟁 문제를 해결하려 만든 것이었지만, **그 과정에서 "청크 안 한 건의 DB 제약 위반이 나머지 499건까지
+막지 못하게 하는" 효과도 부수적으로 제공하고 있었다** — 원자적 upsert로 교체하며 이 부수 효과가
+있었다는 사실 자체를 놓쳤다. `TradeChunkLoader.loadChunk()`는 여전히 최대 500건을 한
+`@Transactional` 안에서 처리하며 건마다 `try/catch`로 개별 실패를 스킵하는데, 오버사이즈 문자열
+(VARCHAR 초과)·UNSIGNED 음수·잘못된 FK 같은 **진짜 제약 위반**(UNIQUE 경쟁이 아닌)이 한 건이라도
+나면 JPA 스펙상 그 예외가 트랜잭션을 rollback-only로 표시하고, catch가 그 건만 스킵한 것처럼 보여도
+`loadChunk()` 커밋 시점에 `UnexpectedRollbackException`이 터져 청크 전체(최대 500건)가 롤백된다 — 이
+프로젝트가 이미 SVC-NTF-01 `NotificationSettingRepository` 1차 구현과 옛 `TradeInsertGateway` 자체의
+존재 이유로 두 번 겪은 패턴이 세 번째로 재발한 것이다.
+
+**수정**: `TradeUpsertGateway`(신규, `batch.loader`) — `TradeRepository#upsert` 호출 단 하나만
+`@Transactional(propagation = REQUIRES_NEW)`로 감싸 청크 트랜잭션과 분리한다. 옛 게이트웨이와 달리
+격리 대상이 원자적 SQL 문장 하나뿐이라 INSERT 실패 후 재조회·UPDATE 재시도 로직 자체가 필요 없고,
+그래서 그 로직이 겪었던 REPEATABLE READ 스냅샷 문제(재조회가 격리된 트랜잭션의 커밋을 못 보는 문제)도
+재현되지 않는다 — 재조회를 아예 하지 않기 때문이다. `TradeChunkLoader`는 `TradeRepository` 대신 이
+게이트웨이에 의존한다. 커넥션 풀 고갈 위험도 없다(BAT-SCH-01이 조합을 항상 단일 스레드로 순회해
+동시에 열리는 커넥션이 최대 2개뿐 — 위 "REQUIRES_NEW 격리 INSERT 게이트웨이 패턴" 절의 1번 항목과
+같은 논거).
+
+**검증(회귀 재현 포함)**: `TradeChunkLoaderTest`(Mockito)는 `TradeRepository` 대신
+`TradeUpsertGateway`를 목킹하도록 갱신. `TradeChunkLoaderMariaDbIT`에 새 테스트를 추가해
+`building_name`을 VARCHAR(100) 초과로 만든 건과 정상 건을 한 청크에 같이 넣고, 정상 건은 커밋되고
+위반 건만 스킵되는지 실 DB로 확인했다 — **이 수정을 일부러 잠깐 되돌려(REQUIRES_NEW 제거) 같은
+테스트를 돌려 본 결과 정확히 `UnexpectedRollbackException`이 재현됐다**(회귀 테스트가 실제로 이 버그를
+잡는다는 것을 확인한 뒤 원상복구). `./gradlew integrationTest`로 10개 MariaDB IT 클래스(35 테스트)
+전부 그린 확인.
+
 ## `@Modifying` 벌크 쿼리 — flushAutomatically/clearAutomatically 원칙
 
 `@Modifying` 벌크 UPDATE/DELETE는 영속성 컨텍스트의 더티 체킹을 거치지 않고 DB에 직접 SQL을 날린다. 같은 트랜잭션 안에서 그 직전에 **다른 엔티티**(벌크 쿼리의 대상 테이블과 다른 테이블)를 도메인 메서드로 수정해 뒀다면, 그 변경은 아직 flush되지 않은 상태로 남아있을 수 있다 — Hibernate의 자동 flush는 쿼리가 실제로 참조하는 "query space"(테이블)만 보고 판단하므로, FK 컬럼을 통해 간접적으로만 연관된 다른 테이블의 미반영 변경은 감지하지 못한다.

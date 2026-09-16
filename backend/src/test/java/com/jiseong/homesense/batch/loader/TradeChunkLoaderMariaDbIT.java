@@ -121,4 +121,38 @@ class TradeChunkLoaderMariaDbIT {
         // 같은 청크의 무관한 건도 함께 커밋됐다는 증거.
         assertThat(rows).anySatisfy(row -> assertThat(row.getAptDong()).isEqualTo("103동"));
     }
+
+    /**
+     * Codex 코드리뷰 P1 지적(2026-09-16) 회귀 테스트: UNIQUE 경쟁이 아니라 **진짜 제약 위반**(여기서는
+     * VARCHAR(100) 초과 문자열)이 청크 안 한 건에서 발생해도, 그 예외가 청크 트랜잭션 전체를
+     * rollback-only로 표시해 나머지 건까지 함께 날려서는 안 된다 — {@link TradeUpsertGateway}의
+     * REQUIRES_NEW 격리가 없었다면 이 테스트는 정상 건의 행이 하나도 커밋되지 않아 실패했을 것이다
+     * (그 경우 loadChunk() 자체가 커밋 시점에 UnexpectedRollbackException을 던지며 실패한다).
+     */
+    @Test
+    void 한_건이_컬럼_길이_제약을_위반해도_나머지_정상_건은_그대로_커밋된다() {
+        String oversizedBuildingName = "가".repeat(150); // building_name VARCHAR(100) 초과
+        TradeDraft violatesConstraint = new TradeDraft(
+                HousingType.APT, DealCategory.SALE, null, "15126468", "11680", "삼성동", oversizedBuildingName,
+                "500", new BigDecimal("59.99"), (short) 3, (short) 2010, LocalDate.of(2024, 3, 1),
+                90000L, null, null, "201동", "AGENT", "강남구", LocalDate.of(2024, 3, 2), null, null, null,
+                false, null, null, null, null, null);
+        TradeDraft ok = new TradeDraft(
+                HousingType.APT, DealCategory.SALE, null, "15126468", "11680", "삼성동", "정상아파트",
+                "501", new BigDecimal("59.99"), (short) 4, (short) 2010, LocalDate.of(2024, 3, 1),
+                91000L, null, null, "202동", "AGENT", "강남구", LocalDate.of(2024, 3, 2), null, null, null,
+                false, null, null, null, null, null);
+        String okHash = dedupHashCalculator.calculate(ok);
+
+        ChunkOutcome outcome = tradeChunkLoader.loadChunk(List.of(violatesConstraint, ok));
+
+        assertThat(outcome.result().errorCount()).isEqualTo(1);
+        assertThat(outcome.result().processedCount()).isEqualTo(1);
+
+        List<Trade> rows = tradeRepository.findAll();
+        // 정상 건(jibun=501)은 커밋돼 있어야 한다.
+        assertThat(rows).anySatisfy(row -> assertThat(row.getDedupHash()).isEqualTo(okHash));
+        // 제약을 위반한 건(jibun=500)은 어떤 형태로도 저장되지 않았어야 한다.
+        assertThat(rows).noneMatch(row -> "500".equals(row.getJibun()));
+    }
 }

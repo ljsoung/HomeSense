@@ -20,7 +20,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
-import com.jiseong.homesense.trade.repository.TradeRepository;
 
 @ExtendWith(MockitoExtension.class)
 class TradeChunkLoaderTest {
@@ -28,7 +27,7 @@ class TradeChunkLoaderTest {
     private static final String FIXED_HASH = "hash-abc";
 
     @Mock
-    private TradeRepository tradeRepository;
+    private TradeUpsertGateway tradeUpsertGateway;
     @Mock
     private DedupHashCalculator dedupHashCalculator;
 
@@ -47,7 +46,7 @@ class TradeChunkLoaderTest {
     void upsert가_1을_반환하면_신규_INSERT로_집계한다() {
         TradeDraft draft = draft(1L, "1168010100");
         when(dedupHashCalculator.calculate(draft)).thenReturn(FIXED_HASH);
-        when(tradeRepository.upsert(
+        when(tradeUpsertGateway.upsert(
                 eq("APT"), eq("SALE"), isNull(), eq("15126468"), eq("11680"), eq("1168010100"), eq("역삼동"),
                 eq(1L), eq("역삼래미안"), eq("123-4"), eq(new BigDecimal("84.99")), eq((short) 10),
                 eq((short) 2005), eq(LocalDate.of(2024, 1, 15)), eq(120000L), isNull(), isNull(),
@@ -67,7 +66,7 @@ class TradeChunkLoaderTest {
         // useAffectedRows=true 드라이버 설정 기준(값이 바뀐 UPDATE=2) — TradeRepository#upsert javadoc 참고.
         TradeDraft draft = draft(1L, "1168010100");
         when(dedupHashCalculator.calculate(draft)).thenReturn(FIXED_HASH);
-        when(tradeRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        when(tradeUpsertGateway.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenReturn(2);
@@ -81,7 +80,7 @@ class TradeChunkLoaderTest {
     void 매칭_실패로_complexId와_legalDongCd가_null이면_touched_집합에_담지_않는다() {
         TradeDraft draft = draft(null, null);
         when(dedupHashCalculator.calculate(draft)).thenReturn(FIXED_HASH);
-        when(tradeRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        when(tradeUpsertGateway.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
@@ -97,7 +96,7 @@ class TradeChunkLoaderTest {
     void upsert가_런타임_예외를_던지면_해당_건만_스킵하고_error_count에_반영한다() {
         TradeDraft draft = draft(1L, "1168010100");
         when(dedupHashCalculator.calculate(draft)).thenReturn(FIXED_HASH);
-        when(tradeRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        when(tradeUpsertGateway.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenThrow(new org.springframework.dao.DataIntegrityViolationException("unexpected"));
@@ -114,7 +113,7 @@ class TradeChunkLoaderTest {
         TradeDraft okDraft = draft(2L, "1168010200");
         when(dedupHashCalculator.calculate(failingDraft)).thenThrow(new IllegalStateException("hash 계산 실패"));
         when(dedupHashCalculator.calculate(okDraft)).thenReturn(FIXED_HASH);
-        when(tradeRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        when(tradeUpsertGateway.upsert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
                 any(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
