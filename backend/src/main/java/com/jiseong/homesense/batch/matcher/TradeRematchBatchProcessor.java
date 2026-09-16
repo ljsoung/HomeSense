@@ -1,5 +1,6 @@
 package com.jiseong.homesense.batch.matcher;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -129,11 +130,13 @@ class TradeRematchBatchProcessor {
         for (Trade trade : batch) {
             Long previousComplexId = trade.getComplex() == null ? null : trade.getComplex().getComplexId();
             MatchMethod previousMatchMethod = trade.getMatchMethod();
+            BigDecimal previousMatchConfidence = trade.getMatchConfidence();
 
             MatchResult result = complexMasterMatcher.matchComplex(toDraft(trade), trade.getLegalDistrictCode());
 
             boolean same = Objects.equals(previousComplexId, result.complexId())
-                    && previousMatchMethod == result.matchMethod();
+                    && previousMatchMethod == result.matchMethod()
+                    && confidenceEquals(previousMatchConfidence, result.matchConfidence());
             if (same) {
                 unchanged++;
             } else {
@@ -143,6 +146,20 @@ class TradeRematchBatchProcessor {
         }
 
         return new BatchOutcome(batch.get(batch.size() - 1).getTradeId(), unchanged, changed, true);
+    }
+
+    /**
+     * complex_id/match_method가 같아도 매처 개정으로 match_confidence만 바뀌는 경우(예: EXACT 판정 안에서
+     * "명칭 유사" 0.800 → "명칭 완전일치" 1.000처럼 신뢰도 계산 로직만 조정된 경우)가 있어 별도로
+     * 비교한다 — 이 값도 이 유지보수 배치가 갱신해야 할 세 필드 중 하나다(클래스 상단 javadoc 참고).
+     * {@link BigDecimal#equals}는 스케일까지 비교해 값이 같아도 스케일이 다르면(예: {@code 1.0} vs
+     * {@code 1.00}) false를 반환하므로, 값 자체만 비교하는 {@link BigDecimal#compareTo}를 쓴다.
+     */
+    private boolean confidenceEquals(BigDecimal previous, BigDecimal current) {
+        if (previous == null || current == null) {
+            return previous == current;
+        }
+        return previous.compareTo(current) == 0;
     }
 
     /**

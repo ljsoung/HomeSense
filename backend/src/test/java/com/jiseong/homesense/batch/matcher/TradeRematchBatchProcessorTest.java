@@ -45,7 +45,8 @@ class TradeRematchBatchProcessorTest {
     @InjectMocks
     private TradeRematchBatchProcessor processor;
 
-    private static Trade trade(Long id, Complex complex, MatchMethod matchMethod, String dedupHash) {
+    private static Trade trade(Long id, Complex complex, MatchMethod matchMethod, BigDecimal matchConfidence,
+            String dedupHash) {
         return Trade.builder()
                 .tradeId(id)
                 .housingType(HousingType.APT)
@@ -60,6 +61,7 @@ class TradeRematchBatchProcessorTest {
                 .cancelYn(false)
                 .complex(complex)
                 .matchMethod(matchMethod)
+                .matchConfidence(matchConfidence)
                 .dedupHash(dedupHash)
                 .legalDistrictCode(LegalDistrictCode.builder()
                         .legalDongCd("1168010100")
@@ -71,7 +73,7 @@ class TradeRematchBatchProcessorTest {
     }
 
     private static Trade unmatchedTrade(Long id, String dedupHash) {
-        return trade(id, null, null, dedupHash);
+        return trade(id, null, null, null, dedupHash);
     }
 
     @Test
@@ -118,7 +120,8 @@ class TradeRematchBatchProcessorTest {
         // complex_id 유무와 무관하게 이 행을 다시 매처에 태워, 지번이 정확히 일치하는 complexId=7로
         // EXACT 재배정돼야 함을 검증한다.
         Complex staleWrongMatch = Complex.builder().complexId(5L).build();
-        Trade misassigned = trade(3L, staleWrongMatch, MatchMethod.SIMILAR, "hash-for-complex-5");
+        Trade misassigned = trade(3L, staleWrongMatch, MatchMethod.SIMILAR, new BigDecimal("0.850"),
+                "hash-for-complex-5");
         LocalDateTime cutoff = LocalDateTime.of(2026, 9, 16, 13, 0);
 
         when(tradeRepository.findByLegalDistrictCodeIsNotNullAndUpdatedAtBeforeAndTradeIdGreaterThanOrderByTradeIdAsc(
@@ -141,7 +144,7 @@ class TradeRematchBatchProcessorTest {
         // 이미 올바르게 EXACT로 매칭된 행이 다시 대상에 포함돼도(멱등) 불필요한 갱신이 없어야 한다.
         // complex_id가 안 바뀌므로 dedup_hash 재계산 자체가 일어나지 않아야 한다(calculate() 미호출).
         Complex alreadyCorrect = Complex.builder().complexId(7L).build();
-        Trade correct = trade(4L, alreadyCorrect, MatchMethod.EXACT, "hash-for-complex-7");
+        Trade correct = trade(4L, alreadyCorrect, MatchMethod.EXACT, new BigDecimal("1.000"), "hash-for-complex-7");
         LocalDateTime cutoff = LocalDateTime.of(2026, 9, 16, 13, 0);
 
         when(tradeRepository.findByLegalDistrictCodeIsNotNullAndUpdatedAtBeforeAndTradeIdGreaterThanOrderByTradeIdAsc(
@@ -159,9 +162,34 @@ class TradeRematchBatchProcessorTest {
     }
 
     @Test
+    void complexId와_matchMethod가_같아도_matchConfidence만_바뀌면_changed로_집계하고_applyRematch를_호출한다() {
+        // 매처 개정으로 EXACT 판정 안에서 신뢰도 계산 로직만 조정된 경우(예: 0.800 -> 1.000) — complex_id/
+        // match_method는 그대로라 dedup_hash는 영향받지 않지만(complexId 불변이라 재계산 자체가 없다),
+        // match_confidence는 반드시 갱신돼야 한다.
+        Complex sameComplex = Complex.builder().complexId(7L).build();
+        Trade staleConfidence = trade(5L, sameComplex, MatchMethod.EXACT, new BigDecimal("0.800"),
+                "hash-for-complex-7");
+        LocalDateTime cutoff = LocalDateTime.of(2026, 9, 16, 13, 0);
+
+        when(tradeRepository.findByLegalDistrictCodeIsNotNullAndUpdatedAtBeforeAndTradeIdGreaterThanOrderByTradeIdAsc(
+                eq(cutoff), eq(0L), any()))
+                .thenReturn(List.of(staleConfidence));
+        when(complexMasterMatcher.matchComplex(any(), any()))
+                .thenReturn(MatchResult.exact(7L, new BigDecimal("1.000")));
+
+        BatchOutcome outcome = processor.processUpdatedBeforeBatch(cutoff, 0L);
+
+        assertThat(outcome.changed()).isEqualTo(1);
+        assertThat(outcome.unchanged()).isZero();
+        verify(tradeRepository).applyRematch(eq(5L), eq(7L), eq(MatchMethod.EXACT.name()),
+                eq(new BigDecimal("1.000")), eq("hash-for-complex-7"), any());
+        verify(dedupHashCalculator, never()).calculate(any());
+    }
+
+    @Test
     void 복구_배치는_매칭_결과를_바꾸지_않고_dedup_hash만_재계산해_다르면_갱신한다() {
         Complex complex = Complex.builder().complexId(7L).build();
-        Trade staleHashRow = trade(9L, complex, MatchMethod.EXACT, "stale-hash");
+        Trade staleHashRow = trade(9L, complex, MatchMethod.EXACT, new BigDecimal("1.000"), "stale-hash");
         when(tradeRepository.findByTradeIdGreaterThanOrderByTradeIdAsc(eq(0L), any()))
                 .thenReturn(List.of(staleHashRow));
         when(dedupHashCalculator.calculate(any())).thenReturn("correct-hash");
@@ -178,7 +206,8 @@ class TradeRematchBatchProcessorTest {
     @Test
     void 복구_배치는_이미_올바른_dedup_hash는_건드리지_않는다() {
         Complex complex = Complex.builder().complexId(7L).build();
-        Trade correctHashRow = trade(10L, complex, MatchMethod.EXACT, "already-correct-hash");
+        Trade correctHashRow = trade(10L, complex, MatchMethod.EXACT, new BigDecimal("1.000"),
+                "already-correct-hash");
         when(tradeRepository.findByTradeIdGreaterThanOrderByTradeIdAsc(eq(0L), any()))
                 .thenReturn(List.of(correctHashRow));
         when(dedupHashCalculator.calculate(any())).thenReturn("already-correct-hash");
@@ -196,7 +225,8 @@ class TradeRematchBatchProcessorTest {
         // 이미 그 정체성을 정상 수집 경로로 획득한 다른 행(target)이 있다면, 이 stale 행은 중복이므로
         // UNIQUE 제약을 위반하는 대신 삭제로 정리해야 한다.
         Trade staleDuplicate = unmatchedTrade(8L, "old-unmatched-hash-8");
-        Trade target = trade(20L, Complex.builder().complexId(99L).build(), MatchMethod.EXACT, "shared-target-hash");
+        Trade target = trade(20L, Complex.builder().complexId(99L).build(), MatchMethod.EXACT,
+                new BigDecimal("1.000"), "shared-target-hash");
 
         when(tradeRepository.findByComplexIsNullAndLegalDistrictCodeIsNotNullAndTradeIdGreaterThanOrderByTradeIdAsc(
                 eq(0L), any()))
