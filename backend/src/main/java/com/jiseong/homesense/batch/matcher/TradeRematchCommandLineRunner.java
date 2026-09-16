@@ -21,6 +21,12 @@ import lombok.RequiredArgsConstructor;
  * 포함해야 하므로 1차 패스만으로는 부족하다, {@link TradeRematchRunner} 클래스 javadoc 참고). cutoff를
  * "실행 시점"으로 잡아도 안전하다 — 1차 패스가 방금 고친 행은 재검사해도 결과가 같아 unchanged로만
  * 잡히고(applyRematch는 멱등), 아직 옛 로직으로 매칭된 행만 실제로 재배정된다.
+ *
+ * <p>{@code --mode=repair-hash}는 {@code repairDedupHashes()}를 실행한다 — 매칭 결과는 건드리지 않고
+ * dedup_hash만 현재 상태 기준으로 재계산해 바로잡는다. {@code applyChange()}가 dedup_hash를 함께
+ * 갱신하도록 고치기 전에 1·2차 패스가 이미 만들어낸 stale dedup_hash(Codex 코드리뷰 P1 지적)를
+ * 정리할 때 한 번 실행하면 된다 — 그 수정 이후의 재매칭은 스스로 dedup_hash를 맞추므로 이 모드를
+ * 반복 실행할 필요가 없다.
  */
 @Component
 @Profile("rematch")
@@ -28,13 +34,16 @@ import lombok.RequiredArgsConstructor;
 public class TradeRematchCommandLineRunner implements CommandLineRunner {
 
     private static final String FULL_MODE_ARG = "--mode=full";
+    private static final String REPAIR_HASH_MODE_ARG = "--mode=repair-hash";
 
     private final TradeRematchRunner tradeRematchRunner;
 
     @Override
     public void run(String... args) {
         List<String> argList = Arrays.asList(args);
-        if (argList.contains(FULL_MODE_ARG)) {
+        if (argList.contains(REPAIR_HASH_MODE_ARG)) {
+            tradeRematchRunner.repairDedupHashes();
+        } else if (argList.contains(FULL_MODE_ARG)) {
             tradeRematchRunner.rematchUpdatedBefore(LocalDateTime.now());
         } else {
             tradeRematchRunner.rematchUnmatched();

@@ -122,16 +122,30 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
             LocalDateTime cutoff, Long tradeId, Pageable pageable);
 
     /**
+     * BAT-MAT-02 dedup_hash 전수 복구 커서(TradeRematchRunner.repairDedupHashes()) — 매칭 여부와
+     * 무관하게 테이블 전체를 trade_id 오름차순으로 순회한다.
+     */
+    List<Trade> findByTradeIdGreaterThanOrderByTradeIdAsc(Long tradeId, Pageable pageable);
+
+    /**
      * BAT-MAT-02 재매칭 전용(TradeRematchRunner) — {@link #upsert}가 의도적으로 보존하는 매칭
      * 필드(complex_id/match_method/match_confidence)를, 매처 로직이 수정된 뒤 이미 적재된 stale
      * 미매칭 행에 한해 명시적으로 갱신한다. 일반 수집 경로(upsert)와 완전히 분리된 별도 메서드로 둬,
      * "재매칭은 upsert의 책임이 아니다"는 기존 설계를 건드리지 않는다.
+     *
+     * <p>{@code dedupHash}도 함께 갱신한다(Codex 코드리뷰 P1 지적) — {@code DedupHashCalculator}는
+     * 매칭 성공 건이면 complex_id를, 실패 건이면 "UNMATCHED|sggCd|umdNm|buildingName|jibun"을 식별자로
+     * 쓴다({@code DedupHashCalculator} javadoc 참고). complex_id만 바꾸고 dedup_hash를 그대로 두면,
+     * 다음 정상 수집(BAT-SCH-01) 때 같은 실거래를 다시 파싱한 draft는 새 complex_id 기준 해시를 계산해
+     * 이 행의 저장된(옛) 해시와 달라진다 — {@link #upsert}의 UNIQUE 제약 매칭이 빗나가 완전히 새로운
+     * 행으로 INSERT되며 같은 실거래가 두 행으로 중복된다. {@code TradeRematchBatchProcessor}가 이
+     * 메서드를 호출하기 전에 새 dedup_hash를 직접 계산해 넘긴다.
      */
     @Modifying
     @Query(value = """
             UPDATE trade
             SET complex_id = :complexId, match_method = :matchMethod, match_confidence = :matchConfidence,
-                updated_at = :now
+                dedup_hash = :dedupHash, updated_at = :now
             WHERE trade_id = :tradeId
             """, nativeQuery = true)
     int applyRematch(
@@ -139,6 +153,7 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
             @Param("complexId") Long complexId,
             @Param("matchMethod") String matchMethod,
             @Param("matchConfidence") BigDecimal matchConfidence,
+            @Param("dedupHash") String dedupHash,
             @Param("now") LocalDateTime now);
 
     /** SVC-CPX-01.getDetail()/getPopular() 대표 거래 — 취소되지 않은 거래 중 가장 최근 1건. */

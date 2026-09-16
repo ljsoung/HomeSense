@@ -8,6 +8,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.jiseong.homesense.batch.loader.DedupHashCalculator;
 import com.jiseong.homesense.batch.parser.dto.TradeDraft;
 import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.trade.entity.Trade;
@@ -44,6 +45,7 @@ class TradeRematchBatchProcessor {
 
     private final TradeRepository tradeRepository;
     private final ComplexMasterMatcher complexMasterMatcher;
+    private final DedupHashCalculator dedupHashCalculator;
 
     /**
      * 배치 처리 결과. {@code lastTradeId}는 이 배치의 마지막 행의 trade_id(커서 전진용, 배치가
@@ -72,6 +74,51 @@ class TradeRematchBatchProcessor {
         return process(batch);
     }
 
+    /**
+     * dedup_hash 전수 복구용 배치 — 매칭을 다시 돌리지 않고(현재 저장된 complex_id/match_method/
+     * match_confidence를 그대로 신뢰), 그 값 기준으로 dedup_hash만 다시 계산해 저장된 값과 다르면
+     * {@link #reconcileHashCollision}·{@code applyRematch}로 바로잡는다. {@link #applyChange}와 달리
+     * complex_id 변경 여부를 게이트로 삼지 않고 매번 재계산한다 — 이 메서드의 목적 자체가 "저장된
+     * 해시가 지금 매칭 상태와 맞는지"를 전수 검증하는 것이라 게이트를 걸 이유가 없다.
+     */
+    @Transactional
+    BatchOutcome repairDedupHashBatch(Long cursor) {
+        List<Trade> batch = tradeRepository.findByTradeIdGreaterThanOrderByTradeIdAsc(cursor, PageRequest.of(0, PAGE_SIZE));
+        if (batch.isEmpty()) {
+            return BatchOutcome.empty();
+        }
+
+        int unchanged = 0;
+        int changed = 0;
+        for (Trade trade : batch) {
+            Long complexId = trade.getComplex() == null ? null : trade.getComplex().getComplexId();
+            String legalDongCd = trade.getLegalDistrictCode() == null
+                    ? null : trade.getLegalDistrictCode().getLegalDongCd();
+            TradeDraft draft = toDraft(trade)
+                    .withMatch(legalDongCd, complexId, trade.getMatchMethod(), trade.getMatchConfidence());
+            String expectedHash = dedupHashCalculator.calculate(draft);
+
+            if (expectedHash.equals(trade.getDedupHash())) {
+                unchanged++;
+                continue;
+            }
+
+            changed++;
+            if (reconcileHashCollision(trade.getTradeId(), expectedHash)) {
+                log.info("BAT-MAT-02 dedup_hash 복구: tradeId={}는 이미 다른 행과 동일 식별자로 수렴해 삭제함",
+                        trade.getTradeId());
+                continue;
+            }
+            tradeRepository.applyRematch(trade.getTradeId(), complexId,
+                    trade.getMatchMethod() == null ? null : trade.getMatchMethod().name(),
+                    trade.getMatchConfidence(), expectedHash, LocalDateTime.now());
+            log.info("BAT-MAT-02 dedup_hash 복구: tradeId={}, {} -> {}", trade.getTradeId(),
+                    trade.getDedupHash(), expectedHash);
+        }
+
+        return new BatchOutcome(batch.get(batch.size() - 1).getTradeId(), unchanged, changed, true);
+    }
+
     private BatchOutcome process(List<Trade> batch) {
         if (batch.isEmpty()) {
             return BatchOutcome.empty();
@@ -90,16 +137,66 @@ class TradeRematchBatchProcessor {
             if (same) {
                 unchanged++;
             } else {
-                tradeRepository.applyRematch(trade.getTradeId(), result.complexId(),
-                        result.matchMethod() == null ? null : result.matchMethod().name(),
-                        result.matchConfidence(), LocalDateTime.now());
                 changed++;
-                log.info("BAT-MAT-02 재배정: tradeId={}, {}({}) -> {}({})", trade.getTradeId(),
-                        previousComplexId, previousMatchMethod, result.complexId(), result.matchMethod());
+                applyChange(trade, previousComplexId, previousMatchMethod, result);
             }
         }
 
         return new BatchOutcome(batch.get(batch.size() - 1).getTradeId(), unchanged, changed, true);
+    }
+
+    /**
+     * complex_id가 실제로 바뀌는 경우(null↔값, 값↔다른 값)에만 dedup_hash를 재계산해 함께 갱신한다 —
+     * {@link DedupHashCalculator}의 식별자가 complex_id 유무·값에 따라 달라지기 때문이다(그 javadoc
+     * 참고). complex_id만 갱신하고 dedup_hash를 그대로 두면, 다음 정상 수집(BAT-SCH-01)이 같은
+     * 실거래를 다시 파싱할 때 새 complex_id 기준 해시를 계산해 이 행의 저장된(옛) 해시와 달라지고,
+     * {@code upsert()}의 UNIQUE 매칭이 빗나가 같은 실거래가 두 행으로 중복 적재된다(Codex 코드리뷰
+     * P1 지적).
+     *
+     * <p>재계산한 해시를 이미 다른 행이 쓰고 있으면({@link #reconcileHashCollision}) 두 행이 재매칭
+     * 결과 사실상 같은 실거래로 수렴한 것이다 — 그 다른 행은 이미 정상 수집 경로로 올바른 정체성을
+     * 얻은 행이므로 이 stale 행을 삭제해 중복을 해소하고, UNIQUE 제약을 그대로 위반하게 두지 않는다.
+     */
+    private void applyChange(Trade trade, Long previousComplexId, MatchMethod previousMatchMethod, MatchResult result) {
+        Long tradeId = trade.getTradeId();
+        String dedupHash = trade.getDedupHash();
+
+        if (!Objects.equals(previousComplexId, result.complexId())) {
+            String legalDongCd = trade.getLegalDistrictCode() == null
+                    ? null : trade.getLegalDistrictCode().getLegalDongCd();
+            TradeDraft draftForHash = toDraft(trade)
+                    .withMatch(legalDongCd, result.complexId(), result.matchMethod(), result.matchConfidence());
+            String candidateHash = dedupHashCalculator.calculate(draftForHash);
+
+            if (!candidateHash.equals(dedupHash)) {
+                if (reconcileHashCollision(tradeId, candidateHash)) {
+                    log.info("BAT-MAT-02 재매칭: tradeId={}는 재계산된 dedup_hash를 이미 다른 행이 쓰고 있어 "
+                            + "중복으로 판단해 삭제함", tradeId);
+                    return;
+                }
+                dedupHash = candidateHash;
+            }
+        }
+
+        tradeRepository.applyRematch(tradeId, result.complexId(),
+                result.matchMethod() == null ? null : result.matchMethod().name(),
+                result.matchConfidence(), dedupHash, LocalDateTime.now());
+        log.info("BAT-MAT-02 재배정: tradeId={}, {}({}) -> {}({})", tradeId,
+                previousComplexId, previousMatchMethod, result.complexId(), result.matchMethod());
+    }
+
+    /**
+     * @return true면 targetHash를 이미 다른 행이 쓰고 있어 tradeId 행을 삭제했다(호출자는
+     *         applyRematch를 더 이상 호출하면 안 된다). false면 충돌이 없어 그대로 진행하면 된다.
+     */
+    private boolean reconcileHashCollision(Long tradeId, String targetHash) {
+        return tradeRepository.findByDedupHash(targetHash)
+                .filter(target -> !target.getTradeId().equals(tradeId))
+                .map(target -> {
+                    tradeRepository.deleteById(tradeId);
+                    return true;
+                })
+                .orElse(false);
     }
 
     /**

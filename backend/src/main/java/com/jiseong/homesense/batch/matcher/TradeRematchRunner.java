@@ -1,6 +1,7 @@
 package com.jiseong.homesense.batch.matcher;
 
 import java.time.LocalDateTime;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Component;
 
@@ -58,19 +59,7 @@ public class TradeRematchRunner {
      * 대상으로 삼는다.
      */
     public RematchSummary rematchUnmatched() {
-        int unchanged = 0;
-        int changed = 0;
-        Long cursor = 0L;
-
-        BatchOutcome outcome = batchProcessor.processUnmatchedBatch(cursor);
-        while (outcome.hasMore()) {
-            unchanged += outcome.unchanged();
-            changed += outcome.changed();
-            cursor = outcome.lastTradeId();
-            outcome = batchProcessor.processUnmatchedBatch(cursor);
-        }
-
-        RematchSummary summary = new RematchSummary(unchanged, changed);
+        RematchSummary summary = runToCompletion(batchProcessor::processUnmatchedBatch);
         log.info("BAT-MAT-02 재매칭(1차, complex_id IS NULL) 완료: unchanged={}, changed={}",
                 summary.unchanged(), summary.changed());
         return summary;
@@ -83,21 +72,41 @@ public class TradeRematchRunner {
      * 행이 다시 포함돼도 안전하다 — 그 행들은 unchanged로만 집계된다.
      */
     public RematchSummary rematchUpdatedBefore(LocalDateTime cutoff) {
+        RematchSummary summary = runToCompletion(cursor -> batchProcessor.processUpdatedBeforeBatch(cutoff, cursor));
+        log.info("BAT-MAT-02 재매칭(2차, updated_at<{}) 완료: unchanged={}, changed={}",
+                cutoff, summary.unchanged(), summary.changed());
+        return summary;
+    }
+
+    /**
+     * dedup_hash 전수 복구 — 매칭 결과(complex_id/match_method/match_confidence)는 전혀 바꾸지 않고,
+     * 각 행의 현재 매칭 상태를 기준으로 dedup_hash만 다시 계산해 저장된 값과 다르면 바로잡는다.
+     * {@link #rematchUnmatched()}/{@link #rematchUpdatedBefore(LocalDateTime)}가 이 메서드보다 먼저
+     * 존재했을 때는 {@code applyRematch()}가 dedup_hash를 갱신하지 않아, 그 두 패스가 이미 만들어낸
+     * "changed" 행들의 dedup_hash가 새 complex_id와 맞지 않는 채로 DB에 남아있었다(Codex 코드리뷰 P1
+     * 지적 — {@link TradeRematchBatchProcessor#applyChange} 수정으로 이후 재매칭부터는 발생하지 않지만,
+     * 그 수정 전에 이미 만들어진 기존 stale 행은 남아있으므로 한 번은 이 메서드로 정리해야 한다).
+     */
+    public RematchSummary repairDedupHashes() {
+        RematchSummary summary = runToCompletion(batchProcessor::repairDedupHashBatch);
+        log.info("BAT-MAT-02 dedup_hash 전수 복구 완료: unchanged={}, changed={}",
+                summary.unchanged(), summary.changed());
+        return summary;
+    }
+
+    private RematchSummary runToCompletion(Function<Long, BatchOutcome> nextBatch) {
         int unchanged = 0;
         int changed = 0;
         Long cursor = 0L;
 
-        BatchOutcome outcome = batchProcessor.processUpdatedBeforeBatch(cutoff, cursor);
+        BatchOutcome outcome = nextBatch.apply(cursor);
         while (outcome.hasMore()) {
             unchanged += outcome.unchanged();
             changed += outcome.changed();
             cursor = outcome.lastTradeId();
-            outcome = batchProcessor.processUpdatedBeforeBatch(cutoff, cursor);
+            outcome = nextBatch.apply(cursor);
         }
 
-        RematchSummary summary = new RematchSummary(unchanged, changed);
-        log.info("BAT-MAT-02 재매칭(2차, updated_at<{}) 완료: unchanged={}, changed={}",
-                cutoff, summary.unchanged(), summary.changed());
-        return summary;
+        return new RematchSummary(unchanged, changed);
     }
 }

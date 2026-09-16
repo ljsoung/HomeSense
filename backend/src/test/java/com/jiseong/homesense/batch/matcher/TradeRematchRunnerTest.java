@@ -59,6 +59,20 @@ class TradeRematchRunnerTest {
     }
 
     @Test
+    void dedup_hash_복구는_배치_처리기의_repairDedupHashBatch를_커서로_반복_호출한다() {
+        when(batchProcessor.repairDedupHashBatch(eq(0L)))
+                .thenReturn(new BatchOutcome(30L, 2, 1, true));
+        when(batchProcessor.repairDedupHashBatch(eq(30L)))
+                .thenReturn(BatchOutcome.empty());
+
+        RematchSummary summary = runner.repairDedupHashes();
+
+        assertThat(summary.unchanged()).isEqualTo(2);
+        assertThat(summary.changed()).isEqualTo(1);
+        verify(batchProcessor, times(2)).repairDedupHashBatch(any());
+    }
+
+    @Test
     void 두번째_패스는_cutoff를_그대로_배치_처리기에_전달하며_커서를_전진한다() {
         LocalDateTime cutoff = LocalDateTime.of(2026, 9, 16, 13, 0);
         when(batchProcessor.processUpdatedBeforeBatch(eq(cutoff), eq(0L)))
