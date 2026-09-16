@@ -101,6 +101,46 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
 
     Page<Trade> findByComplex_ComplexId(Long complexId, Pageable pageable);
 
+    /**
+     * BAT-MAT-02 재매칭 전용(TradeRematchRunner) 커서 — legal_dong_cd는 있지만(BAT-MAT-01 성공)
+     * complex_id는 없는(BAT-MAT-02 실패) 행만 골라 trade_id 오름차순으로 순회한다. 오프셋 기반
+     * 페이지네이션 대신 trade_id 커서를 쓰는 이유: 이번 순회에서 새로 매칭에 성공한 행은 WHERE
+     * 조건(complex IS NULL)에서 곧바로 빠지므로, 오프셋을 그대로 증가시키면 이미 앞에서 빠져나간
+     * 행들 때문에 남은 미매칭 행 일부를 건너뛰게 된다 — trade_id 기준 커서는 매칭 성공 여부와
+     * 무관하게 항상 앞으로만 전진해 이 문제가 없다.
+     */
+    List<Trade> findByComplexIsNullAndLegalDistrictCodeIsNotNullAndTradeIdGreaterThanOrderByTradeIdAsc(
+            Long tradeId, Pageable pageable);
+
+    /**
+     * BAT-MAT-02 재매칭 2차 패스(TradeRematchRunner) 커서 — complex_id 유무와 무관하게 {@code cutoff}
+     * 이전에 매칭(또는 최초 적재)된 행 전부를 대상으로 삼는다. 1차 패스(complex_id IS NULL)와 달리
+     * 이미 SIMILAR/EXACT로 배정된 행도 포함해야, 매처 로직이 바뀌기 전 오배정(예: 버그 C 수정 전
+     * SIMILAR로 잘못 채택된 행이 지번 비교가 살아난 뒤 EXACT로 재배정돼야 하는 경우)까지 잡을 수 있다.
+     */
+    List<Trade> findByLegalDistrictCodeIsNotNullAndUpdatedAtBeforeAndTradeIdGreaterThanOrderByTradeIdAsc(
+            LocalDateTime cutoff, Long tradeId, Pageable pageable);
+
+    /**
+     * BAT-MAT-02 재매칭 전용(TradeRematchRunner) — {@link #upsert}가 의도적으로 보존하는 매칭
+     * 필드(complex_id/match_method/match_confidence)를, 매처 로직이 수정된 뒤 이미 적재된 stale
+     * 미매칭 행에 한해 명시적으로 갱신한다. 일반 수집 경로(upsert)와 완전히 분리된 별도 메서드로 둬,
+     * "재매칭은 upsert의 책임이 아니다"는 기존 설계를 건드리지 않는다.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE trade
+            SET complex_id = :complexId, match_method = :matchMethod, match_confidence = :matchConfidence,
+                updated_at = :now
+            WHERE trade_id = :tradeId
+            """, nativeQuery = true)
+    int applyRematch(
+            @Param("tradeId") Long tradeId,
+            @Param("complexId") Long complexId,
+            @Param("matchMethod") String matchMethod,
+            @Param("matchConfidence") BigDecimal matchConfidence,
+            @Param("now") LocalDateTime now);
+
     /** SVC-CPX-01.getDetail()/getPopular() 대표 거래 — 취소되지 않은 거래 중 가장 최근 1건. */
     Optional<Trade> findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(Long complexId);
 

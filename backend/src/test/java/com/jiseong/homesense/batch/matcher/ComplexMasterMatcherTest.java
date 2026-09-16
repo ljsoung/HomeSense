@@ -261,6 +261,23 @@ class ComplexMasterMatcherTest {
     }
 
     @Test
+    void 도시_이름_자체가_시로_시작하는_단일_시군은_시를_지우지_않는다() {
+        // 실 DB 사례(2026-09-16 회귀 발견): "시흥시"는 공백이 없는 단일 시/군 표기인데, 예전 구현은
+        // "문자열 끝이 아닌 위치의 시"를 공백 유무와 무관하게 지워 "시흥시"의 첫 글자("시")까지
+        // "시+구" 분리자로 오인해 지워버렸다 — 결과 "흥시"는 complex.sigungu="시흥시"(xlsx 원본)와
+        // 영원히 달라져 시흥시 소속 거래 전체(실측 2,189건)가 1차 필터링 후보 0건으로 떨어졌었다.
+        LegalDistrictCode siheung = legalDistrictCode("경기도", "시흥시", "정왕동");
+        Complex candidate = complex(13L, "서해2단지", "정왕동", "경기도 시흥시 정왕동 1886-4 서해2단지");
+        when(complexRepository.findBySidoAndSigunguAndDongRi(eq("경기도"), eq("시흥시"), eq("정왕동")))
+                .thenReturn(List.of(candidate));
+
+        MatchResult result = matcher.matchComplex(draft("1886-4", "서해2단지"), siheung);
+
+        assertThat(result.complexId()).isEqualTo(13L);
+        assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
+    }
+
+    @Test
     void 광역시_구_표기는_영향받지_않는다() {
         // "종로구"처럼 애초에 "시"가 없는 광역시 구 표기는 정규화 규칙이 아무 변화도 주지 않아야 한다.
         Complex candidate = complex(10L, "경희궁의아침3단지", "내수동", "서울특별시 종로구 내수동 72 경희궁의아침3단지");
@@ -271,6 +288,36 @@ class ComplexMasterMatcherTest {
                 draft("72", "경희궁의아침3단지"), legalDistrictCode("서울특별시", "종로구", "내수동"));
 
         assertThat(result.complexId()).isEqualTo(10L);
+        assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
+    }
+
+    @Test
+    void 리_단위_지역은_읍면_접두어를_제거한_리_이름으로_후보를_조회한다() {
+        // 실 DB 사례: legal_district_code.eupmyeondong_name="팽성읍 송화리"(읍+리 결합형) vs
+        // complex.dong_ri="송화리"(리 이름만, 공백 없음) — 접두어 제거 없이는 findBySidoAndSigunguAndDongRi가
+        // "팽성읍 송화리"를 그대로 넘겨 항상 후보 0건이 된다(post-fix 미매칭 366건 중 354건이 이 케이스).
+        LegalDistrictCode paengseongSonghwa = legalDistrictCode("경기도", "평택시", "팽성읍 송화리");
+        Complex candidate = complex(11L, "송화아파트", "송화리", "경기도 평택시 송화리 65 송화아파트");
+        when(complexRepository.findBySidoAndSigunguAndDongRi(eq("경기도"), eq("평택시"), eq("송화리")))
+                .thenReturn(List.of(candidate));
+
+        MatchResult result = matcher.matchComplex(draft("65", "송화아파트"), paengseongSonghwa);
+
+        assertThat(result.complexId()).isEqualTo(11L);
+        assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
+    }
+
+    @Test
+    void 읍면_결합없는_단일레벨_동리는_영향받지_않는다() {
+        // 공백이 없는 일반 동/읍/면 표기는 extractComparableDongRi가 그대로 통과시켜야 한다
+        // (이미 위 여러 테스트가 이 경로를 쓰고 있지만, 회귀 방지를 위해 명시적으로 한 번 더 확인).
+        Complex candidate = complex(12L, "역삼래미안", "역삼동", "서울특별시 강남구 역삼동 123-4 역삼래미안");
+        when(complexRepository.findBySidoAndSigunguAndDongRi(eq("서울특별시"), eq("강남구"), eq("역삼동")))
+                .thenReturn(List.of(candidate));
+
+        MatchResult result = matcher.matchComplex(draft("123-4", "역삼래미안"), YEOKSAM_DONG);
+
+        assertThat(result.complexId()).isEqualTo(12L);
         assertThat(result.matchMethod()).isEqualTo(MatchMethod.EXACT);
     }
 
