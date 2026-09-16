@@ -54,8 +54,9 @@ public class NotificationService {
      * 원자적 upsert(존재하면 UPDATE, 없으면 INSERT)를 수행한다.
      *
      * <p>애초에 "조회 → 있으면 UPDATE, 없으면 INSERT"를 애플리케이션 레벨에서 분기하고, 동시 INSERT
-     * 경쟁으로 인한 UNIQUE 위반은 별도 REQUIRES_NEW 트랜잭션(TradeInsertGateway와 같은 패턴)으로
-     * 격리해 처리하도록 구현했었다. 하지만 REQUIRES_NEW로 그 트랜잭션의 rollback-only 문제를 피하더라도,
+     * 경쟁으로 인한 UNIQUE 위반은 별도 REQUIRES_NEW 트랜잭션(BAT-LOD-01이 한때 쓰던 TradeInsertGateway와
+     * 같은 패턴, 이후 같은 함정이 재발해 TradeRepository#upsert로 교체되며 삭제됐다)으로 격리해 처리하도록
+     * 구현했었다. 하지만 REQUIRES_NEW로 그 트랜잭션의 rollback-only 문제를 피하더라도,
      * MariaDB 기본 격리수준(REPEATABLE READ)에서는 실패 이후 같은(바깥) 트랜잭션에서의 재조회가 그
      * 트랜잭션이 이미 확립한 스냅샷에 묶여 경쟁에서 이긴 다른 트랜잭션의 커밋을 여전히 보지 못한다 —
      * 재조회가 다시 empty를 반환해 재시도가 실패하고 예외가 그대로 전파된다(Codex 코드리뷰 P1 지적,

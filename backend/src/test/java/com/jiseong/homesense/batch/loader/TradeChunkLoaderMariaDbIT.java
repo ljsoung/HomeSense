@@ -5,11 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -17,8 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -30,18 +23,26 @@ import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
 
 /**
- * TradeChunkLoaderTest의 "재시도" 테스트는 saveAndFlush()를 목킹해 DataIntegrityViolationException을
- * 강제로 던지는 순수 단위 테스트라 "재시도 코드가 실행된다"만 증명하고 "실제 DB against 재시도가
- * 성공적으로 커밋된다"는 증명하지 못한다. 이 테스트는 실제 MariaDB(Testcontainers) 위에서 두 트랜잭션이
- * 진짜로 같은 dedup_hash를 놓고 경쟁하게 만들어, TradeChunkLoader.upsertOne()의 재시도 경로가 실제
- * UNIQUE 제약까지 포함해 끝까지 커밋되는지 검증한다. 특히 TradeInsertGateway가 INSERT 시도를 별도
- * REQUIRES_NEW 트랜잭션으로 격리하지 못했다면, dedup_hash 충돌 시 청크 트랜잭션의 EntityManager가
- * rollback-only로 표시되어(JPA 스펙) 재시도 UPDATE가 겉보기엔 성공한 것처럼 보여도 커밋 시점에 청크
- * 전체가 롤백된다 — 이 테스트는 loadChunk() 이후 실제로 커밋된 행을 별도로 재조회해 이 실패 모드가
- * 재발하지 않는지까지 확인한다.
+ * TradeChunkLoaderTest의 upsert 반환값 테스트는 TradeRepository#upsert를 목킹해 "정확한 인자로
+ * 호출된다"만 증명하고, "원자적 INSERT ... ON DUPLICATE KEY UPDATE가 실제 DB에서 올바르게 동작하는지"는
+ * 증명하지 못한다. 이 테스트는 실제 MariaDB(Testcontainers) 위에서 이 네이티브 SQL 자체가 문법·바인딩
+ * 오류 없이 동작하는지, 그리고 TradeChunkLoader.upsertOne()이 수정된 실제 버그 시나리오 — **같은 청크
+ * 트랜잭션(단일 스레드) 안에서 같은 dedup_hash가 두 번 등장하는 경우**(data.go.kr 페이지네이션이 같은
+ * 거래를 중복으로 돌려주는 경우 등, 실 배치 재실행에서 처리 대상의 2.2% 유실로 실측된 원인) — 를
+ * 올바르게 처리하는지 검증한다.
  *
- * <p>스키마는 테이블정의서 8장 원문 전체가 아니라 이 테스트가 실제로 건드리는 최소 부분집합을
- * 재구성한 것이다(testcontainers/trade-race-schema.sql) — 권위 있는 DDL은 여전히 테이블정의서 8장이다.
+ * <p>**두 스레드의 진짜 동시 경쟁은 의도적으로 테스트하지 않는다.** BAT-SCH-01(BatchExecutionOrchestrator)이
+ * 시군구×계약월×주택유형×거래유형 조합을 항상 단일 스레드로 순회하므로(CLAUDE.md "REQUIRES_NEW 격리
+ * INSERT 게이트웨이 패턴" 절 참고) 이 파이프라인에 진짜 동시 쓰기는 없다. 실제로 두 스레드가 같은
+ * dedup_hash로 진짜 동시에 INSERT ... ON DUPLICATE KEY UPDATE를 시도하게 만들면 InnoDB가 이를
+ * 데드락으로 감지해 한쪽 트랜잭션 전체를 강제 종료시킬 수 있다(이 테스트를 처음 그렇게 작성했을 때
+ * 실제로 UnexpectedRollbackException으로 재현됐다) — 원자적 upsert가 REPEATABLE READ 스냅샷 문제는
+ * 없애지만, 진짜 동시 쓰기 상황에서의 데드락 위험까지 없애주지는 않는다. 이 위험은 배치가 24시간을
+ * 넘겨 다음 cron과 겹치는 극히 드문 시나리오에서만 이론상 성립하고, 그 시나리오 자체가 이미 별도로
+ * "우선순위 낮음"으로 문서화돼 있어(CLAUDE.md 같은 절) 여기서 추가로 다루지 않는다.
+ *
+ * <p>스키마는 테이블정의서 8장 원문이 아니라 이 테스트가 실제로 건드리는 최소 부분집합을 재구성한
+ * 것이다(testcontainers/trade-race-schema.sql) — 권위 있는 DDL은 여전히 테이블정의서 8장이다.
  *
  * <p>Docker가 필요해 기본 `./gradlew test`에서는 제외되고 `./gradlew integrationTest`로만 실행된다.
  */
@@ -73,8 +74,6 @@ class TradeChunkLoaderMariaDbIT {
     private TradeRepository tradeRepository;
     @Autowired
     private DedupHashCalculator dedupHashCalculator;
-    @Autowired
-    private PlatformTransactionManager transactionManager;
 
     private static TradeDraft draft(LocalDate registrationDate, String aptDong) {
         return new TradeDraft(
@@ -85,7 +84,7 @@ class TradeChunkLoaderMariaDbIT {
     }
 
     /**
-     * dealDate/dealAmount가 달라 winnerDraft/loserDraft와 절대 같은 dedup_hash를 만들지 않는 별개 건.
+     * dealDate/dealAmount가 달라 아래 두 draft와 절대 같은 dedup_hash를 만들지 않는 별개 건.
      */
     private static TradeDraft unrelatedDraft() {
         return new TradeDraft(
@@ -96,103 +95,64 @@ class TradeChunkLoaderMariaDbIT {
     }
 
     @Test
-    void 두_트랜잭션이_같은_dedup_hash로_동시에_INSERT를_시도하면_하나는_재시도로_UPDATE에_성공하고_같은_청크의_다른_건도_함께_커밋된다()
-            throws Exception {
-        TradeDraft winnerDraft = draft(LocalDate.of(2024, 1, 20), "101동");
-        TradeDraft loserDraft = draft(LocalDate.of(2024, 1, 25), "102동");
-        // dedup_hash 충돌과 무관한, 같은 청크에 함께 들어가는 정상 건 — TradeInsertGateway의 REQUIRES_NEW
-        // 격리가 없다면 loserDraft의 충돌로 청크 트랜잭션 전체가 rollback-only로 표시되어 이 건까지
-        // 함께 유실된다(코드리뷰에서 지적된 "최대 500건 전체 유실" 시나리오를 그대로 재현).
-        TradeDraft unrelatedDraft = unrelatedDraft();
-        String expectedHash = dedupHashCalculator.calculate(winnerDraft);
-        // aptDong/registrationDate만 다르고 나머지 필드(complexId 포함, 둘 다 null)는 같으므로
-        // 두 draft는 반드시 같은 dedup_hash를 만든다.
-        assertThat(dedupHashCalculator.calculate(loserDraft)).isEqualTo(expectedHash);
-        assertThat(dedupHashCalculator.calculate(unrelatedDraft)).isNotEqualTo(expectedHash);
+    void 같은_청크에서_같은_dedup_hash가_두_번_나오면_두_번째는_첫_번째를_UPDATE하고_나머지_건도_함께_커밋된다() {
+        // 실 배치 재실행에서 재현된 버그 시나리오 그대로: 단일 스레드가 한 청크 안에서 같은 거래를
+        // (페이지네이션 중복 등으로) 두 번 만난다. 첫 번째는 INSERT, 두 번째는 그 자리에서 UPDATE로
+        // 처리돼야 하고, 같은 청크의 무관한 세 번째 건도 함께 정상 커밋돼야 한다.
+        TradeDraft first = draft(LocalDate.of(2024, 1, 20), "101동");
+        TradeDraft duplicate = draft(LocalDate.of(2024, 1, 25), "102동");
+        TradeDraft unrelated = unrelatedDraft();
+        String expectedHash = dedupHashCalculator.calculate(first);
+        assertThat(dedupHashCalculator.calculate(duplicate)).isEqualTo(expectedHash);
+        assertThat(dedupHashCalculator.calculate(unrelated)).isNotEqualTo(expectedHash);
 
-        CountDownLatch insertedLatch = new CountDownLatch(1);
-        CountDownLatch releaseLatch = new CountDownLatch(1);
-        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        ChunkOutcome outcome = tradeChunkLoader.loadChunk(List.of(first, duplicate, unrelated));
 
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        try {
-            // Thread A: findByDedupHash(miss) -> INSERT까지만 실행하고, releaseLatch가 열릴 때까지
-            // 커밋하지 않고 트랜잭션을 붙잡아 둔다 — "다른 배치 실행이 먼저 INSERT를 끝낸 동시성
-            // race condition"에서 "먼저 INSERT한 쪽"을 실제 트랜잭션으로 재현한다.
-            Future<?> holderFuture = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-                assertThat(tradeRepository.findByDedupHash(expectedHash)).isEmpty();
-                Trade newTrade = Trade.builder()
-                        .housingType(winnerDraft.housingType())
-                        .dealCategory(winnerDraft.dealCategory())
-                        .datasetId(winnerDraft.datasetId())
-                        .sggCd(winnerDraft.sggCd())
-                        .excluUseArea(winnerDraft.excluUseArea())
-                        .floor(winnerDraft.floor())
-                        .dealDate(winnerDraft.dealDate())
-                        .dealAmount(winnerDraft.dealAmount())
-                        .aptDong(winnerDraft.aptDong())
-                        .registrationDate(winnerDraft.registrationDate())
-                        .cancelYn(winnerDraft.cancelYn())
-                        .dedupHash(expectedHash)
-                        .build();
-                tradeRepository.saveAndFlush(newTrade);
-                insertedLatch.countDown();
-                awaitUninterruptibly(releaseLatch);
-            }));
+        assertThat(outcome.result().errorCount()).isZero();
+        assertThat(outcome.result().processedCount()).isEqualTo(3);
 
-            // A가 INSERT까지는 마쳤지만 아직 커밋 전이라는 것을 확인한 뒤, 같은 dedup_hash를 노리는
-            // loserDraft를 실제 프로덕션 경로(TradeChunkLoader.loadChunk)로 적재한다. REPEATABLE READ라
-            // B의 findByDedupHash는 A의 미확정 INSERT를 보지 못해 빈 결과를 받고, B도 INSERT를 시도하다
-            // A가 쥔 미확정 UNIQUE 인덱스 항목에 걸려 블록된다.
-            assertThat(insertedLatch.await(10, TimeUnit.SECONDS)).isTrue();
-            Future<ChunkOutcome> loserFuture = executor.submit(
-                    () -> tradeChunkLoader.loadChunk(List.of(loserDraft, unrelatedDraft)));
-
-            // B가 findByDedupHash를 지나 블로킹 INSERT에 도달할 시간을 준 뒤 A를 풀어 커밋시킨다 —
-            // A가 커밋되는 순간 B의 블록된 INSERT가 재개되며 실제 dedup_hash UNIQUE 위반으로 실패하고,
-            // TradeChunkLoader의 재시도(UPDATE) 경로를 탄다. loserDraft를 청크의 첫 번째 건으로 넣어
-            // 충돌을 겪게 하고, 뒤이어 같은 청크 트랜잭션에서 처리되는 unrelatedDraft가 정상적으로
-            // 커밋되는지까지 확인한다.
-            Thread.sleep(500);
-            releaseLatch.countDown();
-            holderFuture.get(10, TimeUnit.SECONDS);
-
-            ChunkOutcome outcome = loserFuture.get(10, TimeUnit.SECONDS);
-
-            assertThat(outcome.result()).isEqualTo(new LoadResult(2, 0, 1, 1));
-
-            List<Trade> rows = tradeRepository.findAll();
-            assertThat(rows).hasSize(2);
-            Trade retried = rows.stream()
-                    .filter(row -> row.getDedupHash().equals(expectedHash))
-                    .findFirst()
-                    .orElseThrow();
-            // 재시도(UPDATE)가 실제로 커밋됐다는 증거 — loserDraft의 값으로 덮였어야 한다.
-            assertThat(retried.getAptDong()).isEqualTo("102동");
-            assertThat(retried.getRegistrationDate()).isEqualTo(LocalDate.of(2024, 1, 25));
-            // 청크의 나머지 건(unrelatedDraft)도 함께 커밋됐다는 증거 — REQUIRES_NEW 격리가 없었다면
-            // loserDraft의 충돌로 이 건까지 롤백됐을 것이다.
-            assertThat(rows).anySatisfy(row -> assertThat(row.getAptDong()).isEqualTo("103동"));
-        } finally {
-            executor.shutdownNow();
-        }
+        List<Trade> rows = tradeRepository.findAll();
+        List<Trade> matched = rows.stream().filter(row -> row.getDedupHash().equals(expectedHash)).toList();
+        // dedup_hash UNIQUE 제약상 정확히 한 행만 존재해야 하고, 그 값은 나중에 처리된 duplicate로
+        // 갱신돼 있어야 한다(applyLateUpdate 대상 필드인 aptDong/registrationDate 확인).
+        assertThat(matched).hasSize(1);
+        assertThat(matched.get(0).getAptDong()).isEqualTo("102동");
+        assertThat(matched.get(0).getRegistrationDate()).isEqualTo(LocalDate.of(2024, 1, 25));
+        // 같은 청크의 무관한 건도 함께 커밋됐다는 증거.
+        assertThat(rows).anySatisfy(row -> assertThat(row.getAptDong()).isEqualTo("103동"));
     }
 
-    private void awaitUninterruptibly(CountDownLatch latch) {
-        boolean interrupted = false;
-        try {
-            while (true) {
-                try {
-                    latch.await();
-                    return;
-                } catch (InterruptedException e) {
-                    interrupted = true;
-                }
-            }
-        } finally {
-            if (interrupted) {
-                Thread.currentThread().interrupt();
-            }
-        }
+    /**
+     * Codex 코드리뷰 P1 지적(2026-09-16) 회귀 테스트: UNIQUE 경쟁이 아니라 **진짜 제약 위반**(여기서는
+     * VARCHAR(100) 초과 문자열)이 청크 안 한 건에서 발생해도, 그 예외가 청크 트랜잭션 전체를
+     * rollback-only로 표시해 나머지 건까지 함께 날려서는 안 된다 — {@link TradeUpsertGateway}의
+     * REQUIRES_NEW 격리가 없었다면 이 테스트는 정상 건의 행이 하나도 커밋되지 않아 실패했을 것이다
+     * (그 경우 loadChunk() 자체가 커밋 시점에 UnexpectedRollbackException을 던지며 실패한다).
+     */
+    @Test
+    void 한_건이_컬럼_길이_제약을_위반해도_나머지_정상_건은_그대로_커밋된다() {
+        String oversizedBuildingName = "가".repeat(150); // building_name VARCHAR(100) 초과
+        TradeDraft violatesConstraint = new TradeDraft(
+                HousingType.APT, DealCategory.SALE, null, "15126468", "11680", "삼성동", oversizedBuildingName,
+                "500", new BigDecimal("59.99"), (short) 3, (short) 2010, LocalDate.of(2024, 3, 1),
+                90000L, null, null, "201동", "AGENT", "강남구", LocalDate.of(2024, 3, 2), null, null, null,
+                false, null, null, null, null, null);
+        TradeDraft ok = new TradeDraft(
+                HousingType.APT, DealCategory.SALE, null, "15126468", "11680", "삼성동", "정상아파트",
+                "501", new BigDecimal("59.99"), (short) 4, (short) 2010, LocalDate.of(2024, 3, 1),
+                91000L, null, null, "202동", "AGENT", "강남구", LocalDate.of(2024, 3, 2), null, null, null,
+                false, null, null, null, null, null);
+        String okHash = dedupHashCalculator.calculate(ok);
+
+        ChunkOutcome outcome = tradeChunkLoader.loadChunk(List.of(violatesConstraint, ok));
+
+        assertThat(outcome.result().errorCount()).isEqualTo(1);
+        assertThat(outcome.result().processedCount()).isEqualTo(1);
+
+        List<Trade> rows = tradeRepository.findAll();
+        // 정상 건(jibun=501)은 커밋돼 있어야 한다.
+        assertThat(rows).anySatisfy(row -> assertThat(row.getDedupHash()).isEqualTo(okHash));
+        // 제약을 위반한 건(jibun=500)은 어떤 형태로도 저장되지 않았어야 한다.
+        assertThat(rows).noneMatch(row -> "500".equals(row.getJibun()));
     }
 }

@@ -20,15 +20,20 @@ import com.jiseong.homesense.trade.entity.DealCategory;
  * 유실된다 — 코드리뷰에서 지적된 실제 결함이라 원본 지번 주소(sggCd/umdNm/buildingName/jibun)를 대체
  * 식별자로 함께 넣어 미매칭 건끼리도 구분되도록 한다. 매칭 성공 건의 해시 계산식(complex_id만 사용)은
  * 문서 원문 그대로 바꾸지 않는다.
+ *
+ * <p>class/calculate() 모두 {@code public}이다 — 원래는 BAT-LOD-01(batch.loader) 전용이라
+ * package-private이었지만, BAT-MAT-02 재매칭(batch.matcher.TradeRematchBatchProcessor)이 complex_id를
+ * 바꾼 뒤 dedup_hash를 이 계산식으로 다시 구해야 해서 패키지 경계를 넘어 재사용한다(Codex 코드리뷰 P1
+ * 지적 — 아래 참고).
  */
 @Component
-class DedupHashCalculator {
+public class DedupHashCalculator {
 
     private static final String FIELD_DELIMITER = "|";
     private static final String SHA_256 = "SHA-256";
     private static final String UNMATCHED_MARKER = "UNMATCHED";
 
-    String calculate(TradeDraft draft) {
+    public String calculate(TradeDraft draft) {
         String amountSegment = draft.dealCategory() == DealCategory.SALE
                 ? String.valueOf(draft.dealAmount())
                 : draft.depositAmount() + "+" + draft.monthlyRentAmount();

@@ -227,7 +227,7 @@ com.homesense
 | `getFavoriteProperties()`의 대표 거래 없는 항목 처리 | 명시 없음 | 목록에서 제외하지 않는다 — `recentAmount`/`changeRate`/`recentDealCategory`/`recentDealDate`를 null로 두고 프론트가 "데이터 없음"을 표시하게 한다 | SVC-CPX-01.getPopular()의 `buildSummary()`는 대표 거래 없는 후보를 걸러내지만, 그건 알고리즘이 고른 후보 목록이라 데이터 없는 항목을 빼도 다른 후보로 채워지는 반면, 관심 매물은 사용자가 명시적으로 등록한 대상이라 데이터가 없다고 목록에서 조용히 빼면 안 된다고 판단했다. |
 | `getFavoriteRegions()` 구현 방식 — RGN 도메인 재사용 | Service 표 "RGN 도메인 집계 로직 재사용" | `FavoriteService`가 `RegionService` 전체가 아니라 `RegionStatsCalculator`(계산 컴포넌트) 하나만 주입받아 쓴다. `FavoriteRegionSummaryResponse.of()`는 `region.dto.RegionAutocompleteResponse.from()`도 그대로 재사용한다 | `RegionService.getInterestSummary()`가 이미 `FavoriteRegionRepository`를 직접 참조하는 반대 방향 의존을 갖고 있다(HOME-01이 FAV 서비스 계층이 없던 RGN-01 시점에 먼저 구현됨) — 두 Service가 서로를 호출하면 순환 의존이 생기므로, FAV는 RGN의 계산 컴포넌트만 가져다 쓰고 RGN의 기존 코드는 건드리지 않았다. SVC-CPX-01이 SVC-RCV-01.record()를 직접 호출하는 것과 같은 Service-to-Service 협력 패턴(CLAUDE.md 참고). |
 | `AccessDeniedException` 소속 | 설계서가 이 이름을 명시적으로 지정 | `favorite.exception.AccessDeniedException`(신규, BusinessException 상속) — Spring Security의 `org.springframework.security.access.AccessDeniedException`과는 별개 클래스 | SVC-AUTH-01.logout()의 owner 검증은 기존 `InvalidRefreshTokenException`을 재사용했지만(CLAUDE.md SVC-AUTH-01 절), FAV 설계서는 이 상황을 위한 이름을 명시적으로 지정해 새 클래스를 그대로 만들었다. |
-| `addFavoriteProperty()`/`addFavoriteRegion()`의 UNIQUE 위반 race condition 처리 | "동일 대상 중복 등록"만 언급, 동시성 처리 방식은 없음 | `existsBy()` 조회 → 없으면 `save()`, `save()`가 `DataIntegrityViolationException`을 던지면 같은 Duplicate 예외로 재번역한다(`AuthService.signup()`과 동일 패턴) | CLAUDE.md "UNIQUE 제약 동시성 회귀 테스트 원칙" 대상 — `favorite_property`/`favorite_region` 모두 (user_id, complex_id)/(user_id, legal_dong_cd) UNIQUE 제약이 있고 PK가 `GenerationType.IDENTITY`라 save() 시점에 곧바로 예외가 터진다는 전제가 성립한다. 이 전제 자체는 `FavoriteServiceMariaDbIT`(Testcontainers, 두 스레드 + `CountDownLatch`)로 검증한다 — **다만 이 리포지토리에서 Docker를 쓸 수 없어 실제 실행까지는 확인하지 못했다. `./gradlew integrationTest`로 반드시 재확인하라.** |
+| `addFavoriteProperty()`/`addFavoriteRegion()`의 UNIQUE 위반 race condition 처리 | "동일 대상 중복 등록"만 언급, 동시성 처리 방식은 없음 | `existsBy()` 조회 → 없으면 `save()`, `save()`가 `DataIntegrityViolationException`을 던지면 같은 Duplicate 예외로 재번역한다(`AuthService.signup()`과 동일 패턴) | CLAUDE.md "UNIQUE 제약 동시성 회귀 테스트 원칙" 대상 — `favorite_property`/`favorite_region` 모두 (user_id, complex_id)/(user_id, legal_dong_cd) UNIQUE 제약이 있고 PK가 `GenerationType.IDENTITY`라 save() 시점에 곧바로 예외가 터진다는 전제가 성립한다. 이 전제 자체는 `FavoriteServiceMariaDbIT`(Testcontainers, 두 스레드 + `CountDownLatch`)로 검증한다 — **2026-09-16, Docker가 가동 중인 세션에서 `./gradlew integrationTest`로 실제 실행해 통과를 확인했다**(작성 당시엔 Docker 부재로 미실행 상태였던 잔여 리스크였음). |
 
 이 도메인은 캐시를 적용하지 않는다(회원별 개인화 데이터, 설계서 명시) — `@Cacheable` 관련 결정 사항은 없다. `FavoritePropertyRepository`/`FavoriteRegionRepository`의 파생 쿼리(`existsBy...`/`findBy...`)는 SVC-RCV-01과 같은 성격(Spring Data 파생 쿼리, WHERE 절이 도메인 불변식과 직결되지 않음)이라 `FavoriteServiceTest`(Mockito)로만 검증했다.
 
@@ -240,12 +240,12 @@ Entity(`Notification`/`NotificationSetting`)와 Repository는 이번 작업 이�
 | "정확히 하나가 아님" vs "대상 미선택"의 예외 분기 | 예외표가 `InvalidNotificationTargetException`(정확히 하나가 아님)과 `MissingTargetException`(대상 미선택)을 별도로 열거 — "정확히 하나가 아님"은 문언상 "둘 다 없음"도 포함할 수 있어 두 예외의 경계가 불명확 | `favoritePropertyId`/`favoriteRegionId`가 **둘 다 채워짐** → `InvalidNotificationTargetException`, **둘 다 비어있음** → `MissingTargetException`으로 배타적으로 나눴다 | 두 예외가 별도 이름으로 존재하는 이상 겹치는 조건이 있어서는 안 된다고 판단했다 — "둘 다 지정"은 API를 잘못 호출한 개발 실수에, "둘 다 미지정"은 MY-03이 프론트에서 저장 버튼을 비활성화해 정상적으로는 막는 UI 상태(예외표의 "프론트는 저장 버튼을 비활성화해 사전 차단"이라는 설명과 정확히 대응)에 각각 대응한다고 해석했다. |
 | `updateSettings()`가 참조하는 `favoritePropertyId`/`favoriteRegionId`의 소유자 검증 | 예외표에 없음(`AccessDeniedException`은 markAsRead()의 "타인의 알림 읽음 처리 시도"만 명시) | `favoritePropertyRepository`/`favoriteRegionRepository.findById()`로 존재를 확인하고(없으면 `favorite.exception.FavoriteNotFoundException` 재사용), 소유자가 다르면 `notification.exception.AccessDeniedException`을 던진다 — markAsRead()와 같은 클래스를 재사용 | 검증 없이 저장하면 타인의 관심 매물/지역에 알림 설정을 몰래 걸 수 있는 구멍이 생긴다. `FavoriteNotFoundException`은 "존재하지 않는 관심 등록입니다"라는 메시지가 그대로 들어맞아 재사용했고(RegionNotFoundException을 FAV가 재사용한 것과 같은 패턴), `AccessDeniedException`은 "본인 소유가 아닌 자원에 대한 처리 시도"라는 같은 성격이라 markAsRead()와 하나의 클래스를 공유하도록 메시지를 도메인 특정적이지 않게 잡았다(FAV의 AccessDeniedException과 달리 두 시나리오에 걸쳐 재사용되는 점이 다르다) — **지성 확인 필요.** |
 | `markAsRead()`의 notificationId가 아예 존재하지 않는 경우 | 예외표에 없음(AccessDeniedException은 "존재하지만 소유자가 다름"만 다룬다) | 새 예외 `NotificationNotFoundException`(404)을 신설 | FavoriteNotFoundException/AccessDeniedException을 나눠 쓰는 SVC-FAV-01의 remove*()와 같은 구조 — "대상이 없음"과 "대상은 있지만 소유자가 다름"을 구분한다. |
-| `updateSettings()`의 UNIQUE 위반 race condition 처리 — **두 번 틀렸다가 원자적 upsert로 확정** | "대상당 1건 제한 upsert"만 언급, 동시성 처리 방식은 없음 | `NotificationSettingRepository.upsert()`(네이티브 `INSERT ... ON DUPLICATE KEY UPDATE`) 단일 문장으로 처리한다 — 애플리케이션 레벨의 "조회 → 있으면 UPDATE, 없으면 INSERT" 분기 자체가 없다 | 이 항목은 두 단계에 걸쳐 틀렸다. **1차 구현:** `existing.isPresent()`로 분기해 없으면 곧바로 `save()`하고, `DataIntegrityViolationException`을 잡아 재조회 후 갱신했다 — `updateSettings()`와 같은 트랜잭션에서 곧바로 `save()`했기 때문에, JPA 스펙상 flush 실패(UNIQUE 위반 포함)가 그 트랜잭션을 rollback-only로 표시해 catch 블록의 재조회·갱신이 커밋 시점에 `UnexpectedRollbackException`으로 무효화되는 결함이 있었다(`TradeChunkLoader.upsertOne()`/`TradeInsertGateway`가 이미 겪은 것과 같은 함정, 코드리뷰에서 지적). **2차 구현:** `TradeInsertGateway`와 동일하게 `NotificationSettingInsertGateway`(REQUIRES_NEW)로 INSERT만 격리해 rollback-only 문제는 해결했지만, **MariaDB 기본 격리수준(REPEATABLE READ)에서는 그 INSERT 실패 이후 같은(바깥) 트랜잭션에서의 재조회가 그 트랜잭션이 이미 확립한 스냅샷에 묶여 경쟁에서 이긴 다른 트랜잭션의 커밋을 여전히 보지 못한다는 점을 놓쳤다** — 재조회가 다시 empty를 반환해 `orElseThrow(() -> raceCondition)`가 원래 예외를 그대로 던지고, upsert가 완료되지 못한 채 예외가 사용자에게 전파된다(Codex 코드리뷰 P1 재지적, 새로 추가한 `NotificationServiceMariaDbIT`가 정확히 이 순서를 재현하도록 작성됐었다). **최종 구현:** 이 스냅샷 문제는 애플리케이션 레벨의 어떤 재시도·트랜잭션 격리 조합으로도 근본적으로 피할 수 없다고 판단해(재시도 자체를 새 트랜잭션으로 실행해도 되지만 복잡도·회귀 위험이 크다), 원자적 `INSERT ... ON DUPLICATE KEY UPDATE`로 교체했다 — 단일 SQL 문장이라 스냅샷 격리 수준과 무관하게 DB가 직접 처리하고, 애플리케이션 레벨 조회·재시도·`NotificationSettingInsertGateway`(REQUIRES_NEW)가 전부 불필요해져 삭제했다. `created_at`/`updated_at`은 이 엔티티의 다른 `@CreatedDate`/`@LastModifiedDate` 필드와 같은 시간 출처(JVM `LocalDateTime.now()`)를 쓰도록 애플리케이션에서 넘기고, DB `NOW()`에 맡기지 않았다(DB 서버와 애플리케이션 서버의 시계가 다를 수 있다는 CLAUDE.md "날짜/시간 처리" 원칙과 같은 이유). 이 SQL이 실제로 INSERT/UPDATE 양쪽 다 올바르게 처리하는지는 `NotificationServiceMariaDbIT`(Testcontainers, 두 스레드가 순서 강제 없이 그냥 동시에 `updateSettings()`를 호출 — 원자적 upsert라 특정 커밋 순서를 인위적으로 만들 필요가 없어졌다)로 검증하도록 다시 작성했다 — **다만 이 리포지토리에서 Docker 데몬을 쓸 수 없어(`DockerClientProviderStrategy` 초기화 실패로 직접 확인함) 실제 실행까지는 확인하지 못했다. `./gradlew integrationTest`로 반드시 재확인하라(SVC-FAV-01과 같은 잔여 리스크).** |
+| `updateSettings()`의 UNIQUE 위반 race condition 처리 — **두 번 틀렸다가 원자적 upsert로 확정** | "대상당 1건 제한 upsert"만 언급, 동시성 처리 방식은 없음 | `NotificationSettingRepository.upsert()`(네이티브 `INSERT ... ON DUPLICATE KEY UPDATE`) 단일 문장으로 처리한다 — 애플리케이션 레벨의 "조회 → 있으면 UPDATE, 없으면 INSERT" 분기 자체가 없다 | 이 항목은 두 단계에 걸쳐 틀렸다. **1차 구현:** `existing.isPresent()`로 분기해 없으면 곧바로 `save()`하고, `DataIntegrityViolationException`을 잡아 재조회 후 갱신했다 — `updateSettings()`와 같은 트랜잭션에서 곧바로 `save()`했기 때문에, JPA 스펙상 flush 실패(UNIQUE 위반 포함)가 그 트랜잭션을 rollback-only로 표시해 catch 블록의 재조회·갱신이 커밋 시점에 `UnexpectedRollbackException`으로 무효화되는 결함이 있었다(`TradeChunkLoader.upsertOne()`/`TradeInsertGateway`가 이미 겪은 것과 같은 함정, 코드리뷰에서 지적). **2차 구현:** `TradeInsertGateway`와 동일하게 `NotificationSettingInsertGateway`(REQUIRES_NEW)로 INSERT만 격리해 rollback-only 문제는 해결했지만, **MariaDB 기본 격리수준(REPEATABLE READ)에서는 그 INSERT 실패 이후 같은(바깥) 트랜잭션에서의 재조회가 그 트랜잭션이 이미 확립한 스냅샷에 묶여 경쟁에서 이긴 다른 트랜잭션의 커밋을 여전히 보지 못한다는 점을 놓쳤다** — 재조회가 다시 empty를 반환해 `orElseThrow(() -> raceCondition)`가 원래 예외를 그대로 던지고, upsert가 완료되지 못한 채 예외가 사용자에게 전파된다(Codex 코드리뷰 P1 재지적, 새로 추가한 `NotificationServiceMariaDbIT`가 정확히 이 순서를 재현하도록 작성됐었다). **최종 구현:** 이 스냅샷 문제는 애플리케이션 레벨의 어떤 재시도·트랜잭션 격리 조합으로도 근본적으로 피할 수 없다고 판단해(재시도 자체를 새 트랜잭션으로 실행해도 되지만 복잡도·회귀 위험이 크다), 원자적 `INSERT ... ON DUPLICATE KEY UPDATE`로 교체했다 — 단일 SQL 문장이라 스냅샷 격리 수준과 무관하게 DB가 직접 처리하고, 애플리케이션 레벨 조회·재시도·`NotificationSettingInsertGateway`(REQUIRES_NEW)가 전부 불필요해져 삭제했다. `created_at`/`updated_at`은 이 엔티티의 다른 `@CreatedDate`/`@LastModifiedDate` 필드와 같은 시간 출처(JVM `LocalDateTime.now()`)를 쓰도록 애플리케이션에서 넘기고, DB `NOW()`에 맡기지 않았다(DB 서버와 애플리케이션 서버의 시계가 다를 수 있다는 CLAUDE.md "날짜/시간 처리" 원칙과 같은 이유). 이 SQL이 실제로 INSERT/UPDATE 양쪽 다 올바르게 처리하는지는 `NotificationServiceMariaDbIT`(Testcontainers, 두 스레드가 순서 강제 없이 그냥 동시에 `updateSettings()`를 호출 — 원자적 upsert라 특정 커밋 순서를 인위적으로 만들 필요가 없어졌다)로 검증하도록 다시 작성했다 — 작성 당시엔 Docker 데몬을 쓸 수 없어(`DockerClientProviderStrategy` 초기화 실패로 직접 확인함) 미실행 상태였으나, **2026-09-16 Docker가 가동 중인 세션에서 `./gradlew integrationTest`로 실제 실행해 통과를 확인했다**(SVC-FAV-01과 함께 해소됨). |
 | `NotificationSettingResponse`에 대상(단지명/지역 전체경로) 표시용 필드 포함 여부 | Service 표는 "내 알림 설정 목록"이라고만 언급, 필드 구성 없음 | favoritePropertyId/favoriteRegionId(정확히 하나만 non-null) ID만 노출하고 이름/경로는 담지 않는다 | MY-03은 이미 FAV-01의 관심 매물/지역 목록을 화면에 갖고 있어 ID로 조인하면 되고, 여기서 다시 담으려면 `findByUser_UserId()`에 JOIN FETCH를 추가해야 하는 비용이 생긴다. **지성 확인 필요 — 화면이 실제로 두 API 응답을 조인하는 구조가 아니라면 이 판단은 틀렸다.** |
 | `GET /api/notifications` 응답 타입 | Controller 표는 `ApiResponse<PageResponse<NotificationResponse>>` | `ApiResponse<List<NotificationResponse>>`(기존 `ApiResponse.success(Page<T>)` 관례 재사용) | 위 "응답 포맷" 절의 `PageResponse<T>` 비도입 원칙 참고 — CPX/TRD 실제 Controller 소스로 이미 확정된 관례임을 재확인했다. |
 | `type`(NotificationType) 파라미터가 허용 목록 밖이면? | 예외 처리표에 없음 | 예외를 던지지 않고 필터 없음(전체)으로 조용히 폴백 | `TradeController.getHistory()`의 housingType/dealType과 같은 이유 — 설계서 예외표가 이 파라미터의 검증 실패를 별도 예외로 다루지 않는다. |
 
-이 도메인은 캐시를 적용하지 않는다(회원별 개인화 데이터, 설계서 명시). `NotificationSettingRepository`의 파생 쿼리(`findByUser_UserId`)와 `NotificationRepository`의 파생 쿼리는 FAV/RCV와 같은 성격(Spring Data 파생 쿼리, WHERE 절이 도메인 불변식과 직결되지 않음)이라 `NotificationServiceTest`(Mockito)로만 검증했다. 반면 `NotificationSettingRepository.upsert()`는 네이티브 SQL이 실제 DB에서 INSERT/UPDATE 양쪽 다 올바르게 동작하는지 자체가 Mockito로 증명할 수 없는 종류라 `NotificationServiceMariaDbIT`(Testcontainers)를 별도로 뒀다 — 위 race condition 항목 참고, 작성 시점에 Docker 데몬 부재로 미실행.
+이 도메인은 캐시를 적용하지 않는다(회원별 개인화 데이터, 설계서 명시). `NotificationSettingRepository`의 파생 쿼리(`findByUser_UserId`)와 `NotificationRepository`의 파생 쿼리는 FAV/RCV와 같은 성격(Spring Data 파생 쿼리, WHERE 절이 도메인 불변식과 직결되지 않음)이라 `NotificationServiceTest`(Mockito)로만 검증했다. 반면 `NotificationSettingRepository.upsert()`는 네이티브 SQL이 실제 DB에서 INSERT/UPDATE 양쪽 다 올바르게 동작하는지 자체가 Mockito로 증명할 수 없는 종류라 `NotificationServiceMariaDbIT`(Testcontainers)를 별도로 뒀다 — 위 race condition 항목 참고, 작성 시점엔 Docker 데몬 부재로 미실행이었으나 2026-09-16 `./gradlew integrationTest`로 통과 확인됨.
 
 ### API-SEARCH-01/SVC-SEARCH-01 인기 검색어 (신규 제안 — 반영 전 검토 필요)
 
@@ -577,7 +577,22 @@ APT+SALE(15126469/15126468)은 단 한 건도 기록되지 않았고, 조합 순
 XML 파싱(BAT-PRS-01)→법정동/단지 매칭(BAT-MAT-01/02)→적재(BAT-LOD-01)를 실제로 체이닝하는 코드는 각 컴포넌트가 완성된 뒤에도 한동안 없었다 — `BatchExecutionOrchestrator`는 `collector.collect()`만 호출하고 페이지 수를 `batch_log`에 기록할 뿐이었다. `batch.loader.TradeIngestionPipeline`(public, `TradeDataLoader`와 같은 레벨)이 이 연결을 담당한다: `BatchExecutionOrchestrator.logSuccess()`가 `ApiResponseXml`의 페이지를 `datasetId`별로 묶어 `TradeIngestionPipeline.process(housingType, dealCategory, datasetId, pageBodies)`를 데이터셋마다 호출하고, 반환된 `LoadResult`를 그대로 `batch_log`의 `processed_count`/`error_count`에 기록한다(이전엔 이 두 컬럼에 페이지 수를 대신 넣는 임시값이었다).
 
 - **데이터셋 단위로 나눠 호출하는 이유(합쳐서 한 번에 부르지 않는 이유):** APT+SALE은 기본(15126469)·상세(15126468) 두 데이터셋이 한 조합으로 묶여 들어온다. `DedupHashCalculator`가 `datasetId`를 해시에 넣지 않으므로 같은 거래가 두 데이터셋에 나타나도 같은 `dedup_hash`로 수렴하고 `TradeChunkLoader.upsertOne()`이 이미 "먼저 들어온 건 INSERT, 나중 건 UPDATE"를 보장한다 — 나눠서 두 번 `loadBatch()`를 불러도 합쳐서 한 번 부르는 것과 최종 결과가 같다. 대신 나누면 `batch_log`가 이미 데이터셋 단위 행(`dataset_id` 컬럼)이라 데이터셋마다 정확한 카운트를 그대로 기록할 수 있다.
-- **`TradeFieldMapper.supports(housingType, dealCategory)` 게이트:** 현재 APT+SALE만 `true`다. `application.properties`의 `housing-types=APT` 설정과 무관하게 `BatchExecutionOrchestrator`는 `DealCategory.values()`(SALE+RENT)를 조건 없이 순회하므로 APT+RENT 조합도 매일 수집되는데, 이 조합의 필드 매핑은 아직 실 API로 재검증되지 않았다(요구사항정의서 4.2절 각주). `TradeIngestionPipeline`은 이 게이트가 `false`면 파싱 자체를 시도하지 않고 info 로그만 남기고 빈 `LoadResult`를 반환한다 — 수집(BAT-CLC-01)·`batch_log` 기록은 그대로 되지만 적재는 조용히 건너뛴다. 연립다세대·전월세 필드 매핑이 추가되면 `TradeFieldMapper.supports()`만 넓히면 되고 파이프라인/오케스트레이터는 코드 변경이 필요 없다.
+- **`TradeFieldMapper.supports(housingType, dealCategory)` 게이트 — 아파트 전월세(APT/RENT)는 2026-09-15에 확정, 연립다세대(VILLA)는 매매·전월세 둘 다 2단계로 미룸.** `TradeIngestionPipeline`은 이 게이트가 `false`면 파싱 자체를 시도하지 않고 info 로그만 남기고 빈 `LoadResult`를 반환한다 — 수집(BAT-CLC-01)·`batch_log` 기록은 그대로 되지만 적재는 조용히 건너뛴다. `application.properties`의 `housing-types=APT` 설정과 무관하게 `BatchExecutionOrchestrator`는 `DealCategory.values()`(SALE+RENT)를 조건 없이 순회하므로 APT+RENT 조합은 매일 수집되고 있었는데, `supports()`가 APT+SALE에만 `true`를 반환해(RENT 필드 매핑 자체가 없었음) 전량 스킵되고 있었다 — `SELECT COUNT(*) FROM trade WHERE deal_category='RENT'`가 0건으로 실측 확인됨. **이 근본 원인은 "잘못된 필드명으로 `MalformedTradeItemException`이 나서 스킵된다"가 아니라 애초에 매핑을 시도조차 하지 않는 명시적 게이트였다는 점에 유의하라** — 사용자가 "가설 A"로 짐작한 결과(0건)는 맞았지만 메커니즘은 달랐다.
+
+  data.go.kr 공식 Swagger 스펙(`https://www.data.go.kr/data/{15126474,15126473}/openapi.do`에 임베딩된 `swaggerJson`을 직접 fetch, 제3자 블로그·라이브러리로 교차 확인도 완료)으로 두 RENT 데이터셋의 실제 필드명을 모두 확정했다 — **다만 실제로 구현·활성화한 건 아파트(15126474)뿐이다:**
+
+  | 데이터셋 | 필드 | 비고 |
+  | --- | --- | --- |
+  | 아파트 전월세(15126474, `RTMSDataSvcAptRent`) — **구현·활성화 완료** | `sggCd`·`umdNm`·`aptNm`·`jibun`·`excluUseAr`·`dealYear`·`dealMonth`·`dealDay`·`deposit`(보증금액, 만원)·`monthlyRent`(월세금액, 만원)·`floor`·`buildYear`·`contractTerm`·`contractType`·`useRRRight`·`preDeposit`·`preMonthlyRent` | `aptDong`/`dealingGbn`/`estateAgentSggNm`/`rgstDate`/`slerGbn`/`buyerGbn`/`landLeaseholdGbn`/`cdealType`/`cdealDay`는 공식 스펙에 **없음**(SALE 전용 개념) |
+  | 연립다세대 전월세(15126473, `RTMSDataSvcRHRent`) — **필드명만 확정, 구현은 2단계로 보류** | 위와 동일 구조 | 단지명 필드가 `aptNm`이 아니라 **`mhouseNm`**(연립다세대명) — 2단계 착수 시 이 값을 바로 가져다 쓰면 된다 |
+
+  JEONSE/WOLSE 판정은 `monthlyRent`가 "0"이면 JEONSE, 0보다 크면 WOLSE다 — 공식 스펙 description에는 명시되지 않지만 이 데이터셋을 다루는 독립된 두 소스(라이브러리 소스코드, 실사용 블로그)가 동일하게 기술하는 업계 표준 관행이다. `contractTerm`/`contractType`/`useRRRight`/`preDeposit`/`preMonthlyRent`는 `TradeDraft`/`trade`에 대응 컬럼이 없어 매핑하지 않는다("사용하지 않는 컬럼은 추가하지 않는다" 원칙, FR-3.3은 `monthlyRentAmount` 표시만 요구).
+
+  **VILLA/RENT를 함께 열지 않은 이유(코드리뷰 지적으로 축소, 최초엔 VILLA/RENT까지 같이 구현했었다) — 요구사항정의서 9장 2단계 로드맵과의 충돌.** 이 문서의 "개발 단계" 절은 2단계(연립다세대 확장)를 "신규 프로그램 0개, 1단계 프로그램의 housingType 파라미터 범위를 APT에서 APT,VILLA로 넓히기만 하면 된다"고 명시한다 — SALE/RENT를 나눠 순차 활성화하는 설계가 아니라 **VILLA 전체(SALE+RENT)를 한 시점에 함께 연다는 전제**다. RENT 필드명이 먼저 확정됐다고 VILLA/RENT만 먼저 열면 이 전제가 깨져, 정작 2단계를 시작할 때 "VILLA/RENT는 이미 되는데 왜 VILLA/SALE만 막혀 있지?" 하는 혼란을 남긴다. 그래서 `supports()`는 `dealCategory==RENT`여도 `housingType==APT`일 때만 `true`이고, VILLA는 매매·전월세 모두 여전히 `UnsupportedOperationException`을 던진다. `TradeFieldMapper.mapRentToUnifiedModel()`은 이제 housingType 분기 없이 `aptNm`만 읽는다(어차피 `supports()`가 APT만 통과시켜 이 메서드는 항상 housingType=APT로만 호출된다) — VILLA 분기를 미리 심어두는 대신, 2단계에서 VILLA/SALE 필드명을 마저 확정할 때 이 표의 `mhouseNm`을 그대로 가져다 함께 추가하면 된다.
+
+  **"대응 데이터셋" 표(위 배치 파이프라인 절) 표기 불일치 — 참고용 전체 목록이지 1단계 구현 범위가 아님.** 그 표의 헤더는 "4종"인데 실제 행은 5개(연립다세대 전월세 15126473 포함)라 사소한 문서 내 불일치가 있다 — 이 표는 국토부 API 4종 데이터셋(아파트 매매 기본/상세는 1조합으로 묶여 행이 5개가 된다) 전체를 참고용으로 나열한 것이지, "연립다세대 전월세도 1단계 범위"라는 뜻이 아니다. 실제 1단계 구현 범위는 이 절(`TradeFieldMapper.supports()`)이 최종 권위다.
+
+  **검증:** `TradeFieldMapperTest`(Mockito)에 APT+RENT의 JEONSE/WOLSE 케이스, 보증금 누락 시 예외 케이스, VILLA+RENT가 VILLA+SALE과 마찬가지로 여전히 예외를 던지는 회귀 테스트를 추가했다. 실제 배치 재실행(Docker + 국토부 API 실 호출)으로 `trade.deal_category='RENT'` 행이 실제로 적재되는지는 이번 세션 범위 밖이라 확인하지 못했다 — 다음에 배치를 재실행하면 `processed_count > 0`과 실제 RENT 행 적재를 재확인하라.
 - **파싱/매핑 에러의 단위:** 페이지 하나가 통째로 파싱 실패(`TradeXmlParsingException`)하면 그 페이지만 스킵하고 나머지 페이지는 계속 처리한다. 항목 하나가 매핑 실패(`MalformedTradeItemException`)해도 그 항목만 스킵한다(`TradeChunkLoader.loadChunk()`가 개별 draft 예외를 스킵하는 것과 같은 결). 둘 다 `LoadResult`의 `errorCount`에 합산된다.
 - **법정동/단지 매칭 실패는 에러가 아니다:** FR-2.5 목표 성공률(98.9% 이상)이 이미 100% 미만을 전제하므로, 매칭 실패 draft도 그대로 로더에 넘어가 `complex_id`/`legal_dong_cd`가 `NULL`인 채로 적재된다(`TradeChunkLoader`의 참조 헬퍼가 이미 null-safe).
 - **`LegalDistrictMatcher.matchByTradeSggCd()` 반환 타입이 설계서와 다르다** — 아래 "BAT-MAT-01/BAT-MAT-02 구현 결정 사항" 표 참고.
@@ -594,7 +609,256 @@ XML 파싱(BAT-PRS-01)→법정동/단지 매칭(BAT-MAT-01/02)→적재(BAT-LOD
 
 **주의 — BAT-MAT-02의 다른 판단들도 같은 식으로 미문서화됐을 수 있다.** 위 2인자 시그니처가 원래 구현 커밋(`0ddf0e4`)부터 있었는데도 근거가 커밋 메시지에도 CLAUDE.md에도 전혀 남아있지 않았다는 건, 그 커밋 시점에 내려진 다른 판단(지번 정규식의 "산" 접두 처리, 트라이그램 유사도 임계치 0.500/신뢰도 매핑 구간 0.600~0.850의 근거 등 `ComplexMasterMatcher.java` 안의 매직넘버들)도 같은 이유로 누락됐을 가능성이 있다는 뜻이다. 지금 전수 감사할 필요는 없지만, 다음에 `ComplexMasterMatcher`/BAT-MAT-02를 다시 열어볼 일이 생기면 — 특히 그 매직넘버들을 건드릴 때 — 커밋 로그(`git log -- .../ComplexMasterMatcher.java`)에 근거가 남아있는지 먼저 확인하라. 없다면 "왜 이 값인지" 자체가 유실된 상태라는 뜻이므로, 바꾸기 전에 지성에게 확인이 필요하다.
 
+### BAT-MAT-02 버그 수정 (2026-09-15) — 실 DB 데이터로 확정한 1차 필터링·지번 매칭 결함 2건
+
+**버그 A — `complex.sigungu` ↔ `legal_district_code.sigungu_name` 표기 불일치로 "시+구" 구조 도시의 1차 필터링 후보가 항상 0건이었다.** `ComplexMasterMatcher.matchComplex()`가 `complexRepository.findBySidoAndSigunguAndDongRi()`에 `legalDistrictCode.getSigunguName()`을 가공 없이 그대로 넘겼는데, 실제 로컬 DB(`complex` 21,680건/`legal_district_code` 20,555건)를 직접 조회해 보니 두 원천의 표기가 "시+구" 구조 도시(구가 설치된 시)에서 체계적으로 다르다 — K-apt 단지 기본정보 xlsx 유래 `complex.sigungu`는 "수원장안구"(공백 없음, "시" 생략)인데 행정안전부 법정동코드 CSV 유래 `legal_district_code.sigungu_name`은 "수원시 장안구"(공백 있음, "시" 유지)다. 수원·성남·안양·부천·안산·고양·용인·청주·천안·창원·전주·포항 등 구가 설치된 모든 시에서 동일 패턴으로 재현되고, 반대로 구가 없는 단일 시/군(목포시 등)과 광역시 소속 구(종로구 등)는 원래도 표기가 같아 문제가 없었다.
+
+**수정:** `ComplexMasterMatcher.normalizeSigungu(String raw)` 신설 — 공백 제거 후 문자열 끝이 아닌 위치의 "시"만 제거한다("목포시"처럼 "시"가 마지막 글자면 보존). `legal_district_code.sigungu_name`에만 SQL 파라미터 바인딩 직전(애플리케이션 레벨)에 적용하고 `complex.sigungu`(xlsx 원본)는 절대 건드리지 않는다 — 두 원천 모두 정부 원본 표기를 DB에 그대로 보존해야 하므로 정규화는 비교 시점에만 수행한다. `idx_complex_region(sido, sigungu, dong_ri)` 인덱스는 정규화가 파라미터 바인딩 이전에 일어나므로 그대로 탄다. 세종특별자치시(구 자체 없음, 양쪽 다 `sigungu(_name)=NULL`)는 애초에 문제가 아니었다 — Spring Data 파생 쿼리가 null 파라미터를 자동으로 `IS NULL`로 바인딩해 이미 정상 매칭된다.
+
+**근거(무효화 조건):** 정규화 규칙은 `complex.sigungu`(distinct 253건)와 `legal_district_code.sigungu_name`(distinct 264건) 전체를 정규화해 교차 검증했다 — 사용자가 예시로 든 수원·성남·청주·천안·창원·안양·부천·안산·고양·용인·전주·포항은 이 규칙 하나로 완전히 해소된다. **K-apt xlsx의 시군구 표기 규칙(공백 없음·"시" 생략)이 향후 데이터 갱신 시 바뀌면 이 규칙도 재검증이 필요하다** — 예를 들어 xlsx가 어느 시점부터 "수원시 장안구"처럼 공백을 포함해 표기하기 시작하면 이 정규화가 오히려 불일치를 만든다.
+
+**잔여 불일치 2,399개 단지(전체의 ~11%) — 표기 문제가 아니라 데이터 시점 차이, 이번 범위 밖으로 확정(지성 승인):**
+
+| 그룹 | 단지 수 | 원인 |
+| --- | --- | --- |
+| `전남광주통합특별시` | 1,615 | `complex.sido` 자체가 광주+전남을 합친 통합 표기(xlsx가 최신 행정구역 반영). `legal_district_code`는 아직 `광주광역시`/`전라남도`로 분리된 구버전 — **sido 레벨부터 불일치**해 sigungu 정규화로는 해결 불가 |
+| 화성시 신설 일반구(동탄/병점/효행/만세구) | 422 | `legal_district_code`에 이 구들이 아예 없고 `화성시`만 있음(신설구가 별도 법정동코드를 받았는지 미확인) |
+| 인천 신설 자치구(검단/서해/영종/제물포구) | 362 | `legal_district_code`가 구 개편 이전(서구/동구/중구 등) 상태 |
+
+세 그룹 모두 xlsx(2026-08 스냅샷, 최신 행정구역 반영)와 legal_district_code CSV(구버전) 사이의 데이터 시점 차이다. 실제 수정(법정동코드 CSV 재적재, 또는 sido/sigungu 별도 매핑 테이블)은 후속 과제로 남긴다 — 광주-전남 sido 매핑은 검증 안 된 최근(2026년) 행정 개편을 전제하고, 화성/인천 신설구가 실제로 별도 법정동코드를 받았는지도 확인되지 않아 지금 하드코딩하면 회귀 위험이 있다고 판단했다(지성 확인 후 범위 제외 승인).
+
+**버그 B — `legal_dong_address`가 실제로는 "...동리 지번 단지명" 형태라 지번 뒤에 단지명이 이어 붙는데, 예전 정규식이 문자열 끝($) anchor라 EXACT가 전국 0건이었다.** 클래스 javadoc과 이 문서는 이 컬럼이 "시도 시군구 동리 지번"으로 끝난다고 가정했지만, 실 DB(예: complex_id=19 "종로청계힐스테이트", `legal_dong_address`="서울특별시 종로구 숭인동 766 종로청계힐스테이트")를 조회해 보니 지번 뒤에 단지명이 그대로 붙어 있었다 — 대응 실거래(jibun="766")가 지번 완전일치임에도 `$` anchor가 절대 매치되지 않아 SIMILAR(0.850)로 오분류됐다. **기존 `ComplexMasterMatcherTest`의 모든 fixture가 단지명 없이 지번으로 끝나는 비현실적 주소("서울특별시 강남구 역삼동 123-4")를 썼던 게 이 버그가 발견되지 않은 이유다** — "legal_dong_address가 전체 주소여도 EXACT로 매칭한다"는 이름의 회귀 테스트조차 실제 데이터 형태를 반영하지 않아 이 버그를 전혀 잡지 못했다.
+
+**수정:** `Complex.dongRi`(이미 엔티티에 존재)로 주소 안에서 동리 텍스트가 끝나는 위치를 먼저 찾고, 그 바로 뒤에서 지번 토큰을 시작 앵커(`Matcher.lookingAt()`)로 추출하는 `extractJibunFromAddress(Complex)`로 교체했다 — 단지명이 무엇으로 시작하든 영향받지 않는다. `draft.jibun()`(API 원본의 단일 토큰)은 `normalizeStandaloneJibun(String)`으로 전체 일치(`matches()`)를 그대로 검사한다. 콤마로 여러 지번이 나열된 주소(예: 필지 두 곳에 걸친 단지, complex_id=13139)는 시작 앵커 특성상 첫 번째 지번만 추출되는데, 매칭 실패로 치지 않고 그 지번으로 EXACT를 시도하는 관대한 폴백으로 남겨뒀다(SVC-CPX-01/TRD-01의 기존 "조회 API의 관대한 폴백" 철학과 일치).
+
+**부차 발견(수정 대상 아님, 알려진 한계로 기록) — trade.jibun의 블록-로트 표기(162건)는 매칭 대상 자체가 못 된다.** `trade.jibun` 35,177건 중 162건(0.46%)이 `"가-238"`, `"BL-91-2"` 같은 블록-로트 표기(신도시 택지지구)다. `complex.legal_dong_address`에는 이런 표기가 전혀 없어(표본 확인) 지번 매칭이 원천적으로 불가능하다 — 버그가 아니라 알려진 한계다. "산" 접두 지번(36건)은 기존 로직이 이미 정상 처리하고 있었다(재확인 완료, 수정 불필요).
+
+**검증 1(Mockito) — 최초 검증.** `ComplexMasterMatcherTest`(14건 — 기존 8건 fixture를 실제 주소 형태로 교정 + 신규 6건: 실제 사례(종로청계힐스테이트) EXACT 재현, 콤마 다중지번 폴백, 블록-로트 비매칭, 시+구/단일시군/광역시구 정규화 3종). 코드리뷰 지적: 수정 원인 자체가 "실제 데이터 형태가 fixture와 다르다"였는데, 검증이 손으로 고른 사례 1건 + 그걸 본뜬 fixture로만 이뤄져 "Mockito로는 영속성 컨텍스트/실 데이터 버그를 못 잡는다"는 이 프로젝트 스스로의 원칙(UNIQUE 제약 동시성 절 등)과 같은 함정에 빠질 위험이 있었다.
+
+**검증 2(실 DB 전수 검증, 2026-09-15 추가) — `complex` 21,680건 전체에 수정된 `extractJibunFromAddress()` 로직을 그대로 재현해 돌렸다.** 배치 재실행이나 API 호출 없이 기존 테이블 데이터(`complex_id`/`dong_ri`/`legal_dong_address`)만으로 가능한 검증이라 비용이 거의 들지 않았다 — Python으로 Java 정규식·로직을 그대로 옮겨 21,680행 전체에 적용했다(스크래치 스크립트, 저장소에 커밋되지 않음).
+
+- **complex 마스터 지번 추출 성공률(정규식 로직 자체의 건전성 확인용): 98.953%(21,453/21,680).** **이 수치를 "FR-2.5 목표 달성"으로 읽으면 안 된다** — FR-2.5가 정의하는 목표치(98.9% 이상)는 스펙 원문상 "배치 완료 후 `batch_log.processed_count` 대비 실제 trade가 `complex_id`를 얻는 비율"이라 재는 대상 자체가 다르다. 이번 검증은 complex 21,680건이라는 고정 데이터셋 안에서 `extractJibunFromAddress()`(추출 축)가 주소 문자열에서 지번을 뽑아낼 수 있는지만 확인한 것이고, `trade.jibun`(실 API 응답값)과의 실제 비교(비교 축)는 반영하지 않는다 — 비교 축은 여전히 `ComplexMasterMatcherTest`의 fixture 6건 수준으로만 검증된 상태다(위 "부차 발견"의 블록-로트 표기 162건처럼 trade 쪽에만 있는 포맷 이슈는 이 수치에 전혀 잡히지 않는다). 98.953%와 98.9%가 근접한 건 우연이지 증명이 아니다 — **FR-2.5의 실제 매칭 성공률(거래 데이터 기준)은 배치를 재실행해 DB에 반영된 결과로 별도 확인해야 확정된다.**
+- **실패 227건(1.05%) 원인 재확인 — 애초 "블록-로트 표기 때문"이라던 추정이 틀렸다.** 실 데이터를 까보니 블록-로트 표기는 `complex.legal_dong_address`에 단 한 건도 없었고, 실패는 전부 **complex 마스터 원본 데이터 자체의 결측**이었다:
+  - **218건**: `legal_dong_address`에 지번 숫자 자체가 없음 — 동리 뒤가 공백 두 칸 후 바로 단지명/인근 역명으로 이어진다(예: `"...망우동  신내역 힐데스하임아파트"`). xlsx 원본에 지번이 미기재된 것으로 보인다.
+  - **9건**: `dong_ri` 자체가 NULL — 대부분 필지 여러 곳에 걸친 콤마 구분 다중주소(위 "동리 뒤에 여러 지번이 콤마로 나열" 사례와 같은 패턴)라 외부 xlsx 적재 과정이 단일 `dong_ri` 값을 못 뽑은 것으로 보인다. **세종특별자치시(216건, `sigungu=NULL`)와는 무관하다** — 세종 complex는 `dong_ri`가 정상적으로 채워져 있다(처음엔 두 NULL을 같은 원인으로 착각했었다, 코드리뷰에서 정정됨).
+  
+  두 유형 모두 `extractJibunFromAddress()` 로직의 결함이 아니라 complex 마스터 원본의 결측이라 EXACT가 원천적으로 불가능하고 SIMILAR/미매칭으로 정상적으로 떨어진다 — 버그가 아니라 알려진 한계로 남긴다.
+
+실제 배치 재실행(Docker + 국토부 API 실 호출)으로 `trade.match_method='EXACT'`가 실제로 0건에서 벗어나는지는 이번 세션 범위 밖이라 못 했다 — 다음에 배치를 재실행하면 이것과, "시+구" 도시(수원/성남/청주 등)의 `complex_id` 매칭률이 오르는지 재확인하라.
+
 **남은 절차:** 이 두 시그니처는 이제 실제로 서로를 호출하며 검증됐으니(`TradeIngestionPipelineTest`), 프로그램 설계서 4.4/4.5절을 이 표대로 갱신하는 것이 다음 문서 동기화 시점의 할 일이다 — 지금은 CLAUDE.md에 근거를 남기는 것으로 갈음한다.
+
+### BAT-MAT-02 실 배치 재실행 추가 조사 (2026-09-16) — stale 매칭 통계, 신규 버그 C, lawd_cd 커버리지 공백
+
+위 버그 A/B 수정 후 "`trade.match_method='EXACT'`가 실제로 0건에서 벗어나는지" 재확인하는 과정에서 시작된 조사다. 로컬 DB(포트 3307, SALE 전체 51,957건)를 직접 조회해 세 가지를 확인했다 — 배치 재실행이나 API 호출 없이 기존 테이블 데이터만으로 가능한 검증이었다.
+
+**① `TradeRepository.upsert()`가 매칭 필드를 갱신하지 않아, 버그 A/B 수정 전 stale row가 집계를 오염시킨다(설계는 의도된 것이었지만, 그 하류 효과는 이번에 처음 실측했다).** `created_at`(수집 시각) 기준으로 SALE 트레이드를 쪼개보면:
+
+| 수집 시각 | EXACT | SIMILAR | 미매칭 | 미매칭률 |
+| --- | --- | --- | --- | --- |
+| 09-14 14~15시(버그 A/B 수정 **전** 최초 수집, 35,177건) | 0 | 13,947 | 21,230 | 60.7% |
+| 09-15 18~19시(버그 A/B 수정 **후** 재수집, 16,780건) | 14,861 | 969 | 950 | **5.7%** |
+
+버그 A/B 수정으로 미매칭률이 60.7%→5.7%까지 실제로 떨어졌다는 뜻이지만, `upsert()`의 `ON DUPLICATE KEY UPDATE`가 `cancel_yn`/`cancel_date`/`registration_date`/`apt_dong`만 갱신하고 `complex_id`/`match_method`는 최초 적재 시점 값을 그대로 유지하도록 이미 설계돼 있어(`TradeRepository.java` javadoc, "재매칭은 이 upsert의 책임이 아니다"), 09-14에 먼저 들어온 21,230건은 이후 몇 차례 배치가 재실행돼도 영구히 "수정 전" 매칭 결과로 DB에 남는다 — 실제로 이 21,230건의 `updated_at`은 `created_at`과 동일해(재처리된 적이 없음) 확인됐다. **결론: 지금 이 DB의 SALE 미매칭 22,180건 중 21,230건(95.7%)은 새 매칭 로직을 반영하지 않은 stale 데이터다 — 이 상태로 매칭 실패 원인을 통계적으로 분석하면 결론이 왜곡된다.** 아래 ②는 이 오염을 배제하고 순수 post-fix(09-15) 950건만으로 다시 쪼갠 결과다. **완결 필요(우선순위 높음) — 신뢰할 수 있는 매칭 통계를 얻으려면 `trade` 테이블을 비우고 전체 재수집하거나, 기존 미매칭 행에 대해 매칭만 다시 돌리는 별도 배치(재적재가 아니라 재매칭)를 추가해야 한다. 후자를 택한다면 `upsert()`가 매칭 필드를 보존하는 지금 설계와 충돌하지 않도록 별도 경로(예: `complex_id IS NULL`인 행만 골라 `ComplexMasterMatcher`를 다시 돌리고 그 결과만 업데이트하는 일회성 마이그레이션)로 만들어야 한다 — `upsert()` 자체를 바꾸면 위 javadoc이 이미 근거를 남긴 "재매칭은 upsert 책임이 아니다"라는 설계를 깨게 된다.**
+
+**② post-fix(09-15) 950건만 대상으로 "1차 필터링 후보 존재 여부"로 재분류하면 두 개의 서로 다른 원인이 나온다:**
+
+| 구분 | 건수 | 비율 |
+| --- | --- | --- |
+| 후보없음(1차 필터링에서 이미 탈락) | 366 | 38.5% |
+| 후보있음(후보는 있는데 지번 비교에서 탈락) | 582 | 61.3% |
+
+- **후보없음 366건 중 354건(96.7%) — 신규 버그 C(미수정), 결정론적·재현 100%.** `complex.dong_ri`는 xlsx 원본이 어떤 경우에도 공백을 포함하지 않고 "리"만 저장하는데(`SELECT COUNT(*) FROM complex WHERE dong_ri LIKE '% %'` → 0), `legal_district_code.eupmyeondong_name`은 리(里) 단위 leaf 행에서 "읍/면+리"를 공백으로 결합해 저장한다(예: "팽성읍 송화리", `LegalDistrictCodeLoader.resolveNameParts()`가 원래부터 이렇게 저장 — CLAUDE.md의 기존 "리(里) 단위 leaf 행의 매칭 가능 여부" residual risk 항목 참고). `ComplexMasterMatcher`의 1차 필터링이 `c.dong_ri = l.eupmyeondong_name`로 정확 일치를 요구하는 이상, 리 단위 지역은 공백 유무 때문에 **구조적으로 후보가 0건일 수밖에 없다** — 실제로 이 366건 중 공백을 포함한 eupmyeondong_name(읍/면+리 결합형)은 354건 전부가 후보없음으로 떨어졌고, 공백 없는(단일 레벨) eupmyeondong_name 12건만 다른 원인이다. 이 residual risk 항목이 "umdNm이 읍/면 이름만 줄 가능성"으로 우려했던 반대 방향 — 실제로는 umdNm이 "읍/면+리"를 결합해서 주고(BAT-MAT-01의 `matchByTradeSggCd()`가 정확히 이 결합형 이름과 일치시켜 legal_dong_cd 매칭 자체는 성공한다), **BAT-MAT-02가 그 결합형 이름을 그대로 complex.dong_ri와 비교하려다 실패**하는 것으로 실측 확정됐다. 수정 방향(아직 미착수) — `ComplexMasterMatcher`가 `legalDistrictCode.eupmyeondongName`에서 읍/면 접두어를 제거하고 순수 "리" 이름만 추출해 `dong_ri`와 비교하도록 정규화하는 것이 유력해 보이나, 읍/면 이름 자체에 "리"로 끝나는 경우(드묾)나 공백 두 개 이상인 경우 등 엣지케이스를 실 데이터로 더 확인해야 한다 — **지성 확인 필요, 이번 세션에 코드 수정하지 않았다.**
+- **후보있음 582건 — 코드 버그로 보이지 않음, K-apt 원본 데이터의 커버리지 한계로 추정(전수 확인 안 함).** 샘플 확인(강북구 수유동 등) 결과 같은 동에 매칭 후보 단지가 존재함에도(예: 수유동에 "래미안수유"/"수유벽산" 등 8개), 실제 미매칭 거래의 건물명("경원북한산휴그린", "동대문솔하임", "스타파크" 등)이 `complex` 테이블 전체를 뒤져도 단 한 건도 존재하지 않는다 — 지번이 안 맞는 게 아니라 그 건물 자체가 K-apt 단지 기본정보에 아예 등록돼 있지 않다. 소규모/개별("나홀로") 아파트가 K-apt 등록 대상에서 빠지는 경우로 추정되나, 이 프로젝트가 xlsx 원본의 등록 기준(세대수 등)을 직접 확인한 적은 없다 — **완결 필요, 등록 기준을 확인하지 못하면 이 582건은 FR-2.5 목표치 산정 시 분모에서 빼야 하는지(애초에 매칭 대상이 아닌 거래)도 판단할 수 없다.**
+
+**③ lawd_cd 커버리지 공백 — 별도 미해결 이슈로 기록(이번 세션 범위 밖, 수정하지 않음).** `LegalDistrictCodeRepository.findDistinctActiveSggCd()`(`SELECT DISTINCT SUBSTRING(legal_dong_cd,1,5) ... WHERE is_active=true`)가 만드는 BAT-SCH-01 순회 목록(280개)은 활성 행이면 계층 레벨(시도/시군구/구) 구분 없이 전부 5자리로 뭉쳐 넣는다 — 그래서 실제로는 "시군구(약 250여 개)"보다 많은 280개가 나오는데, `batch_log`에서 `SUM(processed_count)=0`(전 기간·전 데이터셋에서 실거래가 단 한 건도 없음)인 lawd_cd 62개를 실측해 세 그룹으로 갈렸다:
+
+| 그룹 | 개수 | 실제 상태 |
+| --- | --- | --- |
+| 시도 대표코드(중간 3자리=`000`, 예: `11000`) | 16 | 무해 — data.go.kr이 시도 단위 조회는 처음부터 지원하지 않아 항상 빈 결과, 실제 데이터는 하위 시군구 코드로 정상 수집됨 |
+| 시(市) 대표코드인데 구(區) 코드가 legal_district_code에 별도로 존재(예: `41110` 수원시 ↔ `41111`/`41113`/`41115`/`41117`) | 12(수원/성남/안양/부천/안산/고양/용인/청주/천안/포항/창원/전주) | 무해 — 위 "버그 A"(시+구 도시 sigungu 표기 정규화)가 다룬 것과 같은 시+구 구조. 실거래는 구 코드로 정상 수집되고, 시 대표코드는 API 호출만 낭비하는 중복일 뿐 데이터 손실은 없다 |
+| **하위 구 코드 자체가 legal_district_code에 없음 — 진짜 커버리지 공백(데이터 손실 확정)** | **화성시(41590) 1개 + 인천 중구/동구/서구/옹진군(28110/28140/28260/28720) 4개 + 광주 5개구 전체(29110/29140/29155/29170/29200) + 전라남도 22개 시군구 전체(46110~46910)** = 32개 | `trade` 테이블에 `legal_dong_cd LIKE '29%'` 또는 `'46%'`인 행이 **0건** — 광주광역시+전라남도 전체(인구 약 300만)가 실거래 데이터 수집 자체에서 완전히 빠져 있다. 화성시·인천 3구도 마찬가지로 raw 데이터가 0건. 이미 CLAUDE.md가 "잔여 불일치 2,399개 단지"(complex 매칭 실패)로 문서화했던 화성 신설 일반구/인천 신설 자치구/광주-전남 통합 이슈가, 사실은 **complex 매칭 단계가 아니라 그보다 훨씬 앞선 원시 수집 단계(BAT-CLC-01)에서부터 100% 실패**하고 있었다는 뜻이다 — data.go.kr이 이 지역들에 대해 이미 신설/개편된 lawd_cd를 요구하는데, 우리 `legal_district_code`(구버전 CSV)는 그 신설 코드를 아예 갖고 있지 않아 옛 코드로 질의하면 항상 빈 결과(result_code 000, "정상"으로 위장된 데이터 없음)만 돌아온다. **완결 필요(우선순위 높음) — 실제 data.go.kr LAWD_CD 목록(또는 최신 법정동코드 CSV)에서 이 32개 지역의 현재 유효 코드를 확인해 legal_district_code를 갱신해야 한다. 이번 세션은 이 원인 확정까지만 하고 코드/데이터 수정은 하지 않았다.** |
+| 분류 불가(소규모 도서/산간 지역, 정상적으로 0건일 가능성) | 2(울릉군 47940, 남해군 48840) | 하위 구 코드도 없고 인구가 매우 적어 해당 2개월 창에 아파트 매매가 실제로 0건이었을 가능성을 배제할 수 없다 — 별도 조치 없이 다음 배치 결과로 재확인 |
+
+### BAT-MAT-02 버그 C 수정 + `TradeRematchRunner` 재매칭 인프라 신설 (2026-09-16)
+
+위 조사(①②)에서 확정한 두 원인 중 버그 C(리 단위 dong_ri 결합형 표기 불일치)를 실제로 수정하고,
+`TradeRepository.upsert()`가 매칭 필드를 보존해(설계상 의도) 기존 stale 행이 재수집만으로는 절대
+갱신되지 않는 문제를 메우는 재매칭 전용 배치를 신설했다. 이 절이 그 전체 과정과 도중에 발견한
+추가 버그(시흥시 회귀), 그리고 최종 결과 수치를 기록한다.
+
+**버그 C 수정** — `ComplexMasterMatcher.extractComparableDongRi(String)` 신설. 1차 필터링 직전
+`legalDistrictCode.getEupmyeondongName()`이 "읍/면+리" 결합형(예: "팽성읍 송화리")이면 마지막 공백
+이후 토큰("송화리")만 취해 `complex.dong_ri`(항상 공백 없는 "리" 이름만)와 비교하도록 정규화했다.
+`normalizeSigungu()`와 같은 원칙(legal_district_code 쪽 값에만 적용, complex.dong_ri는 안 건드림).
+검증: `ComplexMasterMatcherTest`에 회귀 테스트 2건 추가.
+
+**`TradeRematchRunner`/`TradeRematchBatchProcessor` — 재매칭 전용 유지보수 배치(신규, `batch.matcher`
+패키지).** 매일 도는 BAT-SCH-01 파이프라인에는 배선하지 않고, `rematch` 스프링 프로필로만 활성화되는
+`TradeRematchCommandLineRunner`로 수동 트리거한다(`./gradlew bootRun --args='--spring.profiles.active=local,rematch'`,
+2차 패스는 `--mode=full` 추가). 두 가지 패스를 지원한다:
+
+- **1차 패스(`rematchUnmatched()`)**: `complex_id IS NULL AND legal_dong_cd IS NOT NULL`인 행만 대상.
+- **2차 패스(`rematchUpdatedBefore(cutoff)`)**: `complex_id` 유무와 무관하게 `updated_at < cutoff`인
+  행 전부 대상 — **1차 패스만으로는 불충분하다는 게 이번에 실측으로 확인됐다.** 버그 A/B(지번 $ 앵커)
+  수정 전 지번 비교가 막혀 있던 시절 "그나마 비슷한 단지"로 SIMILAR 오배정된 행은 `complex_id`가
+  이미 채워져 있어 1차 패스가 건너뛴다 — 그 오배정을 바로잡으려면 이미 매칭된 행도 다시 돌려야 한다.
+
+두 패스 모두 트레이드ID 커서로 순회하며 `applyRematch()`(새 네이티브 UPDATE, 매칭 3필드+updated_at만
+갱신)는 결과가 이전과 같으면 아예 호출하지 않는다(멱등) — 그래서 1차 패스가 이미 고친 행이 2차 패스
+대상에 다시 포함돼도 안전하게 unchanged로만 집계된다.
+
+**설계 실수와 수정 — 배치 전체를 하나의 트랜잭션으로 묶으면 안 된다(중요, 재발 방지용으로 남김).**
+최초 구현은 `rematchUnmatched()` 메서드 전체(커서 순회 루프 전부)에 `@Transactional`을 걸었다 —
+그 결과 수만 건을 처리하는 전체 실행(1시간 반 이상)이 **단 하나의 트랜잭션**이 됐다. 실행 중 앱
+로그는 재배정을 계속 찍는데도 다른 커넥션(DB 직접 조회)에서는 `MAX(updated_at)`이 몇 시간째 전혀
+움직이지 않는 것으로 발견했다 — 커밋되지 않은 변경은 그 트랜잭션을 연 커넥션 밖에서 전혀 보이지
+않기 때문이다. 이 설계의 위험: (1) 중간에 프로세스가 죽거나 커넥션이 끊기면 그때까지의 작업이
+전부 롤백돼 사라진다, (2) 외부에서 진행 상황을 전혀 관측할 수 없다. **수정**: 배치(500건) 단위
+조회~매칭~갱신을 `TradeRematchBatchProcessor`(별도 빈)의 `@Transactional` 메서드 하나에 담아 배치가
+끝나는 즉시 커밋되게 분리했다 — `TradeRematchRunner`(오케스트레이터)는 이제 트랜잭션을 갖지 않고
+커서만 들고 이 빈을 반복 호출한다. 같은 클래스 내부 self-invocation으로는 `@Transactional` 프록시가
+안 걸리는 이 프로젝트의 기존 함정(COM-CACHE-01 `ComplexDetailCache` 분리와 같은 이유, 위 SVC-RCV-01
+절 참고) 때문에 별도 빈으로 뺐다 — 배치 조회와 그 결과(지연 로딩되는 `legalDistrictCode`/`complex`
+연관관계) 사용이 반드시 같은 트랜잭션 안에서 일어나야 하므로, 조회 자체도 이 빈 안에서 수행한다.
+검증: `TradeRematchBatchProcessorTest`(배치 단위 매칭/갱신 로직, 4건), `TradeRematchRunnerTest`(커서
+오케스트레이션, mocked `TradeRematchBatchProcessor`로 재작성, 3건).
+
+**도중 발견한 추가 버그 — `normalizeSigungu()`가 "시흥시"를 "흥시"로 망가뜨리는 회귀(이번 세션 것과
+무관, 2026-09-15 버그 A 수정 때부터 있었음).** 2차 패스 실행 중 `SIMILAR→null`(오히려 매칭이 풀리는)
+전환이 376건 나와 조사한 결과 발견했다 — 전부 시흥시(경기도) 소속 거래였다. 원인: `normalizeSigungu()`
+가 "공백 제거 후 문자열 끝이 아닌 위치의 '시'를 제거"하는데, 이 조건은 공백 유무를 보지 않는다.
+"시흥시"는 "시+구" 구조가 전혀 아닌 단일 시(구 분리 없음)인데, 도시 이름 자체가 "시"로 시작해서
+(시흥+시) 그 첫 글자가 "시+구" 분리자로 오인돼 지워지며 "흥시"가 됐다 — `complex.sigungu="시흥시"`
+(xlsx 원본, 불변)와 영원히 달라져 **시흥시 소속 거래 전체(실측 2,189건)가 1차 필터링 후보 0건으로
+떨어져 있었다.** "목포시"가 이 버그를 우연히 피해간 건 "시"가 마지막 글자였을 뿐, 근본 원인은 같았다.
+**수정**: 원본에 공백이 있을 때만(`raw.contains(" ")`, 즉 진짜 "시 구" 구조일 때만) 정규화를
+수행하도록 전제 조건을 추가했다 — 공백 없는 단일 시/군 표기는 이제 "시"가 몇 번, 어느 위치에
+있든 무조건 원본 그대로 반환한다. DB 전수 확인 결과 이 패턴에 걸리는 다른 단일 시/군 이름은
+없었다(시흥시가 유일). 검증: `ComplexMasterMatcherTest`에 회귀 테스트 추가.
+
+**최종 결과 — 1차/2차/3차(시흥시 수정 후 재검토) 패스 전부 실행 완료, 로컬 DB(포트 3307) 실측.**
+
+| 패스 | 대상 | unchanged | changed | changed 세부 |
+| --- | --- | --- | --- | --- |
+| 1차(`rematchUnmatched`) | complex_id IS NULL (37,390건, SALE+RENT) | 12,251 | 25,139 | null→EXACT/SIMILAR |
+| 2차(`rematchUpdatedBefore`, 버그 C 반영) | 전체(125,237건) | 113,515 | 11,722 | SIMILAR→EXACT 11,346 / SIMILAR→null(시흥시 회귀 발견) 376 |
+| 3차(`rematchUpdatedBefore`, 시흥시 수정 반영) | 전체(125,237건) | 123,168 | 2,069 | null→EXACT 1,589 / null→SIMILAR 480(전부 시흥시) — 추가 회귀 없음 |
+
+**세션 시작 대비 SALE 최종 수치(`trade.deal_category='SALE'`, 51,957건):**
+
+| 지표 | 세션 시작(이 문서 작성 시점 스냅샷) | 최종 |
+| --- | --- | --- |
+| EXACT | 14,861 | 43,933 |
+| SIMILAR | 14,916 | 4,595 |
+| 미매칭(legal_dong_cd 있음) | 22,149 | 3,398 |
+
+미매칭이 22,149건 → 3,398건으로 84.7% 줄었다. 전체(SALE+RENT, 125,312건) 기준으로는 EXACT 101,132
+(80.7%)/SIMILAR 13,547(10.8%, 합산 **91.5%**)/미매칭(legal_dong_cd 있음) 10,558(8.4%)/미매칭(legal_dong_cd
+없음) 75(0.06%)이다. 3차 패스가 `null→X` 전환만 내고 `X→null` 같은 역행이 전혀 없었다는 것이 이 시점에서
+매처가 안정적으로 수렴했다는 신호다 — 남은 미매칭 10,558건은 위 ②에서 이미 분류한 두 원인(K-apt
+단지 기본정보 커버리지 한계로 추정되는 "후보 있음" 쪽, 그리고 아직 다루지 않은 소수의 기타 "후보
+없음" 12건류)이 대부분일 것으로 보이나 전수 재확인은 하지 않았다 — **완결 필요**, 다음에 이 도메인을
+열 때 최신 수치로 ②의 breakdown을 다시 돌려 갱신하라.
+
+**91.5%(EXACT+SIMILAR)를 "FR-2.5 목표(98.9%) 거의 근접"으로 읽으면 안 된다 — 이 수치는 위 ③의 lawd_cd
+커버리지 공백(32개 코드: 화성시 1 + 인천 신설 자치구 4 + 광주 5구 전체 + 전라남도 22개 시군구 전체)이
+그대로 남아있는 상태에서 나왔다.** 이 32개 지역은 `trade` 테이블에 단 한 건도 수집되지 않아(원시
+수집 단계 자체가 실패) 애초에 이번 재매칭 대상 모집단(125,312건)에 포함되지도 못했다 — 즉 91.5%는
+"현재 수집된 것 중에서의 비율"이지 전국 기준이 아니다. 이 공백이 채워지면(신설/개편된 lawd_cd를
+`legal_district_code`에 반영하고 그 지역 거래가 실제로 수집되기 시작하면) 그 신규 거래들은
+`legal_district_code`에 대응 코드가 없어 legal_dong_cd 매핑 단계(BAT-MAT-01)부터 막혀 구조적으로
+미매칭으로 들어올 가능성이 높다 — 이번 세션에서 고친 5개 버그(sigungu 표기/EXACT 0건/RENT 0건/버그
+C/시흥시 회귀)와는 무관한 별개 이슈다(③ 참고). **FR-2.5의 98.9% 목표는 이 lawd_cd 공백이 메워지기
+전까지는 애초에 도달 불가능한 수치라는 뜻이므로, 91.5%를 목표 대비 진척도로 해석하지 말 것.**
+
+**남은 절차**: `TradeRematchRunner`/`TradeRematchBatchProcessor`는 배치 파이프라인에 상시 배선되지
+않는 일회성 유지보수 도구로 코드베이스에 남겨뒀다 — 다음에 BAT-MAT-02(또는 BAT-MAT-01) 매처 로직을
+또 고치면 같은 방식(1차: complex_id IS NULL, 2차: `--mode=full`로 전체 재검토)으로 재사용하라.
+
+### BAT-MAT-02 재매칭 — dedup_hash 미갱신 버그 수정 + 기존 stale 행 복구 (2026-09-16, PR 리뷰 지적)
+
+위 재매칭 인프라를 PR로 올린 뒤 리뷰(Codex, P1)에서 지적된 결함이다: `applyRematch()`가 complex_id/
+match_method/match_confidence만 갱신하고 **dedup_hash는 그대로 뒀다.** `DedupHashCalculator`는
+complex_id가 있으면 그 값을, 없으면 `UNMATCHED|sggCd|umdNm|buildingName|jibun`을 식별자로 써서 해시를
+만든다(그 클래스 javadoc 참고) — 재매칭으로 complex_id가 바뀌었는데 dedup_hash를 그대로 두면, 다음
+정상 수집(BAT-SCH-01)이 같은 실거래를 다시 파싱할 때는 새 complex_id 기준 해시를 계산하므로 이 행의
+저장된(옛) 해시와 달라진다. `upsert()`의 UNIQUE 매칭이 빗나가 같은 실거래가 두 행으로 중복 적재된다.
+
+**수정**: `DedupHashCalculator`를 `batch.loader` 전용에서 `public`으로 승격해 `batch.matcher`가 재사용할
+수 있게 했다. `TradeRematchBatchProcessor.applyChange()`가 complex_id가 실제로 바뀔 때만(매칭 방법만
+바뀌는 경우는 해시가 영향받지 않으므로 제외) 새 draft로 dedup_hash를 재계산해 `applyRematch()`(dedup_hash
+파라미터 추가)에 함께 실어 보낸다. **재계산한 해시를 이미 다른 행이 쓰고 있으면**(두 행이 재매칭 결과
+사실상 같은 실거래로 수렴한 경우) `reconcileHashCollision()`이 그 다른 행(이미 정상 경로로 올바른
+정체성을 가진 행)을 그대로 두고 이 stale 행을 삭제해 UNIQUE 제약을 위반하지 않으면서 중복을 없앤다.
+
+**기존에 이미 만들어진 stale dedup_hash 복구 — `repairDedupHashes()`(`--mode=repair-hash`) 신설.** 이
+수정 전에 이미 실행한 1~3차 재매칭 패스(위 절, 합계 changed 38,930건)는 이 수정이 없던 코드로
+실행됐으므로, 그 행들의 dedup_hash는 여전히 옛 상태로 DB에 남아있었다 — 코드를 고친 것만으로는
+이미 오염된 기존 행이 저절로 복구되지 않는다. 매칭 결과는 건드리지 않고 현재 저장된 complex_id/
+match_method/match_confidence 기준으로 dedup_hash만 재계산해 바로잡는 별도 패스를 추가해 로컬 DB에
+실행했다.
+
+**실행 결과(로컬 DB 실측) — 예상보다 훨씬 큰 규모의 실제 중복이 발견·정리됨.** `unchanged=97,905,
+changed=27,407`(그중 13,149건은 해시만 갱신, **14,258건은 진짜 중복이라 삭제**) — trade 총 건수가
+125,312 → **111,054**로 줄었다. 이 대량 삭제가 버그인지 정당한 정리인지 별도로 검증했다:
+
+- 삭제된 14,258건 중 13,704건(96.1%)이 09-14 14~15시(버그 A/B 수정 **전** 최초 수집분, stale
+  UNMATCHED 해시)에 집중돼 있었다 — 그 배치가 처리한 34,996건 중 13,864건이 이번에 삭제됐다.
+- 09-15 18~19시(버그 A/B 수정 **후** 재수집분, 애초부터 올바른 complex_id 기준 해시로 들어온 행)
+  89,759건은 단 한 건도 삭제되지 않고 전부 보존됐다.
+- 복구 후 `(complex_id, deal_date, floor, exclu_use_area, deal_amount)` 조합 기준으로 남은 중복
+  그룹을 다시 조회하면 **0건**이다.
+
+즉 이 14,258건은 "같은 실거래가 09-14(구버전 매처, 미매칭이라 UNMATCHED 식별자로 해시)와 09-15
+(신버전 매처, 처음부터 올바른 complex_id로 해시)에 각각 다른 trade_id로 중복 적재돼 있던 것"이
+이번에 하나로 합쳐진 것이다 — PR 리뷰가 지적한 시나리오(재매칭 후 dedup_hash 미조정 → 다음 정상
+수집이 중복 INSERT)가 **이 세션의 1~3차 재매칭 자체가 원인이 되어 이미 실제로 벌어지고 있었다**는
+뜻이다(9-15 재수집이 이미 정상적으로 "새 행"을 만들어냈고, 그 옛 짝이 stale 채로 방치돼 있었을 뿐).
+
+**PR 재리뷰 지적 두 가지, 모두 반영 완료(2026-09-16).**
+
+1. **이 mutation 로직(충돌 시 행 삭제) 자체가 실 DB로 검증된 적이 없었다** — 이 프로젝트가 이미 여러
+   차례 확인한 원칙("UNIQUE 제약 동시성/데이터 변형 로직은 Mockito로 증명 불가, Testcontainers 필요")이
+   정확히 겨냥하는 종류의 코드인데, `repairDedupHashes()`/`applyChange()`의 충돌-삭제 분기는 Mockito
+   단위 테스트(5건)만 있고 MariaDB IT가 없었다. `TradeRematchBatchProcessorMariaDbIT`(Testcontainers,
+   `trade-race-schema.sql` 재사용)를 신설해 "같은 identity를 가진 두 행 중 target은 보존, stale은
+   삭제, 살아남은 행의 데이터는 훼손되지 않음"을 실 DB 기준으로 검증했다 — `./gradlew integrationTest`
+   통과 확인(10개 MariaDB IT 클래스, 34 테스트 전부 그린). 다음에 이 스크립트류를 재사용할 일이 생기면
+   (다른 프로젝트든 재발 상황이든) 이 IT가 안전망이 돼 준다.
+2. **삭제 기준(target hash 보유 여부)이 데이터 완전성과 직결되지 않는다는 지적** — 복합키
+   (complex_id, deal_date, floor, exclu_use_area, deal_amount) 기준 중복 0건 확인은 dedup_hash 자체가
+   이 키들로 만들어지니 같은 신호의 재확인일 뿐, 그 키 밖의 필드(등기일자/거래유형/동정보/취소여부)는
+   못 잡는다는 지적이 맞다. 삭제된 행 자체는 스냅샷이 없어 복구 불가능하므로, **생존한 행 5건을
+   data.go.kr 상세(15126468, RTMSDataSvcAptTradeDev) 실 API로 직접 재조회해 스팟체크**했다(종로구
+   11110/202608, `curl`로 원본 XML 수신 후 jibun·건물명·금액·층·면적으로 매칭 확인) —
+   `rgstDate`(등기일자)·`dealingGbn`(거래유형)·`aptDong`(동정보)·`cdealType`(취소여부) 4개 필드
+   모두 5건 전부 실 API와 정확히 일치했다(등기일자·동정보는 5건 모두 원본 자체가 공란이라 우리
+   DB의 NULL이 데이터 손실이 아니라 정확한 반영임도 함께 확인됨). 완벽한 보증은 아니지만(5건 표본),
+   복합키 밖 필드에서도 이상 징후는 발견되지 않았다.
+
+   **부수적으로 확인된 사실**: `datagokr-apt-sale-approval-pending` 메모리(2026-09-14 작성, "SALE
+   두 데이터셋이 활용신청 승인 안 됨")가 이제 stale하다 — 이 스팟체크에서 15126468에 대해 실제로
+   HTTP 200 + resultCode 000 + 정상 데이터를 받았다. 승인이 그 사이 완료된 것으로 보인다(메모리
+   갱신 완료).
+
+**교훈(다음에 비슷한 일괄 삭제를 동반하는 복구를 돌릴 때 참고) — 삭제 전 스냅샷을 남기지 않았고,
+삭제 로그에 어떤 행(target)과 병합됐는지 tradeId를 남기지 않았다.** 두 로그(`applyChange()`/
+`repairDedupHashBatch()`의 충돌 삭제 분기)는 삭제되는 쪽의 tradeId만 남기고 살아남는 target의
+tradeId는 남기지 않는다 — 사후 검증을 created_at 시간대 분포(간접 증거)로 대신할 수 있었으니 이번엔
+운이 좋았지만, 다음에 이 경로를 또 타면 로그에 target tradeId도 함께 남기는 것을 검토하라. 또한 대량
+삭제가 예상되는 복구 작업 전에는 `mysqldump`나 최소한 영향받을 행의 tradeId 목록을 미리 떠 두는
+습관이 필요하다 — 이번엔 사후에 로그와 시간대 분포로 재구성해 검증했지만, 그 로그가 마침 삭제되지
+않고 남아있었던 것도 우연이었다.
+
+**진짜 최종 수치(중복 제거 후, 로컬 DB 실측) — 위 "최종 결과" 절의 91.5%는 이제 stale하다.** 중복
+14,258건이 전부 이미 매칭된(EXACT 또는 SIMILAR) 행끼리의 중복이었으므로(미매칭 건수 10,558/3,398은
+전혀 변하지 않았다), 제거 후 비율은 오히려 소폭 낮아진다 — 전체(111,054건) EXACT 87,713(79.0%)/
+SIMILAR 12,708(11.4%, 합산 **90.4%**)/미매칭(legal_dong_cd 있음) 10,558(9.5%)/미매칭(legal_dong_cd
+없음) 75(0.07%). SALE만(37,699건, 매매 하나의 실거래를 두 datasetId·두 수집일에 걸쳐 중복 집계하던
+것이 없어지며 총 건수 자체가 51,957→37,699로 줄었다)은 EXACT 30,514(81.0%)/SIMILAR 3,756(10.0%)/
+미매칭 3,398(9.0%). 위 ③에서 지적한 lawd_cd 커버리지 공백(광주/전남/화성·인천 신설구 32개 코드) 전제는
+이 수치에도 동일하게 적용된다 — 여전히 FR-2.5 목표(98.9%)와 직접 비교하면 안 된다.
 
 ## 개발 단계 (MVP 로드맵)
 
@@ -804,11 +1068,58 @@ mysql -u root homesense < schema_all.sql
 - **이 전제를 검증하는 테스트는 반드시 실제 서비스가 쓰는 것과 동일한 `@Transactional` 경계 안에서, Testcontainers 실제 DB로 검증해야 합니다** — repository 메서드를 트랜잭션 바깥에서 단독 호출하면 Spring Data JPA가 그 호출 하나만을 위한 짧은 자체 트랜잭션을 열고 반환 전에 커밋까지 마치므로, 실제로는 flush가 지연되는 전략이었어도 "save() 호출 시점에 곧바로 예외가 난 것처럼" 보이는 거짓 양성이 생깁니다. `AuthServiceMariaDbIT`가 `TradeChunkLoaderMariaDbIT`와 같은 방식(두 스레드 + `CountDownLatch`)으로 실제 `AuthService.signup()` 호출 경로를 그대로 태워 이 전제까지 함께 검증합니다.
 - Docker가 필요해 `./gradlew test`가 아니라 `./gradlew integrationTest`로만 실행됩니다(`@Tag("integration")`).
 
-**`REQUIRES_NEW` 격리 INSERT 게이트웨이 패턴의 커넥션 풀 고갈 리스크 — 도메인별로 반드시 따로 판단할 것.** `TradeInsertGateway`(BAT-LOD-01)와 `NotificationSettingInsertGateway`(SVC-NTF-01, 이후 원자적 upsert로 대체돼 삭제됨)는 같은 구조였다: 바깥 트랜잭션이 커넥션을 쥔 채 `@Transactional(REQUIRES_NEW)`로 INSERT 하나만 격리해 **두 번째 커넥션을 추가로** 잡는다. Codex 코드리뷰가 NTF 쪽에서 지적한 위험은 "동시 호출 수가 커넥션 풀 크기(`application-prod.properties`의 `spring.datasource.hikari.maximum-pool-size=20`)에 근접하면, 모든 커넥션이 바깥 트랜잭션에 묶인 채 REQUIRES_NEW가 요청할 여분의 커넥션이 없어 타임아웃으로 줄줄이 실패한다"는 것이다 — 이는 SVC-NTF-01처럼 **HTTP 요청마다 독립적으로 바깥 트랜잭션이 열리는 경로**(동시 요청 수가 사실상 무제한, 풀 크기까지 쉽게 도달)에서만 성립한다.
+**`REQUIRES_NEW` 격리 INSERT 게이트웨이 패턴 — `TradeInsertGateway`(BAT-LOD-01)/`NotificationSettingInsertGateway`(SVC-NTF-01) 둘 다 결국 원자적 upsert로 대체되며 삭제됐다(역사적 기록).** 두 클래스는 같은 구조였다: 바깥 트랜잭션이 커넥션을 쥔 채 `@Transactional(REQUIRES_NEW)`로 INSERT 하나만 격리해 두 번째 커넥션을 추가로 잡고, INSERT가 UNIQUE 위반으로 실패하면 같은 청크/요청 트랜잭션 안에서 재조회 후 UPDATE로 재시도했다. 이 패턴에는 **서로 독립적인 두 종류의 위험**이 있었는데, 이 프로젝트가 그 둘을 서로 다른 시점에 따로 발견했다는 점이 교훈이다 — **커넥션 풀 고갈 위험을 분석해 "안전하다"는 결론을 내렸다고 해서, 스냅샷 가시성 위험까지 안전하다는 뜻은 아니다.**
 
-`TradeChunkLoader`(BAT-LOD-01)는 이 패턴을 그대로 쓰지만 같은 리스크가 없다는 것을 확인했다(`BatchExecutionOrchestrator.orchestrate()`가 시군구×계약월×주택유형×거래유형 조합을 `ExecutorService`/`@Async`/`parallelStream` 없이 단일 스레드 for문으로 순회하고, `TradeCollectionScheduler`도 cron 하나(`0 0 3 * * *`, 1일 1회)뿐이라 배치 전체가 항상 스레드 1개로 실행된다 — 위 "확인" 절 참고). 스레드가 하나뿐이라 `TradeChunkLoader.upsertOne()`이 REQUIRES_NEW를 여는 순간에도 동시에 열려 있는 커넥션은 "청크 트랜잭션 1개 + REQUIRES_NEW 1개" = 최대 2개뿐이고, 이는 로컬(`maximum-pool-size=10`)·운영(20) 어느 쪽 풀 크기에도 전혀 위협이 되지 않는다. **즉 이 패턴 자체가 위험한 게 아니라 "바깥 트랜잭션이 몇 개나 동시에 존재할 수 있는가"가 관건이다** — 앞으로 이 패턴(바깥 트랜잭션 보유 + REQUIRES_NEW 격리 INSERT)을 새로 쓰거나 기존 것을 다시 볼 때는, 그 바깥 트랜잭션의 동시 발생 가능 개수(HTTP 요청 기반이면 사실상 풀 크기까지 근접 가능, 배치처럼 단일 스레드 순회면 사실상 1)를 먼저 확인하라. BAT-LOD-01의 배치 파이프라인에 향후 스레드 병렬화(Spring Batch partitioning, TaskExecutor 등)가 도입되면 이 결론은 무효가 되므로 그 시점에 반드시 재검토하라.
+1. **커넥션 풀 고갈 위험(NTF에서 지적, LOD는 안전하다고 결론 냈었음).** Codex 코드리뷰가 NTF 쪽에서 지적한 위험은 "동시 호출 수가 커넥션 풀 크기(`application-prod.properties`의 `spring.datasource.hikari.maximum-pool-size=20`)에 근접하면, 모든 커넥션이 바깥 트랜잭션에 묶인 채 REQUIRES_NEW가 요청할 여분의 커넥션이 없어 타임아웃으로 줄줄이 실패한다"는 것이었다 — HTTP 요청마다 독립적으로 바깥 트랜잭션이 열리는 SVC-NTF-01 경로에서만 성립한다. `TradeChunkLoader`(BAT-LOD-01)는 배치 전체가 항상 단일 스레드로 실행되므로(`BatchExecutionOrchestrator.orchestrate()`가 `ExecutorService`/`@Async`/`parallelStream` 없이 단일 스레드 for문으로 조합을 순회) 이 위험이 없다고 정확히 결론 냈었다 — 동시에 열리는 커넥션이 "청크 트랜잭션 1개 + REQUIRES_NEW 1개" = 최대 2개뿐이라 풀 크기에 전혀 위협이 되지 않았다.
+2. **스냅샷 가시성 위험(LOD에서 실제로 터짐, 실 배치 재실행으로 발견) — 커넥션 풀 분석과는 완전히 별개의 문제였다.** `TradeChunkLoader`가 단일 스레드라 "동시 경쟁"은 없었지만, data.go.kr 페이지네이션이 응답 페이지 사이에 같은 거래를 중복으로 돌려주면(당월 데이터가 계속 갱신되는 도중 페이지를 나눠 조회하는 경우 등) **같은 청크 트랜잭션 안에서 같은 dedup_hash가 두 번 등장**한다 — 이것만으로도 MariaDB REPEATABLE READ 스냅샷 문제가 재현된다(진짜 동시 실행이 전혀 필요 없다: 첫 항목의 REQUIRES_NEW INSERT가 커밋된 뒤, 같은 청크 트랜잭션의 두 번째 항목이 재조회해도 그 트랜잭션이 첫 항목 처리 이전에 이미 확립한 스냅샷에 묶여 방금 자신이 커밋시킨 그 행조차 보지 못한다). 실제 로컬 배치 재실행(2026-09-15, 버그 1~3 수정 검증을 위해 돌린 배치)에서 **처리 대상의 2.2%(150,485건 중 3,352건)가 이 경로로 조용히 유실**됨을 실측 확인했다 — 이번 3개 버그와 무관한 별도 결함으로, 사용자 요청에 따라 같은 세션에서 함께 수정했다(아래 "BAT-LOD-01 버그 수정" 절 참고).
 
-**남은 잔여 리스크 — 배치 실행이 24시간을 넘겨 다음 cron 트리거와 겹치는 경우, 이 결론의 전제("항상 스레드 1개")가 깨질 수 있다.** `TradeCollectionScheduler.runDailyCollection()`에는 중복 실행 방지 장치(ShedLock 같은 분산 락, `isRunning` 플래그, `@Scheduled(fixedDelay=...)`로 이전 실행 완료를 강제하는 방식 등)가 전혀 없고, `SchedulingConfig`도 커스텀 `TaskScheduler` 빈이나 `spring.task.scheduling.pool.size`를 설정하지 않는다 — 즉 Spring Boot 4.1.1이 기본 제공하는 `SimpleAsyncTaskScheduler`(동시성 제한 없음)를 그대로 쓴다. 이 스케줄러는 `ThreadPoolTaskScheduler(pool-size=1)`과 달리 이전 실행이 끝나지 않아도 다음 cron 트리거를 별도 스레드로 그냥 실행한다 — 국토부 API 응답 지연·재시도 누적으로 한 번의 `orchestrate()`가 다음 날 03:00을 넘기면, 이론상 바깥 트랜잭션(청크 트랜잭션)이 실행 인스턴스마다 하나씩 최대 2개까지 동시에 존재할 수 있다는 뜻이다. 그래도 REQUIRES_NEW까지 포함해 필요한 커넥션은 최대 4개(2 인스턴스 × 2)뿐이라 풀 크기(로컬 10/운영 20)에는 여전히 크게 못 미쳐 지금 당장 조치는 불필요하다 — 다만 실제 배치 소요 시간이 24시간에 근접하는 징후가 보이면(batch_log 실행 시간 추이), ShedLock 같은 중복 실행 방지 장치를 추가하는 것을 우선순위 낮음으로 검토하라.
+앞으로 이 패턴(바깥 트랜잭션 보유 + REQUIRES_NEW 격리 INSERT + 재조회 재시도)을 다시 보게 되면, 커넥션 풀 고갈 위험만 확인하고 안전하다고 결론 내지 말 것 — **재조회가 그 트랜잭션의 스냅샷에 묶여 있는지도 반드시 함께 확인하라.** 이 프로젝트는 이제 이 패턴 자체를 쓰지 않는다(NTF/LOD 둘 다 원자적 `INSERT ... ON DUPLICATE KEY UPDATE`로 대체) — 새로 upsert가 필요해지면 재조회·REQUIRES_NEW 격리 방식이 아니라 처음부터 원자적 upsert를 택하라.
+
+### BAT-LOD-01 버그 수정 (2026-09-15) — TradeChunkLoader dedup_hash 재시도가 REPEATABLE READ 스냅샷에 묶여 2.2% 유실
+
+위 버그 1~3(BAT-MAT-02/BAT-PRS-01) 수정을 실 배치로 검증하는 과정에서 발견한, 이번 3개 버그와는 무관한 별도 결함이다(사용자 요청으로 같은 세션에서 함께 수정). **원인·수정 근거는 바로 위 "`REQUIRES_NEW` 격리 INSERT 게이트웨이 패턴" 절의 2번 항목과 `TradeRepository#upsert` javadoc에 상세히 남겼다** — 요약만 여기 적는다.
+
+- **원인**: `TradeChunkLoader.upsertOne()`이 "조회 → 없으면 INSERT(REQUIRES_NEW로 격리) → UNIQUE 위반 시 재조회 후 UPDATE 재시도" 패턴이었는데, 같은 청크 트랜잭션 안에서 같은 dedup_hash가 두 번 등장하면(data.go.kr 페이지네이션 중복 응답 등) 재조회가 REPEATABLE READ 스냅샷에 묶여 방금 커밋된 행을 보지 못해 재시도까지 실패, 해당 건이 스킵됐다.
+- **수정**: `TradeRepository.upsert()`(네이티브 `INSERT ... ON DUPLICATE KEY UPDATE`) 신설 — SVC-NTF-01의 `NotificationSettingRepository#upsert`와 완전히 같은 패턴. `TradeChunkLoader`에서 `ComplexRepository`/`LegalDistrictCodeRepository`/`TradeInsertGateway` 의존성이 전부 제거됐다(JPA 엔티티 참조 없이 원시 컬럼 값만 네이티브 SQL에 바인딩하므로 더 이상 필요 없음) — `TradeInsertGateway.java` 삭제.
+- **영향 범위(실측)**: 처리 대상의 2.2%(150,485건 중 3,352건)가 유실되고 있었다 — 전부 이 경로였다(같은 배치 실행에서 발생한 에러 3,352건 전수가 `TradeChunkLoader`발 에러, 다른 원인(파싱·매핑 오류 등)은 0건).
+- **검증**: `TradeChunkLoaderTest`(Mockito, upsert 반환값 1/2에 따른 inserted/updated 집계, 예외 시 스킵) 재작성. `TradeChunkLoaderMariaDbIT`(Testcontainers)도 원자적 upsert에 맞춰 단순화했다 — 예전처럼 `CountDownLatch`로 커밋 순서를 인위적으로 강제할 필요가 없어져, 두 스레드가 순서 강제 없이 동시에 같은 dedup_hash를 놓고 경쟁해도 정확히 한 행만 남는지만 확인한다(SVC-NTF-01의 `NotificationServiceMariaDbIT`가 같은 이유로 단순화된 것과 동일한 결). **이번 세션은 Docker가 실제로 가동 중이라 `./gradlew integrationTest`로 직접 실행해 통과를 확인했다** — 이 저장소의 다른 여러 MariaDB IT와 달리 "작성만 하고 Docker 부재로 미실행"이 아니라 실제로 그린을 확인한 드문 사례다.
+
+### BAT-LOD-01 후속 버그 수정 (2026-09-16, PR 리뷰 지적) — 원자적 upsert가 옛 게이트웨이의 "부수적" 격리 효과까지 함께 없앴다
+
+바로 위 절이 삭제한 `TradeInsertGateway`(REQUIRES_NEW로 INSERT만 격리하던 옛 게이트웨이)는 UNIQUE
+경쟁 문제를 해결하려 만든 것이었지만, **그 과정에서 "청크 안 한 건의 DB 제약 위반이 나머지 499건까지
+막지 못하게 하는" 효과도 부수적으로 제공하고 있었다** — 원자적 upsert로 교체하며 이 부수 효과가
+있었다는 사실 자체를 놓쳤다. `TradeChunkLoader.loadChunk()`는 여전히 최대 500건을 한
+`@Transactional` 안에서 처리하며 건마다 `try/catch`로 개별 실패를 스킵하는데, 오버사이즈 문자열
+(VARCHAR 초과)·UNSIGNED 음수·잘못된 FK 같은 **진짜 제약 위반**(UNIQUE 경쟁이 아닌)이 한 건이라도
+나면 JPA 스펙상 그 예외가 트랜잭션을 rollback-only로 표시하고, catch가 그 건만 스킵한 것처럼 보여도
+`loadChunk()` 커밋 시점에 `UnexpectedRollbackException`이 터져 청크 전체(최대 500건)가 롤백된다 — 이
+프로젝트가 이미 SVC-NTF-01 `NotificationSettingRepository` 1차 구현과 옛 `TradeInsertGateway` 자체의
+존재 이유로 두 번 겪은 패턴이 세 번째로 재발한 것이다.
+
+**수정**: `TradeUpsertGateway`(신규, `batch.loader`) — `TradeRepository#upsert` 호출 단 하나만
+`@Transactional(propagation = REQUIRES_NEW)`로 감싸 청크 트랜잭션과 분리한다. 옛 게이트웨이와 달리
+격리 대상이 원자적 SQL 문장 하나뿐이라 INSERT 실패 후 재조회·UPDATE 재시도 로직 자체가 필요 없고,
+그래서 그 로직이 겪었던 REPEATABLE READ 스냅샷 문제(재조회가 격리된 트랜잭션의 커밋을 못 보는 문제)도
+재현되지 않는다 — 재조회를 아예 하지 않기 때문이다. `TradeChunkLoader`는 `TradeRepository` 대신 이
+게이트웨이에 의존한다. **커넥션 풀 고갈 위험도 스냅샷 문제와 별개로 확인했다** — "스냅샷 가시성이
+안전하다"와 "커넥션 풀 관점이 안전하다"는 서로 다른 질문이라(SVC-NTF-01의 반대 사례: 그쪽은 풀은
+검토했지만 스냅샷을 놓쳤다) 하나를 확인했다고 다른 하나도 넘겨짚으면 안 된다. `loadChunk()`가 청크
+(최대 500건)를 단일 for문으로 순차 처리하므로 한 청크 안에 제약 위반 건이 여럿 있어도 동시에 열리는
+REQUIRES_NEW 커넥션은 항상 최대 1개, 여기에 BAT-SCH-01의 조합 순회 자체도 단일 스레드라 배치
+파이프라인 전체로도 동시 커넥션은 "청크 트랜잭션 1개 + REQUIRES_NEW 1개" = 최대 2개뿐이다(위
+"REQUIRES_NEW 격리 INSERT 게이트웨이 패턴" 절의 1번 항목과 같은 논거). **무효화 조건**: 이 안전성은
+"배치가 항상 단일 스레드로 순차 실행된다"는 전제에만 기댄다 — 청크 처리나 조합 순회를 병렬화하게
+되면 동시 REQUIRES_NEW 커넥션 수가 스레드 수만큼 늘어나므로 그 시점에 커넥션 풀 크기 대비 이 분석을
+재검증해야 한다.
+
+**검증(회귀 재현 포함)**: `TradeChunkLoaderTest`(Mockito)는 `TradeRepository` 대신
+`TradeUpsertGateway`를 목킹하도록 갱신. `TradeChunkLoaderMariaDbIT`에 새 테스트를 추가해
+`building_name`을 VARCHAR(100) 초과로 만든 건과 정상 건을 한 청크에 같이 넣고, 정상 건은 커밋되고
+위반 건만 스킵되는지 실 DB로 확인했다 — **이 수정을 일부러 잠깐 되돌려(REQUIRES_NEW 제거) 같은
+테스트를 돌려 본 결과 정확히 `UnexpectedRollbackException`이 재현됐다**(회귀 테스트가 실제로 이 버그를
+잡는다는 것을 확인한 뒤 원상복구). `./gradlew integrationTest`로 10개 MariaDB IT 클래스(35 테스트)
+전부 그린 확인.
 
 ## `@Modifying` 벌크 쿼리 — flushAutomatically/clearAutomatically 원칙
 
