@@ -816,6 +816,32 @@ changed=27,407`(그중 13,149건은 해시만 갱신, **14,258건은 진짜 중�
 수집이 중복 INSERT)가 **이 세션의 1~3차 재매칭 자체가 원인이 되어 이미 실제로 벌어지고 있었다**는
 뜻이다(9-15 재수집이 이미 정상적으로 "새 행"을 만들어냈고, 그 옛 짝이 stale 채로 방치돼 있었을 뿐).
 
+**PR 재리뷰 지적 두 가지, 모두 반영 완료(2026-09-16).**
+
+1. **이 mutation 로직(충돌 시 행 삭제) 자체가 실 DB로 검증된 적이 없었다** — 이 프로젝트가 이미 여러
+   차례 확인한 원칙("UNIQUE 제약 동시성/데이터 변형 로직은 Mockito로 증명 불가, Testcontainers 필요")이
+   정확히 겨냥하는 종류의 코드인데, `repairDedupHashes()`/`applyChange()`의 충돌-삭제 분기는 Mockito
+   단위 테스트(5건)만 있고 MariaDB IT가 없었다. `TradeRematchBatchProcessorMariaDbIT`(Testcontainers,
+   `trade-race-schema.sql` 재사용)를 신설해 "같은 identity를 가진 두 행 중 target은 보존, stale은
+   삭제, 살아남은 행의 데이터는 훼손되지 않음"을 실 DB 기준으로 검증했다 — `./gradlew integrationTest`
+   통과 확인(10개 MariaDB IT 클래스, 34 테스트 전부 그린). 다음에 이 스크립트류를 재사용할 일이 생기면
+   (다른 프로젝트든 재발 상황이든) 이 IT가 안전망이 돼 준다.
+2. **삭제 기준(target hash 보유 여부)이 데이터 완전성과 직결되지 않는다는 지적** — 복합키
+   (complex_id, deal_date, floor, exclu_use_area, deal_amount) 기준 중복 0건 확인은 dedup_hash 자체가
+   이 키들로 만들어지니 같은 신호의 재확인일 뿐, 그 키 밖의 필드(등기일자/거래유형/동정보/취소여부)는
+   못 잡는다는 지적이 맞다. 삭제된 행 자체는 스냅샷이 없어 복구 불가능하므로, **생존한 행 5건을
+   data.go.kr 상세(15126468, RTMSDataSvcAptTradeDev) 실 API로 직접 재조회해 스팟체크**했다(종로구
+   11110/202608, `curl`로 원본 XML 수신 후 jibun·건물명·금액·층·면적으로 매칭 확인) —
+   `rgstDate`(등기일자)·`dealingGbn`(거래유형)·`aptDong`(동정보)·`cdealType`(취소여부) 4개 필드
+   모두 5건 전부 실 API와 정확히 일치했다(등기일자·동정보는 5건 모두 원본 자체가 공란이라 우리
+   DB의 NULL이 데이터 손실이 아니라 정확한 반영임도 함께 확인됨). 완벽한 보증은 아니지만(5건 표본),
+   복합키 밖 필드에서도 이상 징후는 발견되지 않았다.
+
+   **부수적으로 확인된 사실**: `datagokr-apt-sale-approval-pending` 메모리(2026-09-14 작성, "SALE
+   두 데이터셋이 활용신청 승인 안 됨")가 이제 stale하다 — 이 스팟체크에서 15126468에 대해 실제로
+   HTTP 200 + resultCode 000 + 정상 데이터를 받았다. 승인이 그 사이 완료된 것으로 보인다(메모리
+   갱신 완료).
+
 **교훈(다음에 비슷한 일괄 삭제를 동반하는 복구를 돌릴 때 참고) — 삭제 전 스냅샷을 남기지 않았고,
 삭제 로그에 어떤 행(target)과 병합됐는지 tradeId를 남기지 않았다.** 두 로그(`applyChange()`/
 `repairDedupHashBatch()`의 충돌 삭제 분기)는 삭제되는 쪽의 tradeId만 남기고 살아남는 target의
