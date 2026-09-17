@@ -38,6 +38,7 @@ import com.jiseong.homesense.recentview.service.RecentViewService;
 import com.jiseong.homesense.search.service.SearchService;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
 
@@ -77,6 +78,11 @@ class ComplexServiceTest {
     }
 
     private static Trade trade(Complex complex, LocalDate dealDate, long amount, String area) {
+        return trade(complex, dealDate, amount, area, null, null);
+    }
+
+    private static Trade trade(Complex complex, LocalDate dealDate, long amount, String area,
+            MatchMethod matchMethod, Short floor) {
         return Trade.builder()
                 .housingType(HousingType.APT)
                 .dealCategory(DealCategory.SALE)
@@ -87,6 +93,8 @@ class ComplexServiceTest {
                 .dealDate(dealDate)
                 .dealAmount(amount)
                 .cancelYn(false)
+                .matchMethod(matchMethod)
+                .floor(floor)
                 .dedupHash("hash-" + complex.getComplexId() + "-" + dealDate)
                 .build();
     }
@@ -180,6 +188,22 @@ class ComplexServiceTest {
         assertThat(result.get(0).complexId()).isEqualTo(1L);
         assertThat(result.get(0).representativeAmount()).isEqualTo(50000L);
         verify(complexRepository, never()).findAllByOrderByComplexIdDesc(any());
+    }
+
+    @Test
+    void getPopular_대표거래의_matchMethod와_floor를_그대로_응답에_담는다() {
+        Complex complex1 = complex(1L);
+        Trade representativeTrade = trade(complex1, LocalDate.of(2026, 1, 10), 50000L, "84.99",
+                MatchMethod.SIMILAR, (short) 7);
+        when(tradeRepository.findTopComplexIdsByRecentTradeVolume(any(), any())).thenReturn(List.of(1L));
+        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex1));
+        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(1L))
+                .thenReturn(Optional.of(representativeTrade));
+
+        List<ComplexSummaryResponse> result = complexService.getPopular(1);
+
+        assertThat(result.get(0).matchMethod()).isEqualTo(MatchMethod.SIMILAR);
+        assertThat(result.get(0).floor()).isEqualTo((short) 7);
     }
 
     @Test

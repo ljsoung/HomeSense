@@ -106,5 +106,21 @@ class RegionServiceTest {
         assertThat(result.get(0).fullPath()).isEqualTo("서울특별시 강남구 역삼동");
         assertThat(result.get(0).avgPrice()).isEqualByComparingTo(new BigDecimal("110000"));
         assertThat(result.get(0).changeRate()).isEqualByComparingTo(new BigDecimal("10.00"));
+        assertThat(result.get(0).tradeCount()).isEqualTo(2L);
+    }
+
+    /** 해당 기간에 거래가 없으면 RegionStats.newTradeCount()는 0이다(예외 아님) — 그대로 노출한다. */
+    @Test
+    void 관심지역의_해당_기간_거래가_0건이면_tradeCount는_0이다() {
+        User user = User.createUser("user@test.com", "encoded", "닉네임");
+        LegalDistrictCode code = legalDistrictCode("1168010100", "서울특별시", "강남구", "역삼동");
+        FavoriteRegion favorite = FavoriteRegion.register(user, code);
+        when(favoriteRegionRepository.findByUser_UserId(1L)).thenReturn(List.of(favorite));
+        when(regionStatsCalculator.calculate("1168010100")).thenReturn(RegionStats.EMPTY);
+
+        List<InterestRegionSummaryResponse> result = regionService.getInterestSummary(1L);
+
+        assertThat(result.get(0).tradeCount()).isEqualTo(0L);
+        assertThat(result.get(0).avgPrice()).isNull();
     }
 }

@@ -31,7 +31,7 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * SVC-CPX-01. 단지 검색·인기단지·상세·지도 범위 조회를 담당한다. 조회 트래픽이 가장 높은 도메인이라
- * getDetail()/getPopular()에 COM-CACHE-01 캐시(complexDetailV2/popularComplexes)를 적용한다(TTL 24h)
+ * getDetail()/getPopular()에 COM-CACHE-01 캐시(complexDetailV2/popularComplexesV2)를 적용한다(TTL 24h)
  * — 무효화는 BAT-LOD-01이 발행하는
  * TradeCacheEvictionEvent를 CacheEvictionListener가 이미 구독하고 있어 별도 배선이 필요 없다.
  *
@@ -68,7 +68,7 @@ public class ComplexService {
         return complexRepository.search(condition, pageable);
     }
 
-    @Cacheable(cacheNames = "popularComplexes", key = "#limit")
+    @Cacheable(cacheNames = "popularComplexesV2", key = "#limit")
     public List<ComplexSummaryResponse> getPopular(int limit) {
         LocalDate since = LocalDate.now().minusMonths(POPULARITY_WINDOW_MONTHS);
         List<Long> complexIds = new ArrayList<>(
@@ -127,7 +127,7 @@ public class ComplexService {
     /**
      * candidate complex_id 하나당 최대 2건(findById + 대표 거래 조회)의 쿼리를 낸다 — search()가
      * QueryDSL 상관 서브쿼리로 단지+대표거래를 한 번에 가져오는 것과 다른 N+1 구조다. limit이
-     * 1~50으로 막혀 있고(ComplexController) popularComplexes 캐시(TTL 24h)로 캐시 미스 시에만
+     * 1~50으로 막혀 있고(ComplexController) popularComplexesV2 캐시(TTL 24h)로 캐시 미스 시에만
      * 발생해 지금 당장 문제는 아니지만, 알려진 기술부채다(Codex 코드리뷰 — CLAUDE.md SVC-CPX-01
      * 절 참고). 나중에 손볼 때는 search()처럼 QueryDSL 서브쿼리 하나로 통합하는 방향을 검토하라.
      */

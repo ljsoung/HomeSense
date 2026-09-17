@@ -29,6 +29,7 @@ import com.jiseong.homesense.complex.dto.SortCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
 
@@ -124,6 +125,13 @@ class ComplexRepositoryMariaDbIT {
 
     private static Trade trade(Complex complex, HousingType housingType, DealCategory dealCategory,
             LocalDate dealDate, Long dealAmount, Long depositAmount, String area, boolean cancelYn) {
+        return trade(complex, housingType, dealCategory, dealDate, dealAmount, depositAmount, area, cancelYn,
+                null, null);
+    }
+
+    private static Trade trade(Complex complex, HousingType housingType, DealCategory dealCategory,
+            LocalDate dealDate, Long dealAmount, Long depositAmount, String area, boolean cancelYn,
+            MatchMethod matchMethod, Short floor) {
         return Trade.builder()
                 .housingType(housingType)
                 .dealCategory(dealCategory)
@@ -135,6 +143,8 @@ class ComplexRepositoryMariaDbIT {
                 .dealAmount(dealAmount)
                 .depositAmount(depositAmount)
                 .cancelYn(cancelYn)
+                .matchMethod(matchMethod)
+                .floor(floor)
                 .dedupHash("hash-" + complex.getComplexId() + "-" + dealDate + "-" + area)
                 .build();
     }
@@ -153,6 +163,39 @@ class ComplexRepositoryMariaDbIT {
         assertThat(resultA.representativeDealDate()).isEqualTo(LocalDate.of(2026, 2, 1));
         assertThat(resultA.representativeAmount()).isEqualTo(80000L);
         assertThat(resultA.representativeArea()).isEqualByComparingTo("84.90");
+    }
+
+    @Test
+    void 검색결과는_대표거래의_matchMethod와_floor를_그대로_노출한다() {
+        // EXACT/floor 채움 케이스(complexA)와 SIMILAR/floor NULL 케이스(complexB)를 한 번에 검증한다
+        // — matchMethod/floor는 search()가 이미 들고 있는 대표거래(price/area/dealDate와 동일 인스턴스)
+        // 에서 나오므로 별도 서브쿼리 없이도 항상 같은 거래를 가리켜야 한다. setUp()의 기존 거래보다
+        // 더 최근 날짜(3/1)로 저장해 이 거래가 각 단지의 새 대표거래가 되도록 한다.
+        Trade tradeA = tradeRepository.saveAndFlush(trade(complexA, HousingType.APT, DealCategory.SALE,
+                LocalDate.of(2026, 3, 1), 90000L, null, "84.90", false, MatchMethod.EXACT, (short) 12));
+        Trade tradeB = tradeRepository.saveAndFlush(trade(complexB, HousingType.APT, DealCategory.SALE,
+                LocalDate.of(2026, 3, 1), 90000L, null, "70.00", false, MatchMethod.SIMILAR, null));
+
+        ComplexSearchCondition condition = new ComplexSearchCondition(
+                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
+                null, null, null, SortCondition.LATEST);
+
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+
+        ComplexSummaryResponse resultA = page.getContent().stream()
+                .filter(r -> r.complexId().equals(complexA.getComplexId()))
+                .findFirst().orElseThrow();
+        ComplexSummaryResponse resultB = page.getContent().stream()
+                .filter(r -> r.complexId().equals(complexB.getComplexId()))
+                .findFirst().orElseThrow();
+
+        assertThat(resultA.matchMethod()).isEqualTo(MatchMethod.EXACT);
+        assertThat(resultA.floor()).isEqualTo((short) 12);
+        assertThat(resultA.representativeDealDate()).isEqualTo(tradeA.getDealDate());
+
+        assertThat(resultB.matchMethod()).isEqualTo(MatchMethod.SIMILAR);
+        assertThat(resultB.floor()).isNull();
+        assertThat(resultB.representativeDealDate()).isEqualTo(tradeB.getDealDate());
     }
 
     @Test

@@ -30,11 +30,11 @@ class CacheEvictionListenerTest {
     }
 
     @Test
-    void complexId마다_complexDetail_캐시를_evict하고_popularComplexes는_통째로_clear한다() {
+    void complexId마다_complexDetail_캐시를_evict하고_popularComplexesV2는_통째로_clear한다() {
         Cache complexDetailCache = mock(Cache.class);
         Cache popularComplexesCache = mock(Cache.class);
         when(cacheManager.getCache("complexDetailV2")).thenReturn(complexDetailCache);
-        when(cacheManager.getCache("popularComplexes")).thenReturn(popularComplexesCache);
+        when(cacheManager.getCache("popularComplexesV2")).thenReturn(popularComplexesCache);
 
         listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L, 2L), Set.of()));
 
@@ -66,13 +66,13 @@ class CacheEvictionListenerTest {
 
         verify(regionAutocompleteCache).clear();
         verify(cacheManager, never()).getCache("complexDetailV2");
-        verify(cacheManager, never()).getCache("popularComplexes");
+        verify(cacheManager, never()).getCache("popularComplexesV2");
     }
 
     @Test
     void 캐시를_찾지_못해도_예외없이_넘어간다() {
         when(cacheManager.getCache("complexDetailV2")).thenReturn(null);
-        when(cacheManager.getCache("popularComplexes")).thenReturn(null);
+        when(cacheManager.getCache("popularComplexesV2")).thenReturn(null);
 
         listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L), Set.of()));
 
@@ -87,7 +87,7 @@ class CacheEvictionListenerTest {
         // (Codex 코드리뷰 P2 지적).
         Cache complexDetailCache = mock(Cache.class);
         when(cacheManager.getCache("complexDetailV2")).thenReturn(complexDetailCache);
-        when(cacheManager.getCache("popularComplexes")).thenThrow(new RuntimeException("Redis 연결 실패"));
+        when(cacheManager.getCache("popularComplexesV2")).thenThrow(new RuntimeException("Redis 연결 실패"));
 
         listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L), Set.of()));
 

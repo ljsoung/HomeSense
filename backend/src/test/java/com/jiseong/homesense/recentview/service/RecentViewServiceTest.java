@@ -60,6 +60,21 @@ class RecentViewServiceTest {
                 .build();
     }
 
+    private static Complex complexWithAddress(Long id, String sido, String sigungu, String dongRi) {
+        return Complex.builder()
+                .complexId(id)
+                .sourceComplexCd("SRC-" + id)
+                .complexName("테스트단지" + id)
+                .complexType("아파트")
+                .sido(sido)
+                .sigungu(sigungu)
+                .dongRi(dongRi)
+                .elevatorPassengerCount((short) 1)
+                .elevatorCargoCount((short) 0)
+                .elevatorCombinedCount((short) 0)
+                .build();
+    }
+
     @Test
     void getRecent_userId와_sessionId가_모두_없으면_빈_리스트를_반환한다() {
         List<RecentViewResponse> result = recentViewService.getRecent(null, null, 3);
@@ -77,6 +92,38 @@ class RecentViewServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).complexId()).isEqualTo(1L);
+    }
+
+    /**
+     * sido/sigungu/dongRi는 ComplexSummaryResponse와 동일한 원시 필드 3개를 그대로 노출한다(CLAUDE.md
+     * CPX-RCV-RGN 카드 표시 필드 보강 작업 참고) — 조합·가공 없이 Complex 엔티티 값을 그대로 통과시킨다.
+     */
+    @Test
+    void getRecent_단지의_sido_sigungu_dongRi를_그대로_응답에_담는다() {
+        Complex complexWithAddress = complexWithAddress(1L, "서울특별시", "강남구", "역삼동");
+        RecentView view = RecentView.record(null, "session-x", complexWithAddress, HousingType.APT);
+        when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
+                .thenReturn(List.of(view));
+
+        List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
+
+        assertThat(result.get(0).sido()).isEqualTo("서울특별시");
+        assertThat(result.get(0).sigungu()).isEqualTo("강남구");
+        assertThat(result.get(0).dongRi()).isEqualTo("역삼동");
+    }
+
+    /** 단지 기본정보 xlsx 원본에 주소 컬럼이 미기재된 경우 — 지어내지 않고 NULL을 그대로 노출한다. */
+    @Test
+    void getRecent_단지의_주소_컬럼이_NULL이면_그대로_NULL을_응답에_담는다() {
+        RecentView view = RecentView.record(null, "session-x", complex(1L), HousingType.APT);
+        when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
+                .thenReturn(List.of(view));
+
+        List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
+
+        assertThat(result.get(0).sido()).isNull();
+        assertThat(result.get(0).sigungu()).isNull();
+        assertThat(result.get(0).dongRi()).isNull();
     }
 
     @Test
