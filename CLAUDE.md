@@ -346,14 +346,25 @@ testcontainers fixture뿐이다). `.gitignore` 57행에 `!schema_all.sql` 예외
 즉 "11개는 이미 커밋됐다"는 애초에 이 정정을 쓴 세션이 검증 없이 진술한 추정이었을 가능성이 높다 —
 실제로는 각 개발자가 테이블정의서 8장 원문을 로컬 DB에 직접 붙여넣어 적용만 하고(그 자체는 위 문단이
 맞게 서술한 프로젝트 관행이다), 그 DDL을 파일로 남겨 커밋하는 절차 자체가 이 프로젝트에 한 번도 없었던
-것으로 보인다. **실질적 영향:** 이 저장소를 새로 clone한 사람(다른 개발자, CI, 다음 세션)은 11개
-프로덕션 테이블(user/refresh_token/legal_district_code/complex/trade/favorite_property/favorite_region/
-recent_view/notification_setting/notification/batch_log) 중 무엇 하나도 저장소만으로는 만들 수 없다 —
-`spring.jpa.hibernate.ddl-auto=validate`라 스키마가 없으면 애플리케이션이 기동 자체를 거부한다. **완결
-필요(우선순위 높음, HOME-01 범위 밖) —** 테이블 정의서 8장 원문을 `schema_all.sql`(저장소 루트 또는
-`backend/schema_all.sql`, `.gitignore` 예외가 이미 둘 다 커버한다)로 옮겨 커밋하라. 이 프론트 세션은
-그 문서 원문에 접근할 수 없어(백엔드 전용 프로젝트 지식) 직접 처리하지 못했다 — 다음에 백엔드 작업을
-하는 세션이나 지성이 직접 처리해야 한다.
+것으로 보인다. **실질적 영향(해소됨, 아래 참고):** 이 저장소를 새로 clone한 사람(다른 개발자, CI, 다음
+세션)은 11개 프로덕션 테이블(user/refresh_token/legal_district_code/complex/trade/favorite_property/
+favorite_region/recent_view/notification_setting/notification/batch_log) 중 무엇 하나도 저장소만으로는
+만들 수 없었다 — `spring.jpa.hibernate.ddl-auto=validate`라 스키마가 없으면 애플리케이션이 기동 자체를
+거부한다.
+
+**해소됨(2026-09-14, 같은 SCR-HOME-01 세션 내에서) — `schema_all.sql`이 저장소 루트에 실제로 커밋됐다
+(커밋 `81d34db`, "sql").** 위 "완결 필요" 지시가 쓰인 시점엔 아직 미해결이었지만, 그 지시대로 테이블
+정의서 8장 원문을 옮겨 담은 `schema_all.sql`(351줄, `.gitignore` 57행의 `!schema_all.sql` 예외를 그대로
+활용)이 같은 세션 안에서 만들어져 커밋됐다 — 파일 자체의 헤더 주석도 "이 파일은 git 히스토리에 한 번도
+존재한 적이 없었음이 확인되어(API-SEARCH-01/SCR-HOME-01 작업 중 발견) 원본 문서를 기준으로 재구성했다"고
+이 경위를 그대로 기록하고 있다. 2026-09-17에 별도 세션이 `git ls-tree`/`git show`로 재확인했다 — 11개
+프로덕션 테이블 전부(`CREATE TABLE` 12건, `search_log` 포함) 존재하고, CHECK 제약(`ck_trade_housing_type
+CHECK (housing_type IN ('APT','VILLA'))`, `ck_trade_match_method` 등)과 FK `ON UPDATE RESTRICT`까지
+CLAUDE.md가 요구해온 설계 원칙을 그대로 담고 있다. **위 문단이 요구했던 "완결 필요(우선순위 높음)"
+조치는 이미 완료된 상태다** — 위 발견 서사는 문제가 실제로 있었다는 기록으로 그대로 남겨두되, 다음에
+이 절을 읽는 세션은 schema_all.sql을 다시 만들 필요가 없다는 것만 알면 된다. 남은 절차는 새 환경에
+배포할 때마다 `mysql -u root homesense < schema_all.sql`을 수동으로 실행하는 것뿐이다(이 프로젝트에
+Flyway/Liquibase 같은 자동 마이그레이션이 없다는 사실 자체는 바뀌지 않았다).
 
 **파일 위치 시행착오 — `.gitignore`의 `*.sql` 전면 차단을 처음엔 놓쳤다.** 처음에는
 `backend/src/main/resources/db/search_log.sql`에 커밋하려 했는데, `.gitignore` 56행이 "DB 덤프(실거래가
@@ -1003,7 +1014,7 @@ UIC-08 `EmptyState`/`Spinner`, UIC-09 `DataTrustBadge`)도 같은 이유로 이 
 | **`httpClient`에 Authorization 헤더 인터셉터 신설** | 없음(AUTH-01 당시 "보호된 라우트가 실제로 생기는 시점에 추가"로 유보돼 있던 항목 — 프론트엔드 구현 결정 사항 표 "accessToken 자동 갱신 인터셉터" 행 참고) | `httpClient.interceptors.request.use()`로 `accessToken`이 있으면 항상 `Authorization: Bearer` 헤더를 붙인다(401→refresh 자동 갱신 인터셉터는 여전히 별도 과제로 남겨둠 — 이번엔 헤더 첨부만) | HOME-01이 이 저장소 최초로 인증이 필요한 API(`interest-summary`, `POST /favorites/properties`)를 호출한다 — 백엔드가 토큰 없어도 요청을 막지 않는 원칙(CLAUDE.md 인증 절)이라 이 헤더를 무조건 붙여도 비로그인 전용 엔드포인트에 해가 없다. |
 | **`X-Session-Id` 프론트 생성/저장 방식** | CLAUDE.md SVC-RCV-01 절이 헤더 이름(`X-Session-Id`)만 백엔드 쪽에서 확정해 뒀고, 프론트가 어떻게 생성·저장할지는 미정이었다 | `crypto.randomUUID()`로 생성해 `localStorage`(`homesense.sessionId`)에 저장 — 탭이 아니라 브라우저에 귀속되도록 `sessionStorage`가 아니라 `localStorage`를 썼다(`lib/sessionId.ts`) | "브라우저별로 생성해 관리하는 세션 식별자"라는 SVC-RCV-01 설계 의도(CLAUDE.md 참고)를 그대로 따르려면 새로고침·새 탭에서도 값이 유지돼야 한다 — `sessionStorage`는 탭이 닫히면 사라져 이 의도와 맞지 않는다. |
 | **검색 자동완성(UIC-03 관련) — 미구현, 범위 밖 확정** | 프롬프트가 "자동완성 API 연동은 선택/유예 가능"이라고 명시 | `SearchBar`(UIC-03)는 순수 텍스트 입력+버튼만 구현하고 `GET /api/regions`(자동완성) 연동은 하지 않았다 | SRCH-01 자체가 아직 자리표시 화면이라 자동완성 결과를 클릭해 이동할 목적지가 없다 — SRCH-01을 실제로 구현하는 시점에 `RegionAutocompleteResponse`를 연동하라. |
-| **백엔드 미기동으로 인한 통합 검증 한계 — 완결 필요** | 완료 조건이 실제 API 연동(`GET /api/complexes/popular` 등)이 올바르게 동작하는지 확인하라고 요구한다 | 이번 세션엔 로컬에 MariaDB가 떠 있지 않았고(Redis만 기동, `docker ps` 확인) 저장소에 `schema_all.sql`도 없어(테이블 정의서 DDL은 외부 문서 전용) 실제 백엔드를 새로 기동해 검증하지 못했다 — 대신 (1) 백엔드 없이 뜬 프런트에서 각 fetch가 실패해도 빈 배열로 우아하게 폴백하는지, (2) Playwright로 `page.route()`를 이용해 5개 엔드포인트를 전부 목킹해 실제 응답 스키마(`ComplexSummaryResponse` 등)를 넣었을 때 카드 렌더링·하트클릭·로그인·자동재생·토스트 전체 왕복이 올바른지 검증했다 | **완결 필요** — 로컬 MariaDB(포트 3307)에 스키마를 적용하고 `./gradlew bootRun`으로 실제 백엔드를 띄운 뒤, 실 데이터로 `GET /api/complexes/popular`/`GET /api/regions/interest-summary`/`GET /api/recent-views`/`GET /api/search/popular` 4개를 다시 확인하라(SVC-FAV-01/SVC-NTF-01 절의 "Docker 없어 IT 미실행" 잔여 리스크와 같은 성격). |
+| **백엔드 미기동으로 인한 통합 검증 한계 — 완결 필요(전제였던 schema_all.sql 부재는 같은 세션 안에서 해소됨)** | 완료 조건이 실제 API 연동(`GET /api/complexes/popular` 등)이 올바르게 동작하는지 확인하라고 요구한다 | 이번 세션엔 로컬에 MariaDB가 떠 있지 않았고(Redis만 기동, `docker ps` 확인) **당시엔** 저장소에 `schema_all.sql`도 없어(테이블 정의서 DDL은 외부 문서 전용) 실제 백엔드를 새로 기동해 검증하지 못했다 — 대신 (1) 백엔드 없이 뜬 프런트에서 각 fetch가 실패해도 빈 배열로 우아하게 폴백하는지, (2) Playwright로 `page.route()`를 이용해 5개 엔드포인트를 전부 목킹해 실제 응답 스키마(`ComplexSummaryResponse` 등)를 넣었을 때 카드 렌더링·하트클릭·로그인·자동재생·토스트 전체 왕복이 올바른지 검증했다 | **완결 필요(부분 해소)** — `schema_all.sql`은 같은 세션 뒷부분에서 만들어져 커밋됐다(위 "정정" 문단의 "해소됨(2026-09-14)" 참고, 2026-09-17 재확인 완료) — 스키마 부재라는 전제 자체는 더 이상 걸림돌이 아니다. 다만 실제로 로컬 MariaDB에 그 스키마를 적용하고 `./gradlew bootRun`으로 백엔드를 띄운 뒤 `GET /api/complexes/popular`/`GET /api/regions/interest-summary`/`GET /api/recent-views`/`GET /api/search/popular` 4개를 실 데이터로 재확인하는 작업 자체는 아직 아무도 하지 않았다 — 이 부분만 여전히 완결 필요다(SVC-FAV-01/SVC-NTF-01 절의 "Docker 없어 IT 미실행" 잔여 리스크와 같은 성격). |
 | **하트 클릭이 항상 POST만 호출 — 코드리뷰(P2) 지적, 수정 완료** | 초기 구현은 `favoritedIds`를 항상 빈 Set에서 시작하고 `toggleFavorite`가 항상 `addFavoriteProperty()`(POST)만 호출했다 — UI는 아바타 하트처럼 토글로 보이지만 실제로는 추가 전용이었다 | 이미 관심 매물로 등록된 단지는 새로고침 후에도 빈 하트로 보이고, 클릭하면 해제가 아니라 `DuplicateFavoriteException`(409)만 받았다 — `GET`/`DELETE` 엔드포인트가 이미 있는데도 프론트가 전혀 쓰지 않고 있었다. 로그인 상태 마운트 시 `GET /api/favorites/properties`로 `complexId→favoritePropertyId` 맵을 하이드레이트하고(`useFavoriteToggle.ts`), 이미 등록된 항목은 `toggleFavorite`가 `DELETE /api/favorites/properties/{favoritePropertyId}`(경로의 `{id}`는 complexId가 아니라 favoritePropertyId — `FavoriteController.removeFavoriteProperty()` 확인)를 호출하도록 분기했다. 이 하이드레이션 effect는 로그인 여부 분기가 `getFavoriteProperties()` 호출 **이전**에 있어 비로그인 사용자에게는 이 GET 자체가 나가지 않는다(Playwright로 별도 검증: 마운트·클릭 어느 시점에도 `/api/favorites/properties` 호출 0건, `/login` 리다이렉트만 발생) | `Set<number>`(complexId만)로는 DELETE를 호출할 방법이 없어 `Map<complexId, favoritePropertyId>`로 상태 구조 자체를 바꿔야 했다. Playwright로 "이미 찜한 단지는 채워진 하트로 렌더 → 클릭 시 DELETE(POST 아님) → 해제 토스트"와 "안 찜한 단지는 빈 하트 → 클릭 시 POST → 등록 토스트" 둘 다 목킹된 백엔드로 검증했다. |
 | **GNB/모바일 헤더 알림 벨 — 세 차례 코드리뷰(P2)로 점진적으로 바로잡음, 최종 확정** | 초기 구현은 `Gnb`/`MobileHeader` 둘 다 알림 벨을 `onClick` 없는 `<button>`으로 그려 뒀다(`/notifications` 라우트가 이미 있는데도 탭해도 아무 반응이 없었다) | **1차 수정(불완전):** 두 벨을 전부 `<Link to="/notifications">`로 바꿔 클릭 가능하게 만들었다 — 이때 `/notifications`가 렌더링하는 자리표시 화면을 `programId="MY-03"`(잘못됨, 아래 참고)로 임의 지정했다. **2차 수정(불완전):** 코드리뷰에서 (1) UI정의서 2.3/4.1/4.2절이 모바일 알림 진입점을 GNB 벨이 아니라 하단 탭 "마이" 아이콘의 배지로 명시하고 있고(하단 탭을 5개로 유지하기 위해 알림을 별도 탭으로 두지 않는 설계), 모바일 헤더 벨은 애초에 Figma 글리프를 확인한 적 없는 추정 아이콘이었다는 점, (2) `/notifications`가 실제로는 두 개의 다른 화면(MY-03 알림 설정, MY-04 알림 이력)을 가리킬 수 있는데 `NotificationController.getNotifications()`/`NotificationResponse`의 Javadoc이 명시적으로 "MY-04 알림 이력"이라 적어 둔 것을 확인 안 하고 MY-03(알림 설정, `GET/PUT /api/notifications/settings` 전용)으로 잘못 연결했다는 점, 두 가지를 지적받았다. 모바일 헤더 벨은 완전히 제거(`MobileHeader.tsx`)했고, `/notifications` 목적지는 MY-04로 정정(`AppRouter.tsx`)했지만 — 이때는 데스크톱 GNB 벨(Figma 3:2 프레임에 빨간 점 배지와 함께 그려져 있던 것) 자체는 "픽셀 증거가 있다"는 이유로 그대로 유지하며 완결 필요로만 남겨뒀다. **3차 수정(최종):** 지성이 UI정의서 2.3절/4.1절 원문을 직접 대조해, GNB 구성이 "로고 / 주메뉴(지역·단지 검색·지도로 보기·관심목록·알림) / 우측 영역(비로그인: 로그인·회원가입, 로그인: 프로필 아이콘)"으로만 정의돼 있고 벨은 어디에도 언급되지 않는다는 것을 확인해 주었다 — **데스크톱 GNB 벨도 완전히 제거**하고(`Gnb.tsx`, `BellIcon` import까지 함께 삭제), 데스크톱의 유일한 알림 진입점을 중앙 네비 "알림" 텍스트 링크(MY-04) 하나로 확정했다 | 벨을 "클릭 가능하게" 고치는 것과 "이 벨이 애초에 존재해야 하는가"는 서로 다른 질문인데, 1차 수정은 전자만 보고 후자를 검토하지 않았다. 2차 수정은 후자를 모바일에는 적용했지만 데스크톱엔 "Figma 픽셀 증거"를 근거로 예외를 뒀는데, 이 프로젝트 스스로가 명시한 "코드와 문서가 어긋나면 문서가 맞다" 원칙(문서 체계 절 — Figma는 6개 근거 문서에 포함되지 않는다) 아래에서는 그 예외 자체가 근거 부족이었다. Figma 픽셀은 "임의 추측"이었던 모바일 벨보다는 근거가 있었지만, 그 근거가 애초에 6개 근거 문서 밖에 있다는 점은 동일했다 — 이번에 지성이 UI정의서 원문을 직접 확인해 주어 완결 필요 상태에서 확정된 결정으로 종결됐다. **남은 완결 필요는 1건뿐:** 하단 탭 "마이" 아이콘의 미읽음 카운트 배지 자체는 아직 구현하지 않았다 — `GET /api/notifications`가 항목별 `isRead`는 주지만 전용 미읽음 카운트 엔드포인트가 없어(값을 구하려면 전체 목록을 받아 클라이언트에서 세야 하는데 페이지네이션 때문에 부정확하다) 백엔드에 카운트 엔드포인트를 추가하는 논의가 먼저 필요하다 — UI정의서 4.2절은 이 배지를 명시적으로 요구하는데 API-NTF-01(프로그램목록서·설계서)엔 이를 뒷받침할 엔드포인트가 없어, UI정의서 요구사항이 프로그램설계서보다 앞서 있는 별도의 문서 간 갭이다(지성 확인). |
 
