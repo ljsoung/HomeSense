@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -333,5 +334,64 @@ class TradeRepositoryMariaDbIT {
 
     private static List<Long> ids(Page<TradeSummaryResponse> page) {
         return page.getContent().stream().map(TradeSummaryResponse::tradeId).toList();
+    }
+
+    /**
+     * findRecentTradesByComplexIds()는 ComplexRepositoryCustomImpl.search()가 이미 검증받은 것과
+     * 동일한 2단 동률 판정(MAX(dealDate) → MAX(tradeId))을 상관 서브쿼리로 구현한다 — SVC-FAV-01이
+     * 처음 도입한 이래 실 DB로 그 판정 자체를 검증한 적이 없었다(FavoriteServiceTest는 Mockito로
+     * 목킹만 함). 이번에 SVC-CPX-01.getPopular()·SVC-RCV-01.getRecent() 둘 다 이 메서드를 "대표 거래"
+     * 단일 소스로 재사용하게 되면서(CLAUDE.md "CPX-RCV-RGN price/area/floor 보강" 절 참고), 동률
+     * 판정이 실제로 결정적인지 여기서 처음 확인한다.
+     */
+    @Test
+    void findRecentTradesByComplexIds_동일_dealDate_동률이면_MAX_tradeId인_거래를_대표거래로_고른다() {
+        tradeRepository.saveAndFlush(baseTrade().dealDate(LocalDate.of(2026, 1, 10))
+                .dealAmount(50000L).dedupHash("h-tie-earlier").build());
+        Trade laterInserted = tradeRepository.saveAndFlush(baseTrade().dealDate(LocalDate.of(2026, 1, 10))
+                .dealAmount(60000L).dedupHash("h-tie-later").build());
+
+        Map<Long, Trade> result = tradeRepository.findRecentTradesByComplexIds(List.of(complexA.getComplexId()));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(complexA.getComplexId()).getTradeId()).isEqualTo(laterInserted.getTradeId());
+        assertThat(result.get(complexA.getComplexId()).getDealAmount()).isEqualTo(60000L);
+    }
+
+    @Test
+    void findRecentTradesByComplexIds_complexId별로_각자의_대표거래를_한_번의_쿼리로_묶어_반환한다() {
+        Complex complexB = complexRepository.saveAndFlush(complex("B"));
+        Trade aOld = tradeRepository.saveAndFlush(baseTrade()
+                .dealDate(LocalDate.of(2026, 1, 1)).dealAmount(50000L).dedupHash("h-a-old").build());
+        Trade aNew = tradeRepository.saveAndFlush(baseTrade()
+                .dealDate(LocalDate.of(2026, 2, 1)).dealAmount(80000L).dedupHash("h-a-new").build());
+        Trade bOnly = tradeRepository.saveAndFlush(baseTrade().complex(complexB)
+                .dealDate(LocalDate.of(2026, 1, 15)).dealAmount(30000L).dedupHash("h-b-only").build());
+
+        Map<Long, Trade> result = tradeRepository
+                .findRecentTradesByComplexIds(List.of(complexA.getComplexId(), complexB.getComplexId()));
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(complexA.getComplexId()).getTradeId()).isEqualTo(aNew.getTradeId());
+        assertThat(result.get(complexA.getComplexId()).getTradeId()).isNotEqualTo(aOld.getTradeId());
+        assertThat(result.get(complexB.getComplexId()).getTradeId()).isEqualTo(bOnly.getTradeId());
+    }
+
+    @Test
+    void findRecentTradesByComplexIds_취소된_거래만_있으면_결과_Map에_키_자체가_없다() {
+        tradeRepository.saveAndFlush(baseTrade().cancelYn(true).dedupHash("h-cancelled-only").build());
+
+        Map<Long, Trade> result = tradeRepository.findRecentTradesByComplexIds(List.of(complexA.getComplexId()));
+
+        assertThat(result).doesNotContainKey(complexA.getComplexId());
+    }
+
+    @Test
+    void findRecentTradesByComplexIds_거래가_없는_complexId도_결과_Map에_키_자체가_없다() {
+        Complex complexWithNoTrades = complexRepository.saveAndFlush(complex("C"));
+
+        Map<Long, Trade> result = tradeRepository.findRecentTradesByComplexIds(List.of(complexWithNoTrades.getComplexId()));
+
+        assertThat(result).isEmpty();
     }
 }

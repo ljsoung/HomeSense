@@ -66,19 +66,22 @@ class RecentViewControllerTest {
         authenticate();
         when(recentViewService.getRecent(eq(1L), isNull(), eq(3))).thenReturn(
                 List.of(new RecentViewResponse(10L, "테스트단지", HousingType.APT,
-                        "서울특별시", "강남구", "역삼동", LocalDateTime.now())));
+                        "서울특별시", "강남구", "역삼동", 50000L, new java.math.BigDecimal("84.99"), (short) 12,
+                        LocalDateTime.now())));
 
         mockMvc.perform(get("/api/recent-views"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].complexId").value(10))
-                .andExpect(jsonPath("$.data[0].sigungu").value("강남구"));
+                .andExpect(jsonPath("$.data[0].sigungu").value("강남구"))
+                .andExpect(jsonPath("$.data[0].price").value(50000))
+                .andExpect(jsonPath("$.data[0].floor").value(12));
     }
 
     @Test
     void 비로그인_상태면_세션헤더_기준으로_조회한다() throws Exception {
         when(recentViewService.getRecent(isNull(), eq("session-abc"), eq(3))).thenReturn(
                 List.of(new RecentViewResponse(20L, "테스트단지2", HousingType.VILLA,
-                        null, null, null, LocalDateTime.now())));
+                        null, null, null, null, null, null, LocalDateTime.now())));
 
         mockMvc.perform(get("/api/recent-views").header("X-Session-Id", "session-abc"))
                 .andExpect(status().isOk())

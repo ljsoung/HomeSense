@@ -1,6 +1,7 @@
 package com.jiseong.homesense.recentview.service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.data.domain.PageRequest;
@@ -14,6 +15,8 @@ import com.jiseong.homesense.recentview.dto.RecentViewResponse;
 import com.jiseong.homesense.recentview.dto.RecentViewTarget;
 import com.jiseong.homesense.recentview.entity.RecentView;
 import com.jiseong.homesense.recentview.repository.RecentViewRepository;
+import com.jiseong.homesense.trade.entity.Trade;
+import com.jiseong.homesense.trade.repository.TradeRepository;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
 
@@ -32,6 +35,16 @@ import lombok.RequiredArgsConstructor;
  * 또는 INSERT, 상한 초과 시 삭제까지)가 얹히지 않도록 하기 위함이다. 예외가 나도 호출자에게
  * 전파되지 않고 기본 {@code SimpleAsyncUncaughtExceptionHandler}가 로그만 남긴다 — 조회 이력은
  * 참고 정보일 뿐 상세조회 성공 여부에 영향을 줘서는 안 된다는 판단이다(AsyncConfig 참고).
+ *
+ * <p>getRecent()는 price/area/floor를 채우기 위해 {@code TradeRepository}를 직접 주입받는다 —
+ * ComplexService가 이미 같은 방식으로 TradeRepository를 직접 주입받고 있어(순환 참조 없는 Service→
+ * 다른 도메인 Repository 직접 접근), Service 간 호출(RCV→CPX)로 대표 거래를 얻는 대신 이 선례를
+ * 그대로 따랐다 — SVC-CPX-01.getDetail()이 SVC-RCV-01.record()를 부르는 기존 방향(CPX→RCV)과
+ * 반대로 RCV가 CPX를 호출하면 순환 참조가 생기기 때문이다. 대표 거래 선정 자체는
+ * {@code TradeRepository.findRecentTradesByComplexIds()}(SVC-FAV-01이 먼저 도입, ComplexService.
+ * getPopular()도 재사용)를 그대로 재사용해 CPX/FAV/RCV 세 도메인이 항상 같은 tie-break 규칙(MAX
+ * (dealDate)→MAX(tradeId))으로 같은 값을 보도록 한다(CLAUDE.md "CPX-RCV-RGN price/area/floor 보강"
+ * 절 참고).
  */
 @Service
 @RequiredArgsConstructor
@@ -44,6 +57,7 @@ public class RecentViewService {
     private final RecentViewRepository recentViewRepository;
     private final UserRepository userRepository;
     private final ComplexRepository complexRepository;
+    private final TradeRepository tradeRepository;
 
     @Transactional(readOnly = true)
     public List<RecentViewResponse> getRecent(Long userId, String sessionId, int limit) {
@@ -55,8 +69,16 @@ public class RecentViewService {
         List<RecentView> views = userId != null
                 ? recentViewRepository.findByUser_UserIdOrderByViewedAtDesc(userId, pageRequest)
                 : recentViewRepository.findBySessionIdOrderByViewedAtDesc(sessionId, pageRequest);
+        if (views.isEmpty()) {
+            return List.of();
+        }
 
-        return views.stream().map(RecentViewResponse::from).toList();
+        List<Long> complexIds = views.stream().map(view -> view.getComplex().getComplexId()).distinct().toList();
+        Map<Long, Trade> representativeTrades = tradeRepository.findRecentTradesByComplexIds(complexIds);
+
+        return views.stream()
+                .map(view -> RecentViewResponse.from(view, representativeTrades.get(view.getComplex().getComplexId())))
+                .toList();
     }
 
     @Async

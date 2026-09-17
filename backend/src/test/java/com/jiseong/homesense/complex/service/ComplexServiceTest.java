@@ -13,7 +13,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -178,9 +178,8 @@ class ComplexServiceTest {
         Complex complex1 = complex(1L);
         Trade representativeTrade = trade(complex1, LocalDate.of(2026, 1, 10), 50000L, "84.99");
         when(tradeRepository.findTopComplexIdsByRecentTradeVolume(any(), any())).thenReturn(List.of(1L));
-        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex1));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(1L))
-                .thenReturn(Optional.of(representativeTrade));
+        when(complexRepository.findAllById(List.of(1L))).thenReturn(List.of(complex1));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, representativeTrade));
 
         List<ComplexSummaryResponse> result = complexService.getPopular(1);
 
@@ -196,9 +195,8 @@ class ComplexServiceTest {
         Trade representativeTrade = trade(complex1, LocalDate.of(2026, 1, 10), 50000L, "84.99",
                 MatchMethod.SIMILAR, (short) 7);
         when(tradeRepository.findTopComplexIdsByRecentTradeVolume(any(), any())).thenReturn(List.of(1L));
-        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex1));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(1L))
-                .thenReturn(Optional.of(representativeTrade));
+        when(complexRepository.findAllById(List.of(1L))).thenReturn(List.of(complex1));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, representativeTrade));
 
         List<ComplexSummaryResponse> result = complexService.getPopular(1);
 
@@ -209,9 +207,8 @@ class ComplexServiceTest {
     @Test
     void getPopular_대표거래가_없는_단지는_결과에서_제외한다() {
         when(tradeRepository.findTopComplexIdsByRecentTradeVolume(any(), any())).thenReturn(List.of(1L));
-        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex(1L)));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(1L))
-                .thenReturn(Optional.empty());
+        when(complexRepository.findAllById(List.of(1L))).thenReturn(List.of(complex(1L)));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of());
 
         List<ComplexSummaryResponse> result = complexService.getPopular(1);
 
@@ -227,12 +224,9 @@ class ComplexServiceTest {
 
         when(tradeRepository.findTopComplexIdsByRecentTradeVolume(any(), any())).thenReturn(List.of(1L));
         when(complexRepository.findAllByOrderByComplexIdDesc(any())).thenReturn(List.of(fallback));
-        when(complexRepository.findById(1L)).thenReturn(Optional.of(byVolume));
-        when(complexRepository.findById(2L)).thenReturn(Optional.of(fallback));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(1L))
-                .thenReturn(Optional.of(volumeTrade));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(2L))
-                .thenReturn(Optional.of(fallbackTrade));
+        when(complexRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(byVolume, fallback));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L, 2L)))
+                .thenReturn(Map.of(1L, volumeTrade, 2L, fallbackTrade));
 
         List<ComplexSummaryResponse> result = complexService.getPopular(2);
 
@@ -248,9 +242,8 @@ class ComplexServiceTest {
         // fallback 후보 목록에 이미 거래량 기준으로 뽑힌 1L이 다시 나타난다(예: 그 단지의
         // complex_id도 등록 순서상 최근인 경우) — 결과에 중복으로 나오면 안 된다.
         when(complexRepository.findAllByOrderByComplexIdDesc(any())).thenReturn(List.of(byVolume));
-        when(complexRepository.findById(1L)).thenReturn(Optional.of(byVolume));
-        when(tradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(1L))
-                .thenReturn(Optional.of(volumeTrade));
+        when(complexRepository.findAllById(List.of(1L))).thenReturn(List.of(byVolume));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, volumeTrade));
 
         List<ComplexSummaryResponse> result = complexService.getPopular(2);
 
