@@ -1,7 +1,7 @@
 import { HomeIcon } from '../icons/HomeIcon';
 import { HeartIcon } from '../icons/HeartIcon';
 import { DataTrustBadge } from './DataTrustBadge';
-import { formatArea, formatKoreanPrice } from '../../lib/format';
+import { formatAddress, formatArea, formatKoreanPrice } from '../../lib/format';
 import type { ComplexSummaryResponse } from '../../features/complex/types';
 
 interface ComplexCardProps {
@@ -15,8 +15,9 @@ interface ComplexCardProps {
  * UIC-05. 백엔드에 단지 이미지 URL 필드가 아예 없어(Complex 엔티티 확인 완료) 실제 사진 대신
  * 브랜드 톤 그라디언트 위에 옅은 집 아이콘을 올린 자리표시 썸네일을 쓴다 — Figma 목업의 스톡
  * 사진은 가상의 단지명에 맞춰진 것이라 실제 데이터와 매칭될 수 없어 그대로 옮기지 않았다.
- * matchMethod/floor는 ComplexSummaryResponse에 없어 배지·층수 표시를 생략한다(사용자 확인,
- * CLAUDE.md SCR-HOME-01 절 참고).
+ * matchMethod/floor는 둘 다 nullable이라(매칭 실패/원본 미기재) 값이 없으면 각각 배지·층수
+ * 세그먼트를 렌더링하지 않는다(2026-09-17, CPX-RCV-RGN 카드 표시 필드 보강으로 필드 자체는
+ * 이미 채워짐 — CLAUDE.md SCR-HOME-01 절 참고).
  */
 export function ComplexCard({ complex, isFavorited, onToggleFavorite, className = '' }: ComplexCardProps) {
   return (
@@ -35,19 +36,20 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, className 
           <HeartIcon filled={isFavorited} className={isFavorited ? 'text-[#ff2056]' : ''} />
         </button>
         <div className="absolute bottom-2.5 left-2.5">
-          <DataTrustBadge housingType={complex.representativeHousingType} />
+          <DataTrustBadge housingType={complex.representativeHousingType} matchMethod={complex.matchMethod} />
         </div>
       </div>
       <div className="flex flex-col p-4">
         <p className="truncate text-[14px] font-bold text-[#101828]">{complex.complexName}</p>
         <p className="mt-0.5 truncate text-[11.5px] text-[#99a1af]">
-          {complex.sigungu} {complex.dongRi}
+          {formatAddress(complex.sigungu, complex.dongRi)}
         </p>
         <p className="mt-2 text-[17px] font-extrabold tracking-[-0.3px] text-[#1c1c1e]">
           {formatKoreanPrice(complex.representativeAmount)}
         </p>
         <p className="mt-1.5 text-[11px] text-[#99a1af]">
-          전용 {formatArea(complex.representativeArea)} · {complex.representativeDealDate}
+          전용 {formatArea(complex.representativeArea)}
+          {complex.floor !== null ? ` · ${complex.floor}층` : ''} · {complex.representativeDealDate}
         </p>
       </div>
     </div>

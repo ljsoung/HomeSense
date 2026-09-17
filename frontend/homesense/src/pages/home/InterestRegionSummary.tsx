@@ -14,9 +14,16 @@ import { useAuth } from '../../features/auth/useAuth';
 
 /**
  * HOME-01 구성요소 4 앞부분 — 완료 조건: 비로그인은 interest-summary를 호출하지 않고(불필요한
- * 401 회피) 가입 유도 카드를 대신 보여준다. "이번 달 N건"은 InterestRegionSummaryResponse에
- * 없는 필드라(avgPrice/changeRate 둘뿐) 생략했다 — ComplexSummaryResponse의 matchMethod/floor
- * 생략과 같은 종류의 데이터 갭(CLAUDE.md SCR-HOME-01 절 참고).
+ * 401 회피) 가입 유도 카드를 대신 보여준다.
+ *
+ * 거래건수(tradeCount, 2026-09-17 CPX-RCV-RGN 카드 표시 필드 보강으로 추가됨) — Figma 원본 카피는
+ * "이번 달 N건"이지만 실제 백엔드 집계 기간은 달력월이 아니라 "최근 1개월" 롤링 윈도우다
+ * (RegionStatsCalculator.calculate()가 `LocalDate.now(KST).minusMonths(1)`로 계산 — 코드 확인
+ * 완료). "이번 달"을 그대로 쓰면 매달 1~2일경 실제로는 지난 30여 일 치 거래를 세고 있으면서도
+ * "이번 달"이라 자칭해 이용자가 잘못된 기간으로 오인할 수 있어, 실제 계산 기준과 일치하는 "최근
+ * 1개월"로 문구를 확정했다("최근 30일"도 검토했으나 minusMonths(1)은 날짜 수 고정이 아니라 달력상
+ * 1개월 앞이라 30일보다 부정확할 이유가 없고, 오히려 실제 구현 표현과 한 글자도 다르지 않게
+ * 맞출 수 있어 이 쪽을 택했다).
  */
 export function InterestRegionSummary() {
   const { isAuthenticated } = useAuth();
@@ -122,7 +129,7 @@ function RegionCard({ region }: { region: InterestRegionSummaryResponse }) {
       <p className="pt-2 text-[20px] font-extrabold tracking-[-0.3px] text-[#1c1c1e]">
         {hasStats && region.avgPrice !== null ? formatKoreanPrice(region.avgPrice) : '데이터 없음'}
       </p>
-      <p className="pt-1.5 text-[11px] text-[#99a1af]">평균 거래가</p>
+      <p className="pt-1.5 text-[11px] text-[#99a1af]">평균 거래가 · 최근 1개월 {region.tradeCount}건</p>
     </div>
   );
 }

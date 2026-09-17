@@ -1,21 +1,18 @@
-import type { HousingType } from '../../features/complex/types';
+import type { HousingType, MatchMethod } from '../../features/complex/types';
 
 const HOUSING_TYPE_LABEL: Record<HousingType, string> = {
   APT: '아파트',
   VILLA: '연립다세대',
 };
 
-type MatchMethod = 'EXACT' | 'SIMILAR';
-
 interface DataTrustBadgeProps {
   housingType: HousingType;
   /**
-   * UI정의서 4.9절은 정밀(EXACT)/근사(SIMILAR) 배지도 함께 정의하지만, ComplexSummaryResponse에는
-   * matchMethod 필드 자체가 없다(백엔드 소스 확인 완료, 사용자 확인: "프론트에서 배지/층수를
-   * 생략" — CLAUDE.md SCR-HOME-01 절 참고). 값이 없으면 이 배지는 렌더링하지 않는다 — 백엔드가
-   * 이 필드를 노출하는 시점에 그대로 넘기기만 하면 된다.
+   * UI정의서 4.9절의 정밀(EXACT)/근사(SIMILAR) 배지 — matchMethod가 null(매칭 실패)이면 렌더링하지
+   * 않는다. `undefined`도 함께 받아들이는 이유는 소비자가 `complex.matchMethod ?? undefined`처럼
+   * null을 옵셔널 prop 관례로 넘기기 편하게 하기 위함이다(둘 다 동일하게 "배지 없음"으로 처리).
    */
-  matchMethod?: MatchMethod;
+  matchMethod?: MatchMethod | null;
 }
 
 /** UIC-09. */

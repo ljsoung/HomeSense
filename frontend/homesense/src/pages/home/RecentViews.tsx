@@ -7,6 +7,7 @@ import { Spinner } from '../../components/ui/Spinner';
 import { getRecentViews } from '../../features/recentview/api';
 import type { RecentViewResponse } from '../../features/recentview/types';
 import { useAuth } from '../../features/auth/useAuth';
+import { formatAddress } from '../../lib/format';
 
 const HOUSING_TYPE_LABEL: Record<string, string> = { APT: '아파트', VILLA: '연립다세대' };
 
@@ -24,9 +25,10 @@ interface RecentViewsProps {
  * 로그인 상태에서 조회 이력이 없을 때는 다른 문구("아직 조회한 단지가 없어요")를 쓴다 — 이미
  * 로그인한 사용자에게 "로그인하면..."을 보여주는 건 명백히 틀린 문구이기 때문이다.
  *
- * 주소/가격/면적·층수는 RecentViewResponse에 없는 필드라(complexId/complexName/housingType/
- * viewedAt 4개뿐) 생략한다 — ComplexSummaryResponse의 matchMethod/floor 생략과 같은 종류의
- * 데이터 갭.
+ * 주소(sido/sigungu/dongRi)는 2026-09-17 CPX-RCV-RGN 카드 표시 필드 보강으로 채워졌다 —
+ * ComplexCard와 동일한 `formatAddress()`(lib/format.ts)로 조합해 같은 조합 규칙을 공유한다.
+ * 가격/전용면적·층수는 여전히 RecentViewResponse에 없는 필드라(recent_view 테이블 자체에
+ * 대응 데이터가 없음) 계속 생략한다.
  */
 export function RecentViews({ favoritedIds, onToggleFavorite }: RecentViewsProps) {
   const { isAuthenticated } = useAuth();
@@ -92,33 +94,36 @@ export function RecentViews({ favoritedIds, onToggleFavorite }: RecentViewsProps
         </div>
       ) : (
         <div className="flex flex-1 flex-col">
-          {views.map((view) => (
-            <div key={view.complexId} className="flex items-start gap-3 border-b border-[#f9fafb] py-3 last:border-b-0">
-              <div className="flex size-[60px] shrink-0 items-center justify-center rounded-[10px] bg-[#f3f4f6]">
-                <HomeIcon className="size-6 opacity-40 [&_path]:stroke-[#6a7282]" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="truncate text-[13px] font-semibold text-[#101828]">{view.complexName}</p>
-                  <button
-                    type="button"
-                    onClick={() => onToggleFavorite(view.complexId)}
-                    aria-label={favoritedIds.has(view.complexId) ? '관심 매물 해제' : '관심 매물 등록'}
-                    aria-pressed={favoritedIds.has(view.complexId)}
-                    className="shrink-0 text-[#99a1af] hover:text-[#e7000b]"
-                  >
-                    <HeartIcon
-                      filled={favoritedIds.has(view.complexId)}
-                      className={`size-3.5 ${favoritedIds.has(view.complexId) ? 'text-[#ff2056]' : ''}`}
-                    />
-                  </button>
+          {views.map((view) => {
+            const address = formatAddress(view.sigungu, view.dongRi);
+            const housingTypeLabel = view.housingType ? HOUSING_TYPE_LABEL[view.housingType] : '';
+            const meta = [address, housingTypeLabel].filter(Boolean).join(' · ');
+            return (
+              <div key={view.complexId} className="flex items-start gap-3 border-b border-[#f9fafb] py-3 last:border-b-0">
+                <div className="flex size-[60px] shrink-0 items-center justify-center rounded-[10px] bg-[#f3f4f6]">
+                  <HomeIcon className="size-6 opacity-40 [&_path]:stroke-[#6a7282]" />
                 </div>
-                <p className="mt-0.5 text-[11px] text-[#99a1af]">
-                  {view.housingType ? HOUSING_TYPE_LABEL[view.housingType] : ''}
-                </p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="truncate text-[13px] font-semibold text-[#101828]">{view.complexName}</p>
+                    <button
+                      type="button"
+                      onClick={() => onToggleFavorite(view.complexId)}
+                      aria-label={favoritedIds.has(view.complexId) ? '관심 매물 해제' : '관심 매물 등록'}
+                      aria-pressed={favoritedIds.has(view.complexId)}
+                      className="shrink-0 text-[#99a1af] hover:text-[#e7000b]"
+                    >
+                      <HeartIcon
+                        filled={favoritedIds.has(view.complexId)}
+                        className={`size-3.5 ${favoritedIds.has(view.complexId) ? 'text-[#ff2056]' : ''}`}
+                      />
+                    </button>
+                  </div>
+                  <p className="mt-0.5 truncate text-[11px] text-[#99a1af]">{meta}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
