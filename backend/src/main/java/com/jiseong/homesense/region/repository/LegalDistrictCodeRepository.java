@@ -62,4 +62,12 @@ public interface LegalDistrictCodeRepository extends JpaRepository<LegalDistrict
     @Modifying
     @Query("UPDATE LegalDistrictCode c SET c.isActive = false WHERE c.isActive = true")
     int deactivateAll();
+
+    /**
+     * BAT-MAT-01 재적재 후 경량 커버리지 체크({@code RegionCoverageChecker}) 전용 — 활성 코드가 실제로
+     * 나열하는 (시도, 시군구) 조합 전부를 나열한다. 시도 대표행(sigunguName=null, 예: 세종)도 그대로
+     * 포함된다.
+     */
+    @Query("SELECT DISTINCT c.sidoName, c.sigunguName FROM LegalDistrictCode c WHERE c.isActive = true")
+    List<Object[]> findDistinctActiveSidoSigunguPairs();
 }
