@@ -69,7 +69,7 @@ class ComplexControllerTest {
     private static ComplexSummaryResponse summary(Long id) {
         return new ComplexSummaryResponse(id, "테스트단지", "서울특별시", "강남구", "역삼동", 500, (short) 5,
                 LocalDate.of(2010, 1, 1), HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 1, 10), 120000L,
-                new java.math.BigDecimal("84.99"));
+                new java.math.BigDecimal("84.99"), com.jiseong.homesense.trade.entity.MatchMethod.EXACT, (short) 12);
     }
 
     @Test
@@ -81,6 +81,8 @@ class ComplexControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data[0].complexId").value(1))
+                .andExpect(jsonPath("$.data[0].matchMethod").value("EXACT"))
+                .andExpect(jsonPath("$.data[0].floor").value(12))
                 .andExpect(jsonPath("$.pageMeta.totalElements").value(1));
     }
 

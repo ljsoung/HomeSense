@@ -85,13 +85,14 @@ class RegionControllerTest {
     void 관심지역_요약_조회에_성공하면_200과_목록을_반환한다() throws Exception {
         when(regionService.getInterestSummary(1L)).thenReturn(List.of(
                 new InterestRegionSummaryResponse(10L, "1168010100", "서울특별시 강남구 역삼동",
-                        new BigDecimal("110000"), new BigDecimal("10.00"))));
+                        new BigDecimal("110000"), new BigDecimal("10.00"), 23L)));
 
         mockMvc.perform(get("/api/regions/interest-summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].favoriteRegionId").value(10))
                 .andExpect(jsonPath("$.data[0].avgPrice").value(110000))
-                .andExpect(jsonPath("$.data[0].changeRate").value(10.00));
+                .andExpect(jsonPath("$.data[0].changeRate").value(10.00))
+                .andExpect(jsonPath("$.data[0].tradeCount").value(23));
     }
 
     @Test
