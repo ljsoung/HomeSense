@@ -3,7 +3,9 @@ package com.jiseong.homesense.complex.service;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
@@ -78,10 +80,7 @@ public class ComplexService {
             complexIds.addAll(fallbackComplexIds(complexIds, limit));
         }
 
-        return complexIds.stream()
-                .map(this::buildSummary)
-                .filter(Objects::nonNull)
-                .toList();
+        return buildSummaries(complexIds);
     }
 
     /**
@@ -125,23 +124,35 @@ public class ComplexService {
     }
 
     /**
-     * candidate complex_id 하나당 최대 2건(findById + 대표 거래 조회)의 쿼리를 낸다 — search()가
-     * QueryDSL 상관 서브쿼리로 단지+대표거래를 한 번에 가져오는 것과 다른 N+1 구조다. limit이
-     * 1~50으로 막혀 있고(ComplexController) popularComplexesV2 캐시(TTL 24h)로 캐시 미스 시에만
-     * 발생해 지금 당장 문제는 아니지만, 알려진 기술부채다(Codex 코드리뷰 — CLAUDE.md SVC-CPX-01
-     * 절 참고). 나중에 손볼 때는 search()처럼 QueryDSL 서브쿼리 하나로 통합하는 방향을 검토하라.
+     * candidate complex_id 전체를 findAllById()·findRecentTradesByComplexIds() 두 번의 배치 쿼리로
+     * 조회한다 — 예전에는 candidate당 최대 2건(findById + 대표 거래 개별 조회)을 내는 N+1 구조였다
+     * (알려진 기술부채로 CLAUDE.md SVC-CPX-01 절에 기록돼 있었음). SVC-RCV-01.getRecent()가 같은
+     * "대표 거래" 개념을 필요로 하게 되면서 TradeRepository.findRecentTradesByComplexIds()
+     * (SVC-FAV-01.getFavoriteProperties()가 먼저 도입한 배치 조회, ComplexRepositoryCustomImpl.search()와
+     * 동일한 MAX(dealDate)→MAX(tradeId) 동률 판정)를 이 메서드도 재사용하도록 맞췄다 — N+1 해소는
+     * 부수 효과이고, 진짜 목적은 "대표 거래" 선정 기준이 CPX/FAV/RCV 세 도메인 전부 단일 소스에서
+     * 나오게 해 같은 단지가 화면마다 다른 가격/층을 보여주는 정합성 버그를 원천 차단하는 것이다
+     * (CLAUDE.md "CPX-RCV-RGN price/area/floor 보강" 절 참고). complexIds의 순서(거래량 상위 →
+     * 등록순 fallback)는 그대로 보존해 응답 순서가 바뀌지 않는다.
      */
-    private ComplexSummaryResponse buildSummary(Long complexId) {
-        Complex complex = complexRepository.findById(complexId).orElse(null);
-        if (complex == null) {
-            return null;
+    private List<ComplexSummaryResponse> buildSummaries(List<Long> complexIds) {
+        if (complexIds.isEmpty()) {
+            return List.of();
         }
-        Trade representativeTrade = tradeRepository
-                .findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(complexId)
-                .orElse(null);
-        if (representativeTrade == null) {
-            return null;
-        }
-        return ComplexSummaryResponse.of(complex, representativeTrade);
+
+        Map<Long, Complex> complexes = complexRepository.findAllById(complexIds).stream()
+                .collect(Collectors.toMap(Complex::getComplexId, complex -> complex));
+        Map<Long, Trade> representativeTrades = tradeRepository.findRecentTradesByComplexIds(complexIds);
+
+        return complexIds.stream()
+                .map(id -> {
+                    Complex complex = complexes.get(id);
+                    Trade representativeTrade = representativeTrades.get(id);
+                    return complex == null || representativeTrade == null
+                            ? null
+                            : ComplexSummaryResponse.of(complex, representativeTrade);
+                })
+                .filter(Objects::nonNull)
+                .toList();
     }
 }

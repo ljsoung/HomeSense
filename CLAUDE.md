@@ -270,6 +270,29 @@ HOME-01 프론트엔드 세션이 남긴 후속 백엔드 작업이다(위 SCR-H
 `./gradlew integrationTest`(Docker 가동 세션에서 직접 실행, `ComplexRepositoryMariaDbIT` 포함 10개
 클래스 전부 그린) 모두 통과 확인.
 
+### SVC-RCV-01 RecentViewResponse price/area/floor 보강 (2026-09-17) — 위 섹션이 미룬 마지막 갭 해소
+
+위 절의 "완결됨" 표(line 264)가 명시했듯, HOME-01/SRCH-01 갭 중 `RecentViewResponse`의 price/area/floor는
+`recent_view` 테이블 자체가 그 값을 갖지 않아(`complex_id`만 보유) 별도 설계가 필요하다는 이유로 그때
+범위 밖으로 남겨뒀다. 이번 작업이 그 마지막 갭을 해소한다 — `RecentViewResponse`에 `price`(Long)/
+`area`(BigDecimal)/`floor`(Short) 3개 필드를 추가했다.
+
+| 항목 | 사전 전제/우려 | 실제 구현/확인 결과 | 근거 |
+| --- | --- | --- | --- |
+| **대표 거래 조회 경로 — RCV→CPX Service 호출 금지, 공유 컴포넌트로 추출** | 작업 지시는 "SVC-RCV-01→SVC-CPX-01 Service 호출은 순환 참조가 되므로 금지, Repository/QueryDSL 레벨 공유 컴포넌트를 새로 추출(예: `TradeRepository.findRepresentativeTradesByComplexIds()` 신설)할 것"을 전제했다 | `TradeRepository.findRecentTradesByComplexIds(List<Long>)`가 **이미 존재했다** — SVC-FAV-01.getFavoriteProperties()가 먼저 도입한 배치 조회로, `ComplexRepositoryCustomImpl.search()`와 정확히 같은 2단 동률 판정(MAX(dealDate)→MAX(tradeId))을 QueryDSL 상관 서브쿼리로 구현해 두고 있었다. 새로 추출할 필요 없이 `RecentViewService`가 이 메서드를 세 번째 소비자로 그대로 재사용하면 됐다 — `TradeRepository`를 직접 주입받는 방식도 `ComplexService`가 이미 쓰고 있는 선례(Service가 다른 도메인 Repository를 직접 주입받는 것은 이 프로젝트에서 이미 허용된 패턴, Service-to-Service 호출이 아니므로 순환 참조 우려 자체가 성립하지 않음)를 그대로 따랐다 | 코드 확인(`TradeRepositoryCustom`/`TradeRepositoryCustomImpl`, `FavoriteService.getFavoriteProperties()`) 후 "새로 추출"이 아니라 "기존 것을 세 번째로 재사용"으로 범위가 줄었다. |
+| **CPX(getPopular)도 같은 공유 메서드를 쓰도록 리팩토링 — 단일 소스 원칙을 문자 그대로 만족** | 작업 지시는 "이미 커밋된 `ComplexRepository`를 리팩토링할지, RCV만 새 컴포넌트를 쓸지는 판단해도 된다 — 다만 tie-break 규칙만큼은 두 도메인에서 반드시 동일해야 한다"고 재량을 열어뒀다 | `ComplexService.getPopular()`(구 `buildSummary(Long)`, `findById`+`findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc()`로 candidate당 최대 2개 개별 쿼리)를 `findAllById()`+`findRecentTradesByComplexIds()` 배치 호출로 리팩토링했다(`buildSummaries(List<Long>)`) — **리팩토링을 택한 이유**: `getPopular()`의 옛 메서드는 `ORDER BY dealDate DESC` 하나뿐이라 동률(같은 dealDate) 시 tie-break가 MariaDB 구현에 의존하는 비결정적 값이었다 — RCV가 새로 쓰는 결정적 tie-break(MAX tradeId)와 규칙이 일치한다는 보장이 없어, "문서화만으로 규칙을 맞춘다"는 대안은 동률 케이스에서 실제로 어긋날 위험이 있었다. 단일 소스로 통합하면 이 위험이 설계상 원천 차단된다. **부수 효과**: 이 리팩토링이 CLAUDE.md SVC-CPX-01 절에 "알려진 기술부채"로 이미 기록돼 있던 `getPopular()`의 N+1 구조(candidate당 최대 2쿼리)도 함께 해소했다 — candidate 수와 무관하게 고정 2쿼리(`findAllById`+`findRecentTradesByComplexIds`)가 됐다. 이제 쓰이지 않게 된 `TradeRepository.findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc()`는 삭제했다. | 검증: `ComplexServiceTest`의 `getPopular_*` 5개 테스트를 `findAllById`/`findRecentTradesByComplexIds` 배치 목킹으로 재작성(회귀 없음, 응답 순서 보존 확인 포함). |
+| **`findRecentTradesByComplexIds()`의 동률 판정 정확성 — 실 DB로 한 번도 검증된 적 없었다** | — (작업 지시에 없던 발견) | FAV-01이 이 메서드를 프로덕션에서 쓰고 있었는데도 `FavoriteServiceTest`(Mockito)만 이 메서드를 목킹했을 뿐, `ComplexRepositoryCustomImpl.search()`가 받았던 것과 같은 수준의 MariaDB IT 검증이 이 메서드에는 없었다 — 이 프로젝트 자신의 원칙("QueryDSL 상관 서브쿼리의 tie-break는 Mockito로 증명 불가, Testcontainers 필요")이 정확히 겨냥하는 공백이었다. CPX/RCV 두 도메인이 이제 이 메서드 하나에 대표 거래 선정을 전부 의존하게 되면서 이 공백을 방치할 수 없어, `TradeRepositoryMariaDbIT`에 4개 테스트를 추가했다: 동률(같은 dealDate) 시 MAX(tradeId) 승리, 여러 complexId를 한 쿼리로 배치 조회, 취소된 거래만 있는 complexId는 결과 Map에서 제외, 거래 자체가 없는 complexId도 제외. | 검증: `./gradlew integrationTest`로 직접 실행, `TradeRepositoryMariaDbIT` 17개 테스트(기존 13 + 신규 4) 전부 그린. |
+| **"popular vs recent-views 정합성" 테스트 — 완료 조건이 권장한 형태(HTTP 두 엔드포인트 비교) 대신 두 단계로 분리** | 완료 조건은 "동일 complex_id에 대해 `GET /api/complexes/popular`와 `GET /api/recent-views`가 항상 같은 price/floor를 반환하는지 검증하는 정합성 테스트 1건"을 권장했다 | `ComplexService.getPopular()`는 `@Cacheable`이라 이 메서드를 실제로 실행하는 통합 테스트는 `@SpringBootTest`로 전체 컨텍스트를 띄워야 하는데, 이 프로젝트의 모든 MariaDB IT는 MariaDB만 Testcontainers `@Container`로 자체 완결시키고 Redis는 그런 장치가 없다 — `RedisCacheManager` 빈이 뜨려면 `localhost:6379`(또는 설정된 호스트)에 실제로 연결 가능해야 하므로, 이 컨테이너 밖(호스트)에 Redis가 떠 있어야만 통과하는 테스트가 된다. 이번 세션은 마침 로컬에 Redis 컨테이너가 떠 있어(`docker ps` 확인) 우연히 통과했겠지만, CI나 Redis 없이 로컬 작업하는 다른 세션에서는 이 테스트 자체가 실패해 이 프로젝트가 지금까지 지켜온 "각 IT는 자기 인프라를 자체 완결시킨다" 원칙을 깨게 된다 — HTTP 두 엔드포인트를 직접 비교하는 안은 채택하지 않았다. **대신 두 단계로 나눠 같은 보증을 얻었다**: (1) 위 IT가 "대표 거래 선정"의 유일한 소스가 결정적임을 증명하고, (2) `RecentViewServiceTest.getRecent_가격_계산_분기가_ComplexSummaryResponse와_동일하다`가 동일한 `Trade` 인스턴스를 `RecentViewResponse.from()`과 `ComplexSummaryResponse.of()` 양쪽에 넣어 산출값이 일치하는지 직접 비교한다(Redis 불필요, Mockito만으로 결정적) — (1)+(2)를 합치면 "같은 쿼리가 같은 거래를 고르고, 그 거래에서 같은 값을 뽑아낸다"는 전체 체인이 증명된다. | **완결 필요는 아님** — 다만 향후 이 프로젝트가 Redis를 Testcontainers로 자체 완결시키는 IT 인프라를 갖추게 되면(현재 없음), 그때는 완료 조건이 원래 요청한 형태(HTTP 두 엔드포인트 직접 비교)로 승격하는 것을 검토하라. |
+| **`RecentView.complex`(FetchType.LAZY) N+1 — 이번 작업 범위 밖, 발견만 기록** | — (작업 지시에 없던 발견) | 이전 세션(CPX-RCV-RGN 카드 표시 필드 보강)이 `RecentViewResponse.from()`에 `sido`/`sigungu`/`dongRi`/`complexName`을 추가하면서, `RecentView.complex`가 `FetchType.LAZY`라 이 필드들을 읽을 때마다(getRecent() 결과 건별로) 지연 로딩이 발생하는 N+1을 이미 만들어 두고 있었다(당시엔 문서화되지 않음) — `complexId`만 읽는 것은 프록시 식별자라 안전하지만, `getComplexName()` 등 나머지 접근자는 프록시를 초기화시킨다. 이번 작업이 같은 메서드에 손을 대면서 발견했다. **고치지 않기로 했다** — `MAX_PER_ACTOR`(20)로 주체당 실제 보유 건수 자체가 이미 상한이 걸려 있어(getPopular()의 원래 N+1처럼 전역·캐시 대상 API가 아니라 요청당·세션 스코프 API) 최악의 경우도 추가 쿼리 20건 수준이고, `getPopular()`의 N+1이 실제로 문제였던 것도 아니라 "알려진 기술부채로 남겨뒀다가 다른 이유로 해당 메서드를 다시 열 때 함께 고친다"는 이 프로젝트의 기존 선례(CLAUDE.md SVC-CPX-01 절)와 같은 판단이다 | **완결 필요(낮은 우선순위)** — 다음에 `RecentViewRepository`의 두 `findByXxxOrderByViewedAtDesc` 파생 쿼리를 건드릴 일이 생기면, `@Query("... JOIN FETCH r.complex ...")`로 바꾸는 것을 함께 검토하라. |
+
+**완료 조건 재확인**: `GET /api/recent-views` 응답에 price/area/floor 포함(floor NULL 가능, 대표 거래
+없으면 셋 다 NULL) — 완료. 대표 거래 선정 로직이 CPX/FAV/RCV 세 도메인 모두 `TradeRepository.
+findRecentTradesByComplexIds()` 단일 소스 — 완료(공유 컴포넌트가 이미 있었으므로 "동일한 tie-break
+규칙을 양쪽에 문서화"할 필요조차 없어졌다). RCV가 trade 데이터에 접근하는 cross-domain 경로는 "N+1
+배치 조회를 위해 명시적으로 허용/리팩토링됨" 판단으로 여기 기록 — 완료. `./gradlew test`/
+`./gradlew integrationTest`(10개 MariaDB IT 클래스, `TradeRepositoryMariaDbIT` 17개 포함) 전부 통과.
+프론트엔드 반영은 범위 밖으로 남겨둔다.
+
 ### API-SEARCH-01/SVC-SEARCH-01 인기 검색어 (신규 제안 — 반영 전 검토 필요)
 
 **이 도메인 전체가 요구사항정의서·엔티티정의서·테이블정의서·UI정의서·프로그램설계서·프로그램목록서(60개

@@ -9,8 +9,11 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,13 +24,17 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 
+import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.recentview.dto.RecentViewResponse;
 import com.jiseong.homesense.recentview.dto.RecentViewTarget;
 import com.jiseong.homesense.recentview.entity.RecentView;
 import com.jiseong.homesense.recentview.repository.RecentViewRepository;
+import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.Trade;
+import com.jiseong.homesense.trade.repository.TradeRepository;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
 
@@ -40,12 +47,15 @@ class RecentViewServiceTest {
     private UserRepository userRepository;
     @Mock
     private ComplexRepository complexRepository;
+    @Mock
+    private TradeRepository tradeRepository;
 
     private RecentViewService recentViewService;
 
     @BeforeEach
     void setUp() {
-        recentViewService = new RecentViewService(recentViewRepository, userRepository, complexRepository);
+        recentViewService =
+                new RecentViewService(recentViewRepository, userRepository, complexRepository, tradeRepository);
     }
 
     private static Complex complex(Long id) {
@@ -75,6 +85,36 @@ class RecentViewServiceTest {
                 .build();
     }
 
+    private static Trade saleTrade(Long dealAmount, String area, Short floor) {
+        return Trade.builder()
+                .housingType(HousingType.APT)
+                .dealCategory(DealCategory.SALE)
+                .datasetId("15126468")
+                .sggCd("11680")
+                .excluUseArea(new BigDecimal(area))
+                .dealDate(LocalDate.of(2026, 1, 10))
+                .dealAmount(dealAmount)
+                .floor(floor)
+                .cancelYn(false)
+                .dedupHash("hash-sale-" + dealAmount + "-" + area)
+                .build();
+    }
+
+    private static Trade rentTrade(Long depositAmount, String area, Short floor) {
+        return Trade.builder()
+                .housingType(HousingType.APT)
+                .dealCategory(DealCategory.RENT)
+                .datasetId("15126474")
+                .sggCd("11680")
+                .excluUseArea(new BigDecimal(area))
+                .dealDate(LocalDate.of(2026, 1, 10))
+                .depositAmount(depositAmount)
+                .floor(floor)
+                .cancelYn(false)
+                .dedupHash("hash-rent-" + depositAmount + "-" + area)
+                .build();
+    }
+
     @Test
     void getRecent_userId와_sessionId가_모두_없으면_빈_리스트를_반환한다() {
         List<RecentViewResponse> result = recentViewService.getRecent(null, null, 3);
@@ -87,6 +127,7 @@ class RecentViewServiceTest {
         RecentView view = RecentView.record(null, "session-x", complex(1L), HousingType.APT);
         when(recentViewRepository.findByUser_UserIdOrderByViewedAtDesc(eq(1L), any(Pageable.class)))
                 .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(any())).thenReturn(Map.of());
 
         List<RecentViewResponse> result = recentViewService.getRecent(1L, null, 3);
 
@@ -104,6 +145,7 @@ class RecentViewServiceTest {
         RecentView view = RecentView.record(null, "session-x", complexWithAddress, HousingType.APT);
         when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
                 .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(any())).thenReturn(Map.of());
 
         List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
 
@@ -118,6 +160,7 @@ class RecentViewServiceTest {
         RecentView view = RecentView.record(null, "session-x", complex(1L), HousingType.APT);
         when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
                 .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(any())).thenReturn(Map.of());
 
         List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
 
@@ -131,11 +174,97 @@ class RecentViewServiceTest {
         RecentView view = RecentView.record(null, "session-x", complex(2L), HousingType.VILLA);
         when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
                 .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(any())).thenReturn(Map.of());
 
         List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).complexId()).isEqualTo(2L);
+    }
+
+    @Test
+    void getRecent_대표거래가_있으면_SALE의_dealAmount를_price로_담는다() {
+        Complex complexEntity = complex(1L);
+        Trade representativeTrade = saleTrade(50000L, "84.99", (short) 12);
+        RecentView view = RecentView.record(null, "session-x", complexEntity, HousingType.APT);
+        when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
+                .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, representativeTrade));
+
+        List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
+
+        assertThat(result.get(0).price()).isEqualTo(50000L);
+        assertThat(result.get(0).area()).isEqualByComparingTo("84.99");
+        assertThat(result.get(0).floor()).isEqualTo((short) 12);
+    }
+
+    @Test
+    void getRecent_대표거래가_RENT면_depositAmount를_price로_담는다() {
+        Complex complexEntity = complex(1L);
+        Trade representativeTrade = rentTrade(30000L, "59.90", (short) 3);
+        RecentView view = RecentView.record(null, "session-x", complexEntity, HousingType.APT);
+        when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
+                .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, representativeTrade));
+
+        List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
+
+        assertThat(result.get(0).price()).isEqualTo(30000L);
+    }
+
+    @Test
+    void getRecent_floor가_NULL인_대표거래는_floor를_NULL로_담는다() {
+        Complex complexEntity = complex(1L);
+        Trade representativeTrade = saleTrade(50000L, "84.99", null);
+        RecentView view = RecentView.record(null, "session-x", complexEntity, HousingType.APT);
+        when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
+                .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, representativeTrade));
+
+        List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
+
+        assertThat(result.get(0).floor()).isNull();
+    }
+
+    /**
+     * 대표 거래 자체가 없는 경우(이론상 recent_view가 가리키는 단지에 취소되지 않은 거래가 없는
+     * 경우) — 예외를 던지지 않고 price/area/floor를 모두 null로 반환한다(완료 조건의 예외 처리표).
+     */
+    @Test
+    void getRecent_대표거래가_없으면_price_area_floor_모두_NULL이다() {
+        RecentView view = RecentView.record(null, "session-x", complex(1L), HousingType.APT);
+        when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
+                .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of());
+
+        List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
+
+        assertThat(result.get(0).price()).isNull();
+        assertThat(result.get(0).area()).isNull();
+        assertThat(result.get(0).floor()).isNull();
+    }
+
+    /**
+     * "같은 단지가 인기 단지 카드와 최근 조회 카드에서 다른 가격/층을 보여주면 안 된다"는 이 작업의
+     * 핵심 요구사항(CLAUDE.md "CPX-RCV-RGN price/area/floor 보강" 절 참고)을 고정한다 — 두 DTO가
+     * 정확히 같은 Trade 인스턴스에서 항상 같은 price/area/floor를 뽑아내는지 직접 비교한다. 이 두
+     * DTO의 amount 분기 삼항식 중 한쪽만 수정되고 다른 쪽은 안 바뀌는 회귀를 잡아낸다.
+     */
+    @Test
+    void getRecent_가격_계산_분기가_ComplexSummaryResponse와_동일하다() {
+        Complex complexEntity = complex(1L);
+        Trade representativeTrade = rentTrade(45000L, "59.90", (short) 8);
+        RecentView view = RecentView.record(null, "session-x", complexEntity, HousingType.APT);
+        when(recentViewRepository.findBySessionIdOrderByViewedAtDesc(eq("session-x"), any(Pageable.class)))
+                .thenReturn(List.of(view));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, representativeTrade));
+
+        List<RecentViewResponse> result = recentViewService.getRecent(null, "session-x", 3);
+        ComplexSummaryResponse cpxEquivalent = ComplexSummaryResponse.of(complexEntity, representativeTrade);
+
+        assertThat(result.get(0).price()).isEqualTo(cpxEquivalent.representativeAmount());
+        assertThat(result.get(0).area()).isEqualByComparingTo(cpxEquivalent.representativeArea());
+        assertThat(result.get(0).floor()).isEqualTo(cpxEquivalent.floor());
     }
 
     @Test

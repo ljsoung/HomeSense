@@ -156,9 +156,6 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
             @Param("dedupHash") String dedupHash,
             @Param("now") LocalDateTime now);
 
-    /** SVC-CPX-01.getDetail()/getPopular() 대표 거래 — 취소되지 않은 거래 중 가장 최근 1건. */
-    Optional<Trade> findFirstByComplex_ComplexIdAndCancelYnFalseOrderByDealDateDesc(Long complexId);
-
     /**
      * SVC-CPX-01.getPopular() — "인기"를 최근 거래량으로 정의한다(지성 확인, CLAUDE.md SVC-CPX-01
      * 절 참고). since 이후 취소되지 않은 거래가 많은 단지 순으로 complex_id를 반환한다. Pageable로
