@@ -78,43 +78,68 @@ class BatchExecutionOrchestrator {
      * 계약일 기준으로 소급 등록되는 특성(지연 신고) 때문에 당월 한 달만 보면 최근 신고분을 놓친다.
      */
     void orchestrate(YearMonth targetMonth) {
-        // 이전 실행이 어떤 이유로든(CriticalBatchException 외의 예외, 프로세스 재기동 등)
-        // 큐를 비우지 못하고 끝났을 가능성에 대비해, 새 실행은 항상 빈 큐로 시작한다는 불변식을
-        // 여기서도 보장한다 — CriticalBatchException catch 블록의 clear() 호출과 완전히
-        // 중복되지만(정상 종료 후엔 빈 큐를 비우는 no-op), 둘 중 하나가 나중에 빠지더라도
-        // 다른 하나가 안전망 역할을 계속하도록 이중화한다.
-        retryQueueManager.clear().forEach(this::logRetryAbandoned);
-
         List<String> sggCds = legalDistrictCodeRepository.findDistinctActiveSggCd();
         List<YearMonth> targetMonths = List.of(targetMonth.minusMonths(1), targetMonth);
+
+        boolean completed = runCombinations(sggCds, targetMonths);
+        if (!completed) {
+            return;
+        }
+
+        log.info("BAT-SCH-01 조합 순회 완료: targetMonth={}, 대상 코드 수={}", targetMonth, sggCds.size());
+        eventPublisher.publishEvent(new TradeCollectionCompletedEvent(targetMonth));
+    }
+
+    /**
+     * lawd_cd 커버리지 공백 소급 수집(백필) 전용 — 정규 순회({@link #orchestrate(YearMonth)})와 달리
+     * 임의의 시군구·계약월 조합만 골라 돈다. {@code TradeCollectionCompletedEvent}는 "정규 일일
+     * 사이클이 이 targetMonth까지 끝났다"는 의미를 갖는데, 백필은 대응하는 단일 targetMonth 개념이
+     * 없어(여러 달을 한 번에 순회) 이 이벤트를 발행하지 않는다 — 향후 이 이벤트에 리스너가 붙었을 때
+     * 백필 실행을 정규 사이클 완료로 오인시키지 않기 위함이다.
+     */
+    void orchestrateBackfill(List<String> sggCds, List<YearMonth> months) {
+        boolean completed = runCombinations(sggCds, months);
+        if (completed) {
+            log.info("BAT-SCH-01 백필 조합 순회 완료: 대상 코드 수={}, 대상 월 수={}", sggCds.size(), months.size());
+        }
+    }
+
+    /**
+     * 조합 순회의 공통 본체. 이전 실행이 어떤 이유로든(CriticalBatchException 외의 예외, 프로세스
+     * 재기동 등) 큐를 비우지 못하고 끝났을 가능성에 대비해, 새 실행은 항상 빈 큐로 시작한다는 불변식을
+     * 여기서 보장한다 — CriticalBatchException catch 블록의 clear() 호출과 완전히 중복되지만(정상
+     * 종료 후엔 빈 큐를 비우는 no-op), 둘 중 하나가 나중에 빠지더라도 다른 하나가 안전망 역할을
+     * 계속하도록 이중화한다.
+     *
+     * @return 조기 중단 없이 끝까지 순회했으면 true, CriticalBatchException으로 중단됐으면 false
+     */
+    private boolean runCombinations(List<String> sggCds, List<YearMonth> months) {
+        retryQueueManager.clear().forEach(this::logRetryAbandoned);
+
         List<HousingType> housingTypes = batchSchedulerProperties.housingTypes();
         consecutiveAbortBatchCount = 0;
 
-        int combinationCount = 0;
         try {
             for (String sggCd : sggCds) {
-                for (YearMonth month : targetMonths) {
+                for (YearMonth month : months) {
                     String dealYmd = month.format(DEAL_YMD_FORMATTER);
                     for (HousingType housingType : housingTypes) {
                         for (DealCategory dealCategory : DealCategory.values()) {
                             processCombination(housingType, dealCategory, sggCd, dealYmd);
-                            combinationCount++;
                         }
                     }
                 }
             }
             retryQueueManager.processRetryQueue(this::attemptRetry, this::logRetryExhausted);
+            return true;
         } catch (CriticalBatchException e) {
             auditLogger.logBatchFailure("BAT-SCH-01", e);
             // 조기 중단으로 processRetryQueue()에 도달하지 못했다 — 그때까지 큐에 쌓인 항목을
             // 비우지 않으면 싱글턴인 RetryQueueManager에 그대로 남아 다음 배치 사이클의 큐와
             // 뒤섞인다(계약월 축이 이동해 이미 범위를 벗어난 dealYmd를 재수집할 수도 있다).
             retryQueueManager.clear().forEach(this::logRetryAbandoned);
-            return;
+            return false;
         }
-
-        log.info("BAT-SCH-01 조합 순회 완료: targetMonth={}, 처리 조합 수={}", targetMonth, combinationCount);
-        eventPublisher.publishEvent(new TradeCollectionCompletedEvent(targetMonth));
     }
 
     /**
