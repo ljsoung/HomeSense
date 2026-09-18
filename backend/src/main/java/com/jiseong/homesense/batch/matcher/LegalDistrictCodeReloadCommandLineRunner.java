@@ -2,6 +2,9 @@ package com.jiseong.homesense.batch.matcher;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
@@ -25,6 +28,11 @@ import lombok.extern.slf4j.Slf4j;
  * 행만 upsert로 재활성화하는 패턴이라 DELETE를 쓰지 않는다 — 폐지된 코드는 삭제되지 않고
  * {@code is_active=false}로 보존되므로, 그 코드를 참조하는 기존 complex/trade FK가 깨지지 않는다
  * (안전성 검증: {@code LegalDistrictCodeLoaderMariaDbIT}).
+ *
+ * <p>이 리소스를 {@link ClassPathResource#getFile()}로 곧바로 읽으면 안 된다 — 패키징된 JAR로
+ * 실행할 때는 이 엔트리가 jar: URL(파일시스템 실체가 없음)이라 {@code getFile()}이 재적재 시작
+ * 전에 예외를 던진다. 문서화된 {@code bootRun} 실행은 uncompressed classes 디렉터리를 쓰기 때문에
+ * 우연히 통과했을 뿐이라, 스트림을 임시 파일로 복사해 어떤 실행 방식에서도 동작하게 한다.
  */
 @Slf4j
 @Component
@@ -38,9 +46,16 @@ public class LegalDistrictCodeReloadCommandLineRunner implements CommandLineRunn
 
     @Override
     public void run(String... args) throws IOException {
-        File csvFile = new ClassPathResource(RESOURCE_PATH).getFile();
-        log.info("법정동코드 재적재 시작: file={}", csvFile.getAbsolutePath());
-        legalDistrictCodeLoader.loadInitial(csvFile);
-        log.info("법정동코드 재적재 완료");
+        Path tempFile = Files.createTempFile("legal-district-code", ".txt");
+        try {
+            try (var in = new ClassPathResource(RESOURCE_PATH).getInputStream()) {
+                Files.copy(in, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            log.info("법정동코드 재적재 시작: resource={}", RESOURCE_PATH);
+            legalDistrictCodeLoader.loadInitial(tempFile.toFile());
+            log.info("법정동코드 재적재 완료");
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
     }
 }
