@@ -5,12 +5,21 @@ import java.util.Optional;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import com.jiseong.homesense.complex.entity.Complex;
 
 public interface ComplexRepository extends JpaRepository<Complex, Long>, ComplexRepositoryCustom {
 
     Optional<Complex> findBySourceComplexCd(String sourceComplexCd);
+
+    /**
+     * BAT-MAT-01 재적재 후 경량 커버리지 체크({@code RegionCoverageChecker}) 전용 — complex 마스터가
+     * 실제로 쓰는 (시도, 시군구) 조합 전부를 나열한다. sigungu가 NULL인 세종특별자치시도 그대로
+     * 포함된다(비교 쪽에서 null-safe하게 처리).
+     */
+    @Query("SELECT DISTINCT c.sido, c.sigungu FROM Complex c WHERE c.sido IS NOT NULL")
+    List<Object[]> findDistinctSidoSigunguPairs();
 
     /**
      * BAT-MAT-02 1차 필터링(idx_complex_region)에 쓰는 시도/시군구/동리 완전일치 조회.

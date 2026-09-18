@@ -346,14 +346,25 @@ testcontainers fixture뿐이다). `.gitignore` 57행에 `!schema_all.sql` 예외
 즉 "11개는 이미 커밋됐다"는 애초에 이 정정을 쓴 세션이 검증 없이 진술한 추정이었을 가능성이 높다 —
 실제로는 각 개발자가 테이블정의서 8장 원문을 로컬 DB에 직접 붙여넣어 적용만 하고(그 자체는 위 문단이
 맞게 서술한 프로젝트 관행이다), 그 DDL을 파일로 남겨 커밋하는 절차 자체가 이 프로젝트에 한 번도 없었던
-것으로 보인다. **실질적 영향:** 이 저장소를 새로 clone한 사람(다른 개발자, CI, 다음 세션)은 11개
-프로덕션 테이블(user/refresh_token/legal_district_code/complex/trade/favorite_property/favorite_region/
-recent_view/notification_setting/notification/batch_log) 중 무엇 하나도 저장소만으로는 만들 수 없다 —
-`spring.jpa.hibernate.ddl-auto=validate`라 스키마가 없으면 애플리케이션이 기동 자체를 거부한다. **완결
-필요(우선순위 높음, HOME-01 범위 밖) —** 테이블 정의서 8장 원문을 `schema_all.sql`(저장소 루트 또는
-`backend/schema_all.sql`, `.gitignore` 예외가 이미 둘 다 커버한다)로 옮겨 커밋하라. 이 프론트 세션은
-그 문서 원문에 접근할 수 없어(백엔드 전용 프로젝트 지식) 직접 처리하지 못했다 — 다음에 백엔드 작업을
-하는 세션이나 지성이 직접 처리해야 한다.
+것으로 보인다. **실질적 영향(해소됨, 아래 참고):** 이 저장소를 새로 clone한 사람(다른 개발자, CI, 다음
+세션)은 11개 프로덕션 테이블(user/refresh_token/legal_district_code/complex/trade/favorite_property/
+favorite_region/recent_view/notification_setting/notification/batch_log) 중 무엇 하나도 저장소만으로는
+만들 수 없었다 — `spring.jpa.hibernate.ddl-auto=validate`라 스키마가 없으면 애플리케이션이 기동 자체를
+거부한다.
+
+**해소됨(2026-09-14, 같은 SCR-HOME-01 세션 내에서) — `schema_all.sql`이 저장소 루트에 실제로 커밋됐다
+(커밋 `81d34db`, "sql").** 위 "완결 필요" 지시가 쓰인 시점엔 아직 미해결이었지만, 그 지시대로 테이블
+정의서 8장 원문을 옮겨 담은 `schema_all.sql`(351줄, `.gitignore` 57행의 `!schema_all.sql` 예외를 그대로
+활용)이 같은 세션 안에서 만들어져 커밋됐다 — 파일 자체의 헤더 주석도 "이 파일은 git 히스토리에 한 번도
+존재한 적이 없었음이 확인되어(API-SEARCH-01/SCR-HOME-01 작업 중 발견) 원본 문서를 기준으로 재구성했다"고
+이 경위를 그대로 기록하고 있다. 2026-09-17에 별도 세션이 `git ls-tree`/`git show`로 재확인했다 — 11개
+프로덕션 테이블 전부(`CREATE TABLE` 12건, `search_log` 포함) 존재하고, CHECK 제약(`ck_trade_housing_type
+CHECK (housing_type IN ('APT','VILLA'))`, `ck_trade_match_method` 등)과 FK `ON UPDATE RESTRICT`까지
+CLAUDE.md가 요구해온 설계 원칙을 그대로 담고 있다. **위 문단이 요구했던 "완결 필요(우선순위 높음)"
+조치는 이미 완료된 상태다** — 위 발견 서사는 문제가 실제로 있었다는 기록으로 그대로 남겨두되, 다음에
+이 절을 읽는 세션은 schema_all.sql을 다시 만들 필요가 없다는 것만 알면 된다. 남은 절차는 새 환경에
+배포할 때마다 `mysql -u root homesense < schema_all.sql`을 수동으로 실행하는 것뿐이다(이 프로젝트에
+Flyway/Liquibase 같은 자동 마이그레이션이 없다는 사실 자체는 바뀌지 않았다).
 
 **파일 위치 시행착오 — `.gitignore`의 `*.sql` 전면 차단을 처음엔 놓쳤다.** 처음에는
 `backend/src/main/resources/db/search_log.sql`에 커밋하려 했는데, `.gitignore` 56행이 "DB 덤프(실거래가
@@ -723,7 +734,7 @@ XML 파싱(BAT-PRS-01)→법정동/단지 매칭(BAT-MAT-01/02)→적재(BAT-LOD
 | --- | --- | --- |
 | 시도 대표코드(중간 3자리=`000`, 예: `11000`) | 16 | 무해 — data.go.kr이 시도 단위 조회는 처음부터 지원하지 않아 항상 빈 결과, 실제 데이터는 하위 시군구 코드로 정상 수집됨 |
 | 시(市) 대표코드인데 구(區) 코드가 legal_district_code에 별도로 존재(예: `41110` 수원시 ↔ `41111`/`41113`/`41115`/`41117`) | 12(수원/성남/안양/부천/안산/고양/용인/청주/천안/포항/창원/전주) | 무해 — 위 "버그 A"(시+구 도시 sigungu 표기 정규화)가 다룬 것과 같은 시+구 구조. 실거래는 구 코드로 정상 수집되고, 시 대표코드는 API 호출만 낭비하는 중복일 뿐 데이터 손실은 없다 |
-| **하위 구 코드 자체가 legal_district_code에 없음 — 진짜 커버리지 공백(데이터 손실 확정)** | **화성시(41590) 1개 + 인천 중구/동구/서구/옹진군(28110/28140/28260/28720) 4개 + 광주 5개구 전체(29110/29140/29155/29170/29200) + 전라남도 22개 시군구 전체(46110~46910)** = 32개 | `trade` 테이블에 `legal_dong_cd LIKE '29%'` 또는 `'46%'`인 행이 **0건** — 광주광역시+전라남도 전체(인구 약 300만)가 실거래 데이터 수집 자체에서 완전히 빠져 있다. 화성시·인천 3구도 마찬가지로 raw 데이터가 0건. 이미 CLAUDE.md가 "잔여 불일치 2,399개 단지"(complex 매칭 실패)로 문서화했던 화성 신설 일반구/인천 신설 자치구/광주-전남 통합 이슈가, 사실은 **complex 매칭 단계가 아니라 그보다 훨씬 앞선 원시 수집 단계(BAT-CLC-01)에서부터 100% 실패**하고 있었다는 뜻이다 — data.go.kr이 이 지역들에 대해 이미 신설/개편된 lawd_cd를 요구하는데, 우리 `legal_district_code`(구버전 CSV)는 그 신설 코드를 아예 갖고 있지 않아 옛 코드로 질의하면 항상 빈 결과(result_code 000, "정상"으로 위장된 데이터 없음)만 돌아온다. **완결 필요(우선순위 높음) — 실제 data.go.kr LAWD_CD 목록(또는 최신 법정동코드 CSV)에서 이 32개 지역의 현재 유효 코드를 확인해 legal_district_code를 갱신해야 한다. 이번 세션은 이 원인 확정까지만 하고 코드/데이터 수정은 하지 않았다.** |
+| **하위 구 코드 자체가 legal_district_code에 없음 — 진짜 커버리지 공백(데이터 손실 확정)** | **화성시(41590) 1개 + 인천 중구/동구/서구/옹진군(28110/28140/28260/28720) 4개 + 광주 5개구 전체(29110/29140/29155/29170/29200) + 전라남도 22개 시군구 전체(46110~46910)** = 32개 | `trade` 테이블에 `legal_dong_cd LIKE '29%'` 또는 `'46%'`인 행이 **0건** — 광주광역시+전라남도 전체(인구 약 300만)가 실거래 데이터 수집 자체에서 완전히 빠져 있다. 화성시·인천 3구도 마찬가지로 raw 데이터가 0건. 이미 CLAUDE.md가 "잔여 불일치 2,399개 단지"(complex 매칭 실패)로 문서화했던 화성 신설 일반구/인천 신설 자치구/광주-전남 통합 이슈가, 사실은 **complex 매칭 단계가 아니라 그보다 훨씬 앞선 원시 수집 단계(BAT-CLC-01)에서부터 100% 실패**하고 있었다는 뜻이다 — data.go.kr이 이 지역들에 대해 이미 신설/개편된 lawd_cd를 요구하는데, 우리 `legal_district_code`(구버전 CSV)는 그 신설 코드를 아예 갖고 있지 않아 옛 코드로 질의하면 항상 빈 결과(result_code 000, "정상"으로 위장된 데이터 없음)만 돌아온다. **부분 해소(2026-09-17, 아래 "BAT-MAT-01/BAT-MAT-02 법정동코드 참조자료 재적재" 절) — legal_district_code의 32개 코드 자체는 재적재로 복구돼(is_active=false→신규 코드 활성) 이 표의 원인 진단은 그대로 유효하다. 다만 `trade` 실거래 데이터는 여전히 0건이다 — legal_district_code를 최신화한다고 과거 누락분이 저절로 채워지지 않는다, 소급 수집(4단계)을 별도로 돌려야 한다. 이 행의 "우선순위 높음" 태그는 소급 수집이 끝나기 전까지 유지한다 — 사용자가 체감하는 실제 문제(이 3개 지역 실거래가 안 보임)는 아직 그대로다. 다음 액션은 data.go.kr serviceKey의 일일 호출 한도 확인부터.** |
 | 분류 불가(소규모 도서/산간 지역, 정상적으로 0건일 가능성) | 2(울릉군 47940, 남해군 48840) | 하위 구 코드도 없고 인구가 매우 적어 해당 2개월 창에 아파트 매매가 실제로 0건이었을 가능성을 배제할 수 없다 — 별도 조치 없이 다음 배치 결과로 재확인 |
 
 ### BAT-MAT-02 버그 C 수정 + `TradeRematchRunner` 재매칭 인프라 신설 (2026-09-16)
@@ -906,6 +917,132 @@ SIMILAR 12,708(11.4%, 합산 **90.4%**)/미매칭(legal_dong_cd 있음) 10,558(9
 미매칭 3,398(9.0%). 위 ③에서 지적한 lawd_cd 커버리지 공백(광주/전남/화성·인천 신설구 32개 코드) 전제는
 이 수치에도 동일하게 적용된다 — 여전히 FR-2.5 목표(98.9%)와 직접 비교하면 안 된다.
 
+### BAT-MAT-01/BAT-MAT-02 법정동코드 참조자료 재적재 — 위 ③ lawd_cd 커버리지 공백 32개 코드 중 시군구
+코드 자체를 해소 (2026-09-17)
+
+위 "BAT-MAT-02 실 배치 재실행 추가 조사" 절 ③이 확정만 하고 해소하지 않은 채 남겨뒀던 lawd_cd
+커버리지 공백(화성시 신설 일반구, 인천 행정체제 개편, 전남광주통합특별시 출범 — legal_district_code
+참조자료가 2025-08 스냅샷에 머물러 2026년 두 차례 개편을 반영하지 못한 문제)의 **원인(legal_district_code에
+신설 코드 자체가 없음)만 이번 세션에서 해소했다.**
+
+**⚠️ 사용자가 실제로 체감하는 문제(전남광주·화성·인천 신설구 실거래가가 여전히 안 보이는 것)는
+아직 해결되지 않았다 — 착각하지 말 것.** 이번 세션이 끝낸 것은 "인프라를 안전하게 만드는 것"
+(legal_district_code가 최신 행정구역을 알게 됨, 매칭 로직이 새 표기를 정확히 처리함, 재발 방지
+체크가 자동으로 붙음)까지다. `trade` 테이블의 해당 지역 실거래는 여전히 0건이다 — legal_district_code를
+최신화한다고 과거에 놓친 수집분이 저절로 채워지지 않는다. **완결 필요(우선순위 높음, 유지) — 4단계
+(소급 수집)가 끝나야 이 이슈 전체가 닫힌다.** 사용자 확인 후 이번 세션 범위에서는 소급 수집을
+명시적으로 보류했다(data.go.kr API 호출 한도·소요시간 확인이 먼저 필요 — 아래 4단계 절 참고).
+
+**1단계 조사 결과 — 예상과 달리 코드 변경이 거의 필요 없었다.** 행정안전부 법정동코드 전체자료 신규
+스냅샷(`src/main/resources/data/법정동코드.txt`로 교체, distinct sgg_cd 280→284, 신규 36/폐지 32 —
+사전 diff와 정확히 일치)을 검토한 결과:
+- `LegalDistrictCodeLoader.loadInitial()`은 이미 `deactivateAll()`(전체 비활성화) → 이번 CSV의 "존재"
+  행만 upsert 재활성화 패턴이라 DELETE를 전혀 쓰지 않는다 — 폐지된 32개 코드는 애초에 삭제되지 않고
+  `is_active=false`로 자동 보존된다. 코드 변경 불필요.
+- 파서(`readExistingRecords()`)는 이미 탭/콤마 구분자를 자동판별한다. 코드 변경 불필요.
+- 화성시 신설구("경기도 화성시 만세구" 등)는 `resolveNameParts()`가 `sigunguName="화성시 만세구"`
+  (공백 포함)로 파싱하는데, `complex.sigungu`(xlsx 원본)는 "화성만세구"(붙여쓰기)다 — 표기가 다르다는
+  우려가 맞았지만, **기존 `ComplexMasterMatcher.normalizeSigungu()`("시+구" 구조 도시의 공백 제거 정규화,
+  버그A 수정 당시 도입)가 이미 이 패턴을 일반적으로 처리해 "화성시 만세구"→"화성만세구"로 정확히
+  변환한다** — 별도 정규화 로직 추가 불필요. 인천 신설구·전남광주통합특별시 하위 시군구는 원본에
+  공백이 없어 정규화 자체가 필요 없다. 라이브 로컬 DB(21,680건 complex)로 leaf 레벨(`dong_ri`)까지
+  교차검증해 세 그룹 모두 기존 매칭 로직이 그대로 통한다는 것을 확인했다.
+
+**⚠️ premise 정정 — `complex.legal_dong_cd`는 21,680건 전부(100%) NULL인 미사용 컬럼이었다.** 사용자
+지시문은 이 컬럼으로 "영향받은 complex 건수"를 세라고 요청했는데, 실제로는 이 컬럼에 값을 쓰는 코드가
+프로젝트 어디에도 없다(전수 grep 확인) — `Complex.legalDistrictCode`(`@ManyToOne`, FK 컬럼명
+`legal_dong_cd`)는 실제 매칭 파이프라인(BAT-MAT-02)이 채우지 않는, 스키마상으로만 존재하는 선택 FK다.
+실제 매칭 신호는 `trade.legal_dong_cd`(BAT-MAT-01)/`trade.complex_id`+`match_method`(BAT-MAT-02)에
+있다. **사용자 확인 후 이 컬럼은 이번 작업 범위에서 그대로 두기로 확정했다** — 채우는 로직을 추가하지
+않는다. 대신 trade 테이블 기준으로 재측정한 결과, 3개 영향 그룹(전남광주통합특별시 1,709개
+complex·화성시 4개 신설구 422개·인천 4개 신설구 362개, 합계 2,493건 = 전체의 11.5%, 지시문의 추정치와
+일치) 전부 해당 lawd_cd의 trade 건수가 **0건**이었다 — 매칭 실패가 아니라 원시 수집(BAT-CLC-01)
+단계부터의 누락임을 재확인했다(위 ③과 같은 결론).
+
+**⚠️ 별도로 짚어야 할 발견 — 법정동코드 재적재는 지금까지 프로덕션 코드 어디에서도 호출된 적이 없었다.**
+`loadInitial(` 호출부를 전수 grep한 결과 테스트 밖에는 단 한 곳도 없었다 — 즉 재적재 전 DB에 있던
+20,555건은 이 저장소의 정상 운영 경로로 들어간 게 아니라, 이 프로젝트 어딘가의 일회성 스크립트나
+수동 조작으로 적재된 것으로 보인다(정확한 출처는 이번 세션에서 추적하지 않았다). 위 "캐싱" 절이
+`regionAutocomplete` 캐시 무효화 트리거를 이미 "법정동코드 재적재(비정기)"라고 전제하고 있었는데, 그
+전제를 실행할 실제 진입점이 없었던 셈이다.
+
+**결정(사용자 확인) — 아래 `LegalDistrictCodeReloadCommandLineRunner`를 이번 한 번만 쓰는 일회성
+도구가 아니라, 앞으로 법정동코드 참조자료가 갱신될 때마다(행정구역 개편 등, 비정기) 쓰는 표준
+재적재 절차로 확정한다.** 절차: (1) 행정표준코드관리시스템에서 새 "법정동코드 전체자료"를 내려받아
+`backend/src/main/resources/data/법정동코드.txt`로 교체, (2) `./gradlew bootRun
+--args='--spring.profiles.active=local,reload-legal-district'`로 재적재 실행(완료 즉시 프로세스를
+종료해도 된다 — CommandLineRunner가 끝나도 웹 서버는 계속 떠 있으므로 필요 없으면 그때 죽여도 된다),
+(3) `RegionCoverageChecker`가 재적재 이벤트에 자동으로 붙어 커버리지 공백을 로그로 알려준다 — 이번처럼
+"공백 0건"을 확인하는 것이 재적재가 온전히 반영됐다는 최소 신호다. **다음에 이 절차를 또 잊고
+"재적재 경로가 없다"는 걸 다시 발견하는 일이 없도록, 여기 이 문단을 남긴다.**
+
+**2단계 — 실제 재적재 실행 + 안전성 검증.**
+- `LegalDistrictCodeReloadCommandLineRunner`(신규, `reload-legal-district` 프로필 전용,
+  `TradeRematchCommandLineRunner`와 같은 "평소 부팅에 관여하지 않는 수동 유지보수 진입점" 패턴)를
+  신설해 `src/main/resources/data/법정동코드.txt`를 `ClassPathResource`로 읽어 `loadInitial()`을
+  호출한다.
+- `LegalDistrictCodeLoaderMariaDbIT`(신규, Testcontainers) — "폐지된 코드는 삭제되지 않고 `trade` FK가
+  깨지지 않는지"는 Mockito로 증명 불가능한 종류라(`LegalDistrictCodeLoaderTest`는 `saveAll()` 인자만
+  검증) 1라운드→2라운드 재적재를 실제 FK 제약이 걸린 DB 위에서 재현했다. **최초 구현은 라운드 사이에
+  같은 PK를 미리 `findById()`로 로드해 뒀다가 1차 캐시(영속성 컨텍스트) staleness로 거짓 실패가 났다**
+  — `deactivateAll()`(벌크 UPDATE)은 DB를 즉시 바꾸지만 이미 로드된 managed 엔티티의 인메모리 상태는
+  갱신하지 않는다(CLAUDE.md의 "`@Modifying` 벌크 쿼리" 원칙과 같은 함정의 변형, 다만 이번엔 순수
+  테스트 방법론 문제였지 프로덕션 버그는 아니었다 — 실제 `loadInitial()` 각 호출은 항상 독립된
+  영속성 컨텍스트에서 실행된다). 라운드 사이에 `entityManager.clear()`를 넣어 해결했다.
+- **실제로 로컬 DB(포트 3307, complex 21,680건·trade 111,054건 보유한 실 데이터)에 재적재를
+  실행했다** — `./gradlew bootRun --args='--spring.profiles.active=local,reload-legal-district'`.
+  결과: `legal_district_code` 20,555→24,080건(전부 추가, 삭제 없음), 활성 20,555→20,560건, 활성
+  distinct sgg_cd 280→284(정확히 일치). 샘플 검증한 폐지 12개 sgg(28110/28140/28260/29000/29110/
+  29140/29155/29170/29200/46000/46110/46710)는 전부 `is_active=false`로 보존, 신규 10개 sgg(12000/
+  12110/28125/28155/28275/28290/41591/41593/41595/41597)는 전부 `is_active=true`로 정상 추가됐다.
+  `complex_count`/`trade_count`는 재적재 전후 불변(21,680/111,054) — FK 데이터 손실 없음 확인.
+
+**3단계 — complex 매칭 복구는 "로직 준비 완료"까지만, 실행할 대상이 아직 없다.** 위 premise 정정에서
+확인했듯 3개 영향 그룹의 trade가 현재 0건이라, `TradeRematchRunner`를 지금 돌려도 이 3개 그룹에 대해
+재매칭할 대상 자체가 없다(전체 재매칭은 과거 1시간 반 이상 걸린 전례가 있어, 코드 변경이 전혀 없는
+지금 실행하는 것은 낭비로 판단해 돌리지 않았다). 정규화 로직(`SigunguNormalizer`, 아래 5단계 참고)이
+이미 이 3개 그룹의 (시도, 시군구) 조합을 정확히 커버한다는 것은 재적재 직후 `RegionCoverageChecker`
+실행으로 확인했다(공백 0건) — 4단계(소급 수집)로 실제 trade 데이터가 들어오는 즉시 정상적으로
+매칭될 준비가 되어 있다는 뜻이다.
+
+**4단계(소급 수집) — 사용자 확인 후 이번 세션 범위에서 보류. 다음 액션은 API 한도 확인부터.**
+화성시 4개 구(2026-02-01~)·인천 4개 신설구+전남광주통합특별시 28개 코드(2026-07-01~)의 실제
+data.go.kr API 소급 수집은 스로틀링·장시간 소요·요금 이슈가 있어 별도로 확인 후 진행하기로 했다 —
+**다음에 이 절을 다시 열 때 가장 먼저 할 일은 `DATA_GO_KR_SERVICE_KEY`의 data.go.kr 마이페이지 일일
+호출 한도를 확인하는 것이다**(32개 lawd_cd × 최대 5개월 분(2월/7월 개편 시점부터 오늘까지) × 데이터셋
+수만큼 페이지네이션 호출이 필요해 하루 한도를 넘길 가능성이 있다 — 한도 확인 후에야 "한 번에 돌릴지,
+여러 날에 걸쳐 나눠 돌릴지"를 결정할 수 있다). 한도 확인이 끝나면 새 클래스 없이 기존
+`TradeCollectionScheduler`/`BatchExecutionOrchestrator`를 대상 lawd_cd·기간만 좁혀 재사용하라(지시문
+원안대로).
+
+**5단계 — 재발 방지 경량 커버리지 체크 신설.**
+- `SigunguNormalizer`(신규, `batch.matcher`) — `ComplexMasterMatcher`의 private
+  `normalizeSigungu()`를 그대로 추출했다. 소비자가 2곳(`ComplexMasterMatcher`, 아래
+  `RegionCoverageChecker`)으로 늘어나는 시점에 각자 로직을 복제하면 한쪽만 고쳐지는 드리프트 위험이
+  있어 공유 클래스로 뽑았다 — 정규화 규칙 자체(공백 있을 때만 "시+구" 분리, `SigunguNormalizerTest`
+  참고)는 전혀 바꾸지 않았다. **위 "버그 A"/"시흥시 회귀" 절이 언급하는 `ComplexMasterMatcher.
+  normalizeSigungu()`는 이 이관 이전의 역사적 기록이라 그대로 뒀다 — 지금 코드에서 같은 동작을 하는
+  것은 `SigunguNormalizer.normalize()`다.**
+- `RegionCoverageChecker`(신규) — complex 마스터가 실제로 쓰는 (시도, 시군구) 조합 전체와
+  `legal_district_code` 활성 코드가 커버하는 (시도, 정규화된 시군구) 조합을 대조해, 매칭 후보를 찾을
+  수 없는 조합을 `log.warn`으로 남긴다. `ADM-01`(5단계 선택 범위, 미구현)이나 `BAT-ERR-01`(API
+  result_code 판정 전용, 이 목적과 결이 다름)에 억지로 얹지 않고, 이미 존재하는
+  `LegalDistrictCodeReloadedEvent`(BAT-MAT-01 재적재 완료 시 발행)를 구독하는
+  `RegionCoverageCheckListener`로 자연스러운 트리거 시점(재적재 직후)에 붙였다 —
+  `CacheEvictionListener`와 같은 `@TransactionalEventListener(AFTER_COMMIT, fallbackExecution=true)`
+  + try-catch 패턴(이 체크의 실패가 이미 커밋된 재적재 결과나 캐시 evict 리스너에 영향을 주면 안 됨).
+  실제 재적재 실행 로그로 "공백 0건"을 확인했다(정상 커버리지 케이스) — 화성/인천/광주전남 문제가
+  실제로 해소됐다는 방증이기도 하다. "정교한 설계는 필요 없다"는 지시대로 완벽한 탐지가 아니라
+  로그 신호 하나가 목적이다.
+
+**완료 기준 재확인**: legal_district_code distinct 활성 sgg_cd 284개(확인) — 완료. 폐지된 32개는
+삭제되지 않고 is_active=false로 보존(확인) — 완료. 화성시/인천/광주전남 관련 complex 레코드의
+legal_dong_cd NULL 건수 대폭 감소는 — 위 premise 정정대로 그 컬럼 자체가 미사용이라 애초에 측정
+대상이 아니었다(사용자 확인 후 범위 제외). 로컬 DB에서 재현 가능한 검증 스크립트/테스트 — 완료
+(`LegalDistrictCodeLoaderMariaDbIT` 2건 + `RegionCoverageCheckerTest`/`RegionCoverageCheckListenerTest`/
+`SigunguNormalizerTest`, 전체 `./gradlew test`(468) + `./gradlew integrationTest`(42) 그린 확인).
+**남은 절차**: 4단계(소급 수집)를 착수할 때 이 절의 lawd_cd·기간 목록을 그대로 재사용하라.
+
 ## 개발 단계 (MVP 로드맵)
 
 요구사항 정의서 9장 기준. 순서대로 진행하세요.
@@ -1003,7 +1140,7 @@ UIC-08 `EmptyState`/`Spinner`, UIC-09 `DataTrustBadge`)도 같은 이유로 이 
 | **`httpClient`에 Authorization 헤더 인터셉터 신설** | 없음(AUTH-01 당시 "보호된 라우트가 실제로 생기는 시점에 추가"로 유보돼 있던 항목 — 프론트엔드 구현 결정 사항 표 "accessToken 자동 갱신 인터셉터" 행 참고) | `httpClient.interceptors.request.use()`로 `accessToken`이 있으면 항상 `Authorization: Bearer` 헤더를 붙인다(401→refresh 자동 갱신 인터셉터는 여전히 별도 과제로 남겨둠 — 이번엔 헤더 첨부만) | HOME-01이 이 저장소 최초로 인증이 필요한 API(`interest-summary`, `POST /favorites/properties`)를 호출한다 — 백엔드가 토큰 없어도 요청을 막지 않는 원칙(CLAUDE.md 인증 절)이라 이 헤더를 무조건 붙여도 비로그인 전용 엔드포인트에 해가 없다. |
 | **`X-Session-Id` 프론트 생성/저장 방식** | CLAUDE.md SVC-RCV-01 절이 헤더 이름(`X-Session-Id`)만 백엔드 쪽에서 확정해 뒀고, 프론트가 어떻게 생성·저장할지는 미정이었다 | `crypto.randomUUID()`로 생성해 `localStorage`(`homesense.sessionId`)에 저장 — 탭이 아니라 브라우저에 귀속되도록 `sessionStorage`가 아니라 `localStorage`를 썼다(`lib/sessionId.ts`) | "브라우저별로 생성해 관리하는 세션 식별자"라는 SVC-RCV-01 설계 의도(CLAUDE.md 참고)를 그대로 따르려면 새로고침·새 탭에서도 값이 유지돼야 한다 — `sessionStorage`는 탭이 닫히면 사라져 이 의도와 맞지 않는다. |
 | **검색 자동완성(UIC-03 관련) — 미구현, 범위 밖 확정** | 프롬프트가 "자동완성 API 연동은 선택/유예 가능"이라고 명시 | `SearchBar`(UIC-03)는 순수 텍스트 입력+버튼만 구현하고 `GET /api/regions`(자동완성) 연동은 하지 않았다 | SRCH-01 자체가 아직 자리표시 화면이라 자동완성 결과를 클릭해 이동할 목적지가 없다 — SRCH-01을 실제로 구현하는 시점에 `RegionAutocompleteResponse`를 연동하라. |
-| **백엔드 미기동으로 인한 통합 검증 한계 — 완결 필요** | 완료 조건이 실제 API 연동(`GET /api/complexes/popular` 등)이 올바르게 동작하는지 확인하라고 요구한다 | 이번 세션엔 로컬에 MariaDB가 떠 있지 않았고(Redis만 기동, `docker ps` 확인) 저장소에 `schema_all.sql`도 없어(테이블 정의서 DDL은 외부 문서 전용) 실제 백엔드를 새로 기동해 검증하지 못했다 — 대신 (1) 백엔드 없이 뜬 프런트에서 각 fetch가 실패해도 빈 배열로 우아하게 폴백하는지, (2) Playwright로 `page.route()`를 이용해 5개 엔드포인트를 전부 목킹해 실제 응답 스키마(`ComplexSummaryResponse` 등)를 넣었을 때 카드 렌더링·하트클릭·로그인·자동재생·토스트 전체 왕복이 올바른지 검증했다 | **완결 필요** — 로컬 MariaDB(포트 3307)에 스키마를 적용하고 `./gradlew bootRun`으로 실제 백엔드를 띄운 뒤, 실 데이터로 `GET /api/complexes/popular`/`GET /api/regions/interest-summary`/`GET /api/recent-views`/`GET /api/search/popular` 4개를 다시 확인하라(SVC-FAV-01/SVC-NTF-01 절의 "Docker 없어 IT 미실행" 잔여 리스크와 같은 성격). |
+| **백엔드 미기동으로 인한 통합 검증 한계 — 완결 필요(전제였던 schema_all.sql 부재는 같은 세션 안에서 해소됨)** | 완료 조건이 실제 API 연동(`GET /api/complexes/popular` 등)이 올바르게 동작하는지 확인하라고 요구한다 | 이번 세션엔 로컬에 MariaDB가 떠 있지 않았고(Redis만 기동, `docker ps` 확인) **당시엔** 저장소에 `schema_all.sql`도 없어(테이블 정의서 DDL은 외부 문서 전용) 실제 백엔드를 새로 기동해 검증하지 못했다 — 대신 (1) 백엔드 없이 뜬 프런트에서 각 fetch가 실패해도 빈 배열로 우아하게 폴백하는지, (2) Playwright로 `page.route()`를 이용해 5개 엔드포인트를 전부 목킹해 실제 응답 스키마(`ComplexSummaryResponse` 등)를 넣었을 때 카드 렌더링·하트클릭·로그인·자동재생·토스트 전체 왕복이 올바른지 검증했다 | **완결 필요(부분 해소)** — `schema_all.sql`은 같은 세션 뒷부분에서 만들어져 커밋됐다(위 "정정" 문단의 "해소됨(2026-09-14)" 참고, 2026-09-17 재확인 완료) — 스키마 부재라는 전제 자체는 더 이상 걸림돌이 아니다. 다만 실제로 로컬 MariaDB에 그 스키마를 적용하고 `./gradlew bootRun`으로 백엔드를 띄운 뒤 `GET /api/complexes/popular`/`GET /api/regions/interest-summary`/`GET /api/recent-views`/`GET /api/search/popular` 4개를 실 데이터로 재확인하는 작업 자체는 아직 아무도 하지 않았다 — 이 부분만 여전히 완결 필요다(SVC-FAV-01/SVC-NTF-01 절의 "Docker 없어 IT 미실행" 잔여 리스크와 같은 성격). |
 | **하트 클릭이 항상 POST만 호출 — 코드리뷰(P2) 지적, 수정 완료** | 초기 구현은 `favoritedIds`를 항상 빈 Set에서 시작하고 `toggleFavorite`가 항상 `addFavoriteProperty()`(POST)만 호출했다 — UI는 아바타 하트처럼 토글로 보이지만 실제로는 추가 전용이었다 | 이미 관심 매물로 등록된 단지는 새로고침 후에도 빈 하트로 보이고, 클릭하면 해제가 아니라 `DuplicateFavoriteException`(409)만 받았다 — `GET`/`DELETE` 엔드포인트가 이미 있는데도 프론트가 전혀 쓰지 않고 있었다. 로그인 상태 마운트 시 `GET /api/favorites/properties`로 `complexId→favoritePropertyId` 맵을 하이드레이트하고(`useFavoriteToggle.ts`), 이미 등록된 항목은 `toggleFavorite`가 `DELETE /api/favorites/properties/{favoritePropertyId}`(경로의 `{id}`는 complexId가 아니라 favoritePropertyId — `FavoriteController.removeFavoriteProperty()` 확인)를 호출하도록 분기했다. 이 하이드레이션 effect는 로그인 여부 분기가 `getFavoriteProperties()` 호출 **이전**에 있어 비로그인 사용자에게는 이 GET 자체가 나가지 않는다(Playwright로 별도 검증: 마운트·클릭 어느 시점에도 `/api/favorites/properties` 호출 0건, `/login` 리다이렉트만 발생) | `Set<number>`(complexId만)로는 DELETE를 호출할 방법이 없어 `Map<complexId, favoritePropertyId>`로 상태 구조 자체를 바꿔야 했다. Playwright로 "이미 찜한 단지는 채워진 하트로 렌더 → 클릭 시 DELETE(POST 아님) → 해제 토스트"와 "안 찜한 단지는 빈 하트 → 클릭 시 POST → 등록 토스트" 둘 다 목킹된 백엔드로 검증했다. |
 | **GNB/모바일 헤더 알림 벨 — 세 차례 코드리뷰(P2)로 점진적으로 바로잡음, 최종 확정** | 초기 구현은 `Gnb`/`MobileHeader` 둘 다 알림 벨을 `onClick` 없는 `<button>`으로 그려 뒀다(`/notifications` 라우트가 이미 있는데도 탭해도 아무 반응이 없었다) | **1차 수정(불완전):** 두 벨을 전부 `<Link to="/notifications">`로 바꿔 클릭 가능하게 만들었다 — 이때 `/notifications`가 렌더링하는 자리표시 화면을 `programId="MY-03"`(잘못됨, 아래 참고)로 임의 지정했다. **2차 수정(불완전):** 코드리뷰에서 (1) UI정의서 2.3/4.1/4.2절이 모바일 알림 진입점을 GNB 벨이 아니라 하단 탭 "마이" 아이콘의 배지로 명시하고 있고(하단 탭을 5개로 유지하기 위해 알림을 별도 탭으로 두지 않는 설계), 모바일 헤더 벨은 애초에 Figma 글리프를 확인한 적 없는 추정 아이콘이었다는 점, (2) `/notifications`가 실제로는 두 개의 다른 화면(MY-03 알림 설정, MY-04 알림 이력)을 가리킬 수 있는데 `NotificationController.getNotifications()`/`NotificationResponse`의 Javadoc이 명시적으로 "MY-04 알림 이력"이라 적어 둔 것을 확인 안 하고 MY-03(알림 설정, `GET/PUT /api/notifications/settings` 전용)으로 잘못 연결했다는 점, 두 가지를 지적받았다. 모바일 헤더 벨은 완전히 제거(`MobileHeader.tsx`)했고, `/notifications` 목적지는 MY-04로 정정(`AppRouter.tsx`)했지만 — 이때는 데스크톱 GNB 벨(Figma 3:2 프레임에 빨간 점 배지와 함께 그려져 있던 것) 자체는 "픽셀 증거가 있다"는 이유로 그대로 유지하며 완결 필요로만 남겨뒀다. **3차 수정(최종):** 지성이 UI정의서 2.3절/4.1절 원문을 직접 대조해, GNB 구성이 "로고 / 주메뉴(지역·단지 검색·지도로 보기·관심목록·알림) / 우측 영역(비로그인: 로그인·회원가입, 로그인: 프로필 아이콘)"으로만 정의돼 있고 벨은 어디에도 언급되지 않는다는 것을 확인해 주었다 — **데스크톱 GNB 벨도 완전히 제거**하고(`Gnb.tsx`, `BellIcon` import까지 함께 삭제), 데스크톱의 유일한 알림 진입점을 중앙 네비 "알림" 텍스트 링크(MY-04) 하나로 확정했다 | 벨을 "클릭 가능하게" 고치는 것과 "이 벨이 애초에 존재해야 하는가"는 서로 다른 질문인데, 1차 수정은 전자만 보고 후자를 검토하지 않았다. 2차 수정은 후자를 모바일에는 적용했지만 데스크톱엔 "Figma 픽셀 증거"를 근거로 예외를 뒀는데, 이 프로젝트 스스로가 명시한 "코드와 문서가 어긋나면 문서가 맞다" 원칙(문서 체계 절 — Figma는 6개 근거 문서에 포함되지 않는다) 아래에서는 그 예외 자체가 근거 부족이었다. Figma 픽셀은 "임의 추측"이었던 모바일 벨보다는 근거가 있었지만, 그 근거가 애초에 6개 근거 문서 밖에 있다는 점은 동일했다 — 이번에 지성이 UI정의서 원문을 직접 확인해 주어 완결 필요 상태에서 확정된 결정으로 종결됐다. **남은 완결 필요는 1건뿐:** 하단 탭 "마이" 아이콘의 미읽음 카운트 배지 자체는 아직 구현하지 않았다 — `GET /api/notifications`가 항목별 `isRead`는 주지만 전용 미읽음 카운트 엔드포인트가 없어(값을 구하려면 전체 목록을 받아 클라이언트에서 세야 하는데 페이지네이션 때문에 부정확하다) 백엔드에 카운트 엔드포인트를 추가하는 논의가 먼저 필요하다 — UI정의서 4.2절은 이 배지를 명시적으로 요구하는데 API-NTF-01(프로그램목록서·설계서)엔 이를 뒷받침할 엔드포인트가 없어, UI정의서 요구사항이 프로그램설계서보다 앞서 있는 별도의 문서 간 갭이다(지성 확인). |
 
