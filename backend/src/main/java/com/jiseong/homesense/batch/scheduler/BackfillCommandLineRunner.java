@@ -91,6 +91,16 @@ public class BackfillCommandLineRunner implements CommandLineRunner {
     /**
      * legal_district_code(현재 활성 코드) - batch_log(정규 배치가 이미 순회한 적 있는 코드) 차집합 —
      * "재적재로 새로 활성화됐지만 정규 배치가 한 번도 다루지 않은 코드"만 정확히 남는다.
+     *
+     * <p><b>주의 — 이 도출 로직은 batch_log의 현재 상태에 의존하므로 부분 실행에 취약하다.</b> 이
+     * 러너 자신이 {@code batch_log}에 행을 남기는 파이프라인을 호출하기 때문에, {@code --code=}로
+     * 시범 실행을 한 번 돌리면 그 즉시 그 코드가 "이미 다룬 코드"로 batch_log에 편입되어, 뒤이어
+     * 전체 실행(인자 없이)을 돌리면 방금 시범 실행한 코드가 대상 목록에서 통째로 빠진다 — 그 코드가
+     * 다른 달을 아직 하나도 못 채웠어도 마찬가지다(2026-09-18 실행에서 실제로 겪음: `41591` 시범
+     * 실행 직후 전체 실행이 35개만 잡아 `41591`의 나머지 7개월이 누락됐고, `--month=` 반복 인자로
+     * 보충 실행해 메웠다). 이 러너를 다시 쓸 때(다음 행정구역 개편 등) 시범 실행부터 하고 싶다면,
+     * 시범 실행이 끝난 뒤 전체 실행 전에 시범 실행한 코드의 나머지 기간을 놓치지 않았는지 반드시
+     * batch_log로 재확인하거나, 처음부터 전체 목록을 {@code --code=}로 하나씩 열거해 시범 실행하라.
      */
     private List<String> resolveNewlyActivatedSggCds() {
         Set<String> alreadyQueried = new HashSet<>(batchLogRepository.findDistinctLawdCd());
