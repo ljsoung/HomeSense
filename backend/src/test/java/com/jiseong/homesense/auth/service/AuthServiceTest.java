@@ -130,7 +130,7 @@ class AuthServiceTest {
     @Test
     void login_탈퇴한_계정이면_AccountNotActiveException을_던진다() {
         User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
-        withdrawnUser.withdraw();
+        withdrawnUser.withdraw(java.time.LocalDateTime.now());
         when(loginAttemptService.isLocked(anyString())).thenReturn(false);
         when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(withdrawnUser));
 
@@ -229,7 +229,7 @@ class AuthServiceTest {
     @Test
     void refresh_탈퇴하거나_정지된_계정이면_AccountNotActiveException을_던진다() {
         User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
-        withdrawnUser.withdraw();
+        withdrawnUser.withdraw(java.time.LocalDateTime.now());
         RefreshToken stored = RefreshToken.issue(withdrawnUser, "hashed-token", LocalDateTime.now().plusDays(1));
         when(jwtTokenProvider.validateToken("token")).thenReturn(true);
         when(jwtTokenProvider.isAccessToken("token")).thenReturn(false);
