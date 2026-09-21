@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -28,14 +29,19 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.jiseong.homesense.auth.dto.EmailCheckResponse;
 import com.jiseong.homesense.auth.dto.LoginCommand;
 import com.jiseong.homesense.auth.dto.LoginResponse;
+import com.jiseong.homesense.auth.dto.ReactivateCommand;
 import com.jiseong.homesense.auth.dto.SignupCommand;
 import com.jiseong.homesense.auth.dto.SignupResponse;
 import com.jiseong.homesense.auth.dto.TokenResponse;
+import com.jiseong.homesense.auth.exception.AccountNotActiveException;
+import com.jiseong.homesense.auth.exception.AccountNotWithdrawnException;
+import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.service.AuthService;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.common.security.UserPrincipal;
+import com.jiseong.homesense.user.entity.UserStatus;
 
 @WebMvcTest(controllers = AuthController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -180,6 +186,105 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.error.code").exists());
 
         verifyNoInteractions(authService);
+    }
+
+    // --- POST /api/auth/reactivate (탈퇴 철회) ---
+
+    private static final String REACTIVATE_BODY = "{\"email\":\"withdrawn@test.com\",\"password\":\"Abcd1234!\"}";
+
+    @Test
+    void 탈퇴_철회_성공하면_200과_자동_로그인_토큰을_반환한다() throws Exception {
+        when(authService.reactivate(new ReactivateCommand("withdrawn@test.com", "Abcd1234!")))
+                .thenReturn(new LoginResponse("access-token", "refresh-token", 1800L));
+
+        mockMvc.perform(post("/api/auth/reactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(REACTIVATE_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.data.refreshToken").value("refresh-token"))
+                .andExpect(jsonPath("$.data.expiresIn").value(1800));
+    }
+
+    @Test
+    void 탈퇴_철회_이메일_형식이_잘못되면_400과_필드에러를_반환하고_서비스를_호출하지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/reactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"not-an-email\",\"password\":\"Abcd1234!\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("email"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void 탈퇴_철회_비밀번호가_비어_있으면_400과_필드에러를_반환한다() throws Exception {
+        mockMvc.perform(post("/api/auth/reactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"withdrawn@test.com\",\"password\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("password"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void 탈퇴_철회_자격_증명이_틀리면_401로_변환된다() throws Exception {
+        when(authService.reactivate(any())).thenThrow(new InvalidCredentialsException());
+
+        mockMvc.perform(post("/api/auth/reactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(REACTIVATE_BODY))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
+    }
+
+    @Test
+    void 탈퇴_철회_정지된_계정이면_403_ACCOUNT_SUSPENDED로_변환된다() throws Exception {
+        when(authService.reactivate(any())).thenThrow(new AccountNotActiveException(UserStatus.SUSPENDED));
+
+        mockMvc.perform(post("/api/auth/reactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(REACTIVATE_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("ACCOUNT_SUSPENDED"));
+    }
+
+    @Test
+    void 탈퇴_철회_이미_ACTIVE인_계정이면_409_ACCOUNT_NOT_WITHDRAWN으로_변환된다() throws Exception {
+        when(authService.reactivate(any())).thenThrow(new AccountNotWithdrawnException());
+
+        mockMvc.perform(post("/api/auth/reactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(REACTIVATE_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ACCOUNT_NOT_WITHDRAWN"));
+    }
+
+    @Test
+    void 탈퇴_철회_유예기간이_지났으면_410_REACTIVATION_PERIOD_EXPIRED로_변환된다() throws Exception {
+        when(authService.reactivate(any())).thenThrow(new ReactivationPeriodExpiredException());
+
+        mockMvc.perform(post("/api/auth/reactivate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(REACTIVATE_BODY))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.error.code").value("REACTIVATION_PERIOD_EXPIRED"))
+                .andExpect(jsonPath("$.error.message").value("탈퇴 철회 가능 기간이 지났습니다."));
+    }
+
+    @Test
+    void 로그인_탈퇴한_계정이면_403_ACCOUNT_WITHDRAWN과_철회_안내가_없는_문구로_변환된다() throws Exception {
+        when(authService.login(any())).thenThrow(new AccountNotActiveException(UserStatus.WITHDRAWN));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"withdrawn@test.com\",\"password\":\"Abcd1234!\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("ACCOUNT_WITHDRAWN"))
+                .andExpect(jsonPath("$.error.message").value("탈퇴 처리된 계정입니다."));
     }
 
     @Test

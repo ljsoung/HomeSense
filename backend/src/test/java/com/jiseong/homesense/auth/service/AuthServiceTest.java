@@ -11,7 +11,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,22 +23,30 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.jiseong.homesense.auth.dto.LoginCommand;
+import com.jiseong.homesense.auth.dto.LoginResponse;
+import com.jiseong.homesense.auth.dto.ReactivateCommand;
 import com.jiseong.homesense.auth.dto.SignupCommand;
 import com.jiseong.homesense.auth.dto.SignupResponse;
 import com.jiseong.homesense.auth.dto.TokenResponse;
 import com.jiseong.homesense.auth.entity.RefreshToken;
 import com.jiseong.homesense.auth.exception.AccountLockedException;
 import com.jiseong.homesense.auth.exception.AccountNotActiveException;
+import com.jiseong.homesense.auth.exception.AccountNotWithdrawnException;
 import com.jiseong.homesense.auth.exception.DuplicateEmailException;
 import com.jiseong.homesense.auth.exception.InvalidRefreshTokenException;
+import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
+import com.jiseong.homesense.common.config.WithdrawalProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
+import com.jiseong.homesense.user.entity.UserStatus;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.user.service.WithdrawalPolicy;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -54,13 +64,19 @@ class AuthServiceTest {
     @Mock
     private LoginAttemptService loginAttemptService;
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 12, 0, 0);
+    private static final int GRACE_DAYS = 7;
+
     private AuthService authService;
 
     @BeforeEach
     void setUp() {
         JwtProperties jwtProperties = new JwtProperties("test-secret-0123456789", 1_800_000L, 1_209_600_000L);
+        WithdrawalPolicy withdrawalPolicy = new WithdrawalPolicy(Clock.fixed(NOW.atZone(KST).toInstant(), KST),
+                new WithdrawalProperties(GRACE_DAYS, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
         authService = new AuthService(userRepository, refreshTokenRepository, passwordEncoder,
-                jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService);
+                jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy);
     }
 
     @Test
@@ -128,14 +144,53 @@ class AuthServiceTest {
     }
 
     @Test
-    void login_탈퇴한_계정이면_AccountNotActiveException을_던진다() {
+    void login_비밀번호가_맞고_탈퇴한_계정이면_ACCOUNT_WITHDRAWN으로_거부하고_토큰을_발급하지_않는다() {
         User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
-        withdrawnUser.withdraw();
+        withdrawnUser.withdraw(NOW);
         when(loginAttemptService.isLocked(anyString())).thenReturn(false);
         when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(withdrawnUser));
+        when(passwordEncoder.matches("Abcd1234!", "encoded")).thenReturn(true);
 
         assertThatThrownBy(() -> authService.login(new LoginCommand("withdrawn@test.com", "Abcd1234!")))
-                .isInstanceOf(AccountNotActiveException.class);
+                .isInstanceOfSatisfying(AccountNotActiveException.class, e -> {
+                    assertThat(e.errorCode()).isEqualTo("ACCOUNT_WITHDRAWN");
+                    assertThat(e.httpStatus().value()).isEqualTo(403);
+                    assertThat(e.getMessage()).isEqualTo("탈퇴 처리된 계정입니다.");
+                    // 철회 UI가 아직 없으므로 "철회할 수 있습니다" 같은 허위 안내를 넣지 않는다.
+                    assertThat(e.getMessage()).doesNotContain("철회");
+                });
+
+        verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
+    }
+
+    @Test
+    void login_비밀번호가_틀리면_탈퇴한_계정이어도_InvalidCredentialsException이고_계정_상태가_드러나지_않는다() {
+        User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
+        withdrawnUser.withdraw(NOW);
+        when(loginAttemptService.isLocked(anyString())).thenReturn(false);
+        when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(withdrawnUser));
+        when(passwordEncoder.matches("wrong", "encoded")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.login(new LoginCommand("withdrawn@test.com", "wrong")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(loginAttemptService).recordFailure("withdrawn@test.com");
+    }
+
+    @Test
+    void login_비밀번호가_맞고_정지된_계정이면_ACCOUNT_SUSPENDED로_거부한다() {
+        User suspendedUser = User.createUser("suspended@test.com", "encoded", "닉네임");
+        ReflectionTestUtils.setField(suspendedUser, "status", UserStatus.SUSPENDED);
+        when(loginAttemptService.isLocked(anyString())).thenReturn(false);
+        when(userRepository.findByEmail("suspended@test.com")).thenReturn(Optional.of(suspendedUser));
+        when(passwordEncoder.matches("Abcd1234!", "encoded")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.login(new LoginCommand("suspended@test.com", "Abcd1234!")))
+                .isInstanceOfSatisfying(AccountNotActiveException.class, e -> {
+                    assertThat(e.errorCode()).isEqualTo("ACCOUNT_SUSPENDED");
+                    assertThat(e.httpStatus().value()).isEqualTo(403);
+                    assertThat(e.getMessage()).isEqualTo("탈퇴하거나 정지된 계정입니다");
+                });
     }
 
     @Test
@@ -229,7 +284,7 @@ class AuthServiceTest {
     @Test
     void refresh_탈퇴하거나_정지된_계정이면_AccountNotActiveException을_던진다() {
         User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
-        withdrawnUser.withdraw();
+        withdrawnUser.withdraw(NOW);
         RefreshToken stored = RefreshToken.issue(withdrawnUser, "hashed-token", LocalDateTime.now().plusDays(1));
         when(jwtTokenProvider.validateToken("token")).thenReturn(true);
         when(jwtTokenProvider.isAccessToken("token")).thenReturn(false);
@@ -237,7 +292,8 @@ class AuthServiceTest {
         when(refreshTokenRepository.findByTokenValue("hashed-token")).thenReturn(Optional.of(stored));
 
         assertThatThrownBy(() -> authService.refreshAccessToken("token"))
-                .isInstanceOf(AccountNotActiveException.class);
+                .isInstanceOfSatisfying(AccountNotActiveException.class,
+                        e -> assertThat(e.errorCode()).isEqualTo("ACCOUNT_WITHDRAWN"));
 
         verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
     }
@@ -292,5 +348,124 @@ class AuthServiceTest {
         authService.logout(1L, "token");
 
         assertThat(stored.isUsable()).isFalse();
+    }
+
+    // --- reactivate (탈퇴 철회) ---
+
+    private User withdrawnUserWithId(long userId) {
+        User user = User.createUser("withdrawn@test.com", "encoded", "닉네임");
+        ReflectionTestUtils.setField(user, "userId", userId);
+        user.withdraw(NOW.minusDays(3));
+        return user;
+    }
+
+    @Test
+    void reactivate_유예기간_안이면_조건부_UPDATE로_복구하고_새_토큰으로_자동_로그인한다() {
+        User user = withdrawnUserWithId(1L);
+        when(loginAttemptService.isLocked("withdrawn@test.com")).thenReturn(false);
+        when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("Abcd1234!", "encoded")).thenReturn(true);
+        // threshold = now - graceDays, updatedAt = now — 파기와 같은 정책 객체가 계산한 값이어야 한다.
+        when(userRepository.reactivateIfWithinGrace(1L, NOW.minusDays(GRACE_DAYS), NOW)).thenReturn(1);
+        // 벌크 UPDATE 이후 영속성 컨텍스트가 비워지므로 갱신된 행을 다시 읽는다.
+        User reloaded = User.createUser("withdrawn@test.com", "encoded", "닉네임");
+        ReflectionTestUtils.setField(reloaded, "userId", 1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(reloaded));
+        when(jwtTokenProvider.createAccessToken(eq(1L), eq("USER"))).thenReturn("access-token");
+        when(jwtTokenProvider.createRefreshToken(1L)).thenReturn("refresh-token");
+        when(refreshTokenHasher.hash("refresh-token")).thenReturn("hashed-refresh-token");
+
+        LoginResponse response = authService.reactivate(new ReactivateCommand("withdrawn@test.com", "Abcd1234!"));
+
+        assertThat(response.accessToken()).isEqualTo("access-token");
+        assertThat(response.refreshToken()).isEqualTo("refresh-token");
+        verify(loginAttemptService).reset("withdrawn@test.com");
+        verify(refreshTokenRepository).save(any(RefreshToken.class)); // 새 토큰 발급
+        // 탈퇴 시 폐기된 기존 refresh_token은 되살리지 않는다 — 기존 토큰을 건드리는 호출이 없다.
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
+    }
+
+    @Test
+    void reactivate_비밀번호가_틀리면_실패카운트를_증가시키고_복구를_시도하지_않는다() {
+        User user = withdrawnUserWithId(1L);
+        when(loginAttemptService.isLocked("withdrawn@test.com")).thenReturn(false);
+        when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong", "encoded")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.reactivate(new ReactivateCommand("withdrawn@test.com", "wrong")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(loginAttemptService).recordFailure("withdrawn@test.com");
+        verify(userRepository, never()).reactivateIfWithinGrace(any(), any(), any());
+    }
+
+    @Test
+    void reactivate_잠긴_계정이면_조회하지_않고_AccountLockedException을_던진다() {
+        when(loginAttemptService.isLocked("locked@test.com")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.reactivate(new ReactivateCommand("locked@test.com", "Abcd1234!")))
+                .isInstanceOf(AccountLockedException.class);
+
+        verify(userRepository, never()).findByEmail(anyString());
+    }
+
+    @Test
+    void reactivate_존재하지_않는_이메일이면_login과_같은_InvalidCredentialsException이고_카운트를_올리지_않는다() {
+        when(loginAttemptService.isLocked(anyString())).thenReturn(false);
+        when(userRepository.findByEmail("nouser@test.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.reactivate(new ReactivateCommand("nouser@test.com", "Abcd1234!")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(loginAttemptService, never()).recordFailure(anyString());
+    }
+
+    @Test
+    void reactivate_이미_ACTIVE인_계정이면_AccountNotWithdrawnException을_던진다() {
+        User active = User.createUser("user@test.com", "encoded", "닉네임");
+        when(loginAttemptService.isLocked(anyString())).thenReturn(false);
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(active));
+        when(passwordEncoder.matches("Abcd1234!", "encoded")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.reactivate(new ReactivateCommand("user@test.com", "Abcd1234!")))
+                .isInstanceOfSatisfying(AccountNotWithdrawnException.class, e -> {
+                    assertThat(e.errorCode()).isEqualTo("ACCOUNT_NOT_WITHDRAWN");
+                    assertThat(e.httpStatus().value()).isEqualTo(409);
+                });
+
+        verify(userRepository, never()).reactivateIfWithinGrace(any(), any(), any());
+    }
+
+    @Test
+    void reactivate_정지된_계정은_절대_복구하지_않고_ACCOUNT_SUSPENDED로_거부한다() {
+        User suspended = User.createUser("suspended@test.com", "encoded", "닉네임");
+        ReflectionTestUtils.setField(suspended, "status", UserStatus.SUSPENDED);
+        when(loginAttemptService.isLocked(anyString())).thenReturn(false);
+        when(userRepository.findByEmail("suspended@test.com")).thenReturn(Optional.of(suspended));
+        when(passwordEncoder.matches("Abcd1234!", "encoded")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.reactivate(new ReactivateCommand("suspended@test.com", "Abcd1234!")))
+                .isInstanceOfSatisfying(AccountNotActiveException.class,
+                        e -> assertThat(e.errorCode()).isEqualTo("ACCOUNT_SUSPENDED"));
+
+        verify(userRepository, never()).reactivateIfWithinGrace(any(), any(), any());
+    }
+
+    @Test
+    void reactivate_유예기간이_지나_조건부_UPDATE가_0건이면_410으로_거부하고_토큰을_발급하지_않는다() {
+        User user = withdrawnUserWithId(1L);
+        when(loginAttemptService.isLocked(anyString())).thenReturn(false);
+        when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("Abcd1234!", "encoded")).thenReturn(true);
+        when(userRepository.reactivateIfWithinGrace(1L, NOW.minusDays(GRACE_DAYS), NOW)).thenReturn(0);
+
+        assertThatThrownBy(() -> authService.reactivate(new ReactivateCommand("withdrawn@test.com", "Abcd1234!")))
+                .isInstanceOfSatisfying(ReactivationPeriodExpiredException.class, e -> {
+                    assertThat(e.errorCode()).isEqualTo("REACTIVATION_PERIOD_EXPIRED");
+                    assertThat(e.httpStatus().value()).isEqualTo(410);
+                });
+
+        verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
+        verify(refreshTokenRepository, never()).save(any());
     }
 }

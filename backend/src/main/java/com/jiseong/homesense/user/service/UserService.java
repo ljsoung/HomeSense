@@ -16,7 +16,8 @@ import com.jiseong.homesense.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * SVC-USER-01. 로그인 회원의 정보 조회·수정과 회원 탈퇴(소프트 삭제)를 담당한다.
+ * SVC-USER-01. 로그인 회원의 정보 조회·수정과 회원 탈퇴(소프트 삭제)를 담당한다. 탈퇴는 항상 소프트 삭제다 —
+ * 유예기간 경과 후의 물리 삭제는 BAT-USR-01(WithdrawnUserPurgeScheduler)만 수행한다.
  * userId는 항상 인증된 UserPrincipal(Access Token)에서 나오므로, 여기서 조회가 비면 정상적인
  * 사용자 흐름이 아니라 토큰 위조 등 비정상 상황으로 본다(UserNotFoundException).
  */
@@ -28,6 +29,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
+    private final WithdrawalPolicy withdrawalPolicy;
 
     @Transactional(readOnly = true)
     public UserResponse getUser(Long userId) {
@@ -58,7 +60,7 @@ public class UserService {
             throw new InvalidCredentialsException();
         }
 
-        user.withdraw();
+        user.withdraw(withdrawalPolicy.now());
         refreshTokenRepository.revokeAllByUserId(userId);
     }
 

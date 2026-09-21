@@ -10,14 +10,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.jiseong.homesense.auth.dto.LoginCommand;
 import com.jiseong.homesense.auth.dto.LoginResponse;
+import com.jiseong.homesense.auth.dto.ReactivateCommand;
 import com.jiseong.homesense.auth.dto.SignupCommand;
 import com.jiseong.homesense.auth.dto.SignupResponse;
 import com.jiseong.homesense.auth.dto.TokenResponse;
 import com.jiseong.homesense.auth.entity.RefreshToken;
 import com.jiseong.homesense.auth.exception.AccountLockedException;
 import com.jiseong.homesense.auth.exception.AccountNotActiveException;
+import com.jiseong.homesense.auth.exception.AccountNotWithdrawnException;
 import com.jiseong.homesense.auth.exception.DuplicateEmailException;
 import com.jiseong.homesense.auth.exception.InvalidRefreshTokenException;
+import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
@@ -25,14 +28,17 @@ import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.user.service.WithdrawalPolicy;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * SVC-AUTH-01. 회원가입/로그인/토큰 재발급/로그아웃/이메일 중복확인을 담당한다.
+ * SVC-AUTH-01. 회원가입/로그인/탈퇴 철회/토큰 재발급/로그아웃/이메일 중복확인을 담당한다.
  * 토큰 생성·검증 자체는 COM-SEC-02({@link JwtTokenProvider})에 위임하고, 여기서는 자격 증명 검증과
  * Refresh Token의 DB 상태(해시 저장, revoked_yn) 관리만 맡는다.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -45,6 +51,7 @@ public class AuthService {
     private final JwtProperties jwtProperties;
     private final RefreshTokenHasher refreshTokenHasher;
     private final LoginAttemptService loginAttemptService;
+    private final WithdrawalPolicy withdrawalPolicy;
 
     public SignupResponse signup(SignupCommand cmd) {
         if (userRepository.existsByEmail(cmd.email())) {
@@ -70,28 +77,81 @@ public class AuthService {
                 user.getUserId(), user.getEmail(), user.getNickname());
     }
 
+    /**
+     * 비밀번호 검증 → status 검사 순서다. 상태를 먼저 보면 비밀번호를 모르는 사람에게도 "탈퇴/정지된 계정"임이
+     * 드러나 "계정 존재 여부 비노출" 원칙(AUTH-01)과 어긋난다 — 비밀번호가 틀리면 상태와 무관하게
+     * {@link InvalidCredentialsException}이다(설계서 3.1절과 다른 이탈, CLAUDE.md 결정 기록 참고).
+     */
     public LoginResponse login(LoginCommand cmd) {
-        String normalizedEmail = User.normalizeEmail(cmd.email());
+        User user = authenticate(cmd.email(), cmd.password());
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new AccountNotActiveException(user.getStatus());
+        }
+
+        IssuedTokens tokens = loginInternal(user);
+        return new LoginResponse(tokens.accessToken(), tokens.refreshToken(), tokens.expiresIn());
+    }
+
+    /**
+     * 탈퇴 철회. 탈퇴한 계정은 로그인할 수 없어 인증 전 요청이므로 email+password로 본인을 확인하고(로그인과 같은
+     * 잠금·실패 카운트 규칙), 유예기간 안이면 ACTIVE로 되돌린 뒤 자동 로그인한다(signup과 같은 패턴).
+     *
+     * <p>상태 분기는 비밀번호를 아는 사람에게만 보인다: ACTIVE → 409, SUSPENDED → 403(정지 계정은 절대 자가 복구
+     * 불가), WITHDRAWN → 계속. 마지막은 조건부 UPDATE의 affected rows로 판정한다 — 0이면 유예기간이 지났거나 그 사이
+     * 자동 파기(BAT-USR-01)가 먼저 처리한 것이라 410이다(분산락 없이 DB가 경합을 직렬화한다). 탈퇴 시 폐기된
+     * refresh_token은 되살리지 않고 새 토큰을 발급한다.
+     */
+    public LoginResponse reactivate(ReactivateCommand cmd) {
+        User user = authenticate(cmd.email(), cmd.password());
+
+        switch (user.getStatus()) {
+            case ACTIVE -> throw new AccountNotWithdrawnException();
+            case SUSPENDED -> throw new AccountNotActiveException(UserStatus.SUSPENDED);
+            case WITHDRAWN -> {
+                // 아래 조건부 UPDATE로 진행
+            }
+        }
+
+        LocalDateTime now = withdrawalPolicy.now();
+        LocalDateTime threshold = withdrawalPolicy.graceThreshold(now);
+        if (userRepository.reactivateIfWithinGrace(user.getUserId(), threshold, now) == 0) {
+            throw new ReactivationPeriodExpiredException();
+        }
+
+        // 벌크 UPDATE가 영속성 컨텍스트를 비웠으므로(clearAutomatically) 갱신된 행을 다시 읽는다.
+        User reactivated = userRepository.findById(user.getUserId()).orElseThrow(ReactivationPeriodExpiredException::new);
+        IssuedTokens tokens = loginInternal(reactivated);
+
+        log.atInfo()
+                .addKeyValue("auditEvent", "ACCOUNT_REACTIVATED")
+                .addKeyValue("userId", reactivated.getUserId())
+                .log("ACCOUNT_REACTIVATED userId={}", reactivated.getUserId());
+        return new LoginResponse(tokens.accessToken(), tokens.refreshToken(), tokens.expiresIn());
+    }
+
+    /**
+     * login()·reactivate()가 공유하는 자격 증명 검증: 잠금 확인 → 정규화한 이메일로 조회 → BCrypt 매칭 →
+     * 실패 카운트 증가/초기화. 존재하지 않는 이메일과 비밀번호 불일치는 같은 {@link InvalidCredentialsException}
+     * (동일 문구)이라 둘을 구분할 수 없다. 계정 status는 여기서 보지 않는다 — 호출자가 비밀번호 검증 이후에
+     * 판단한다.
+     */
+    private User authenticate(String rawEmail, String password) {
+        String normalizedEmail = User.normalizeEmail(rawEmail);
 
         if (loginAttemptService.isLocked(normalizedEmail)) {
             throw new AccountLockedException();
         }
 
-        User user = userRepository.findByEmail(cmd.email()).orElseThrow(InvalidCredentialsException::new);
+        User user = userRepository.findByEmail(rawEmail).orElseThrow(InvalidCredentialsException::new);
 
-        if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new AccountNotActiveException();
-        }
-
-        if (!passwordEncoder.matches(cmd.password(), user.getPassword())) {
+        if (!passwordEncoder.matches(password, user.getPassword())) {
             loginAttemptService.recordFailure(normalizedEmail);
             throw new InvalidCredentialsException();
         }
 
         loginAttemptService.reset(normalizedEmail);
-
-        IssuedTokens tokens = loginInternal(user);
-        return new LoginResponse(tokens.accessToken(), tokens.refreshToken(), tokens.expiresIn());
+        return user;
     }
 
     /**
@@ -113,7 +173,7 @@ public class AuthService {
 
         User user = stored.getUser();
         if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new AccountNotActiveException();
+            throw new AccountNotActiveException(user.getStatus());
         }
 
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId(), user.getRole().name());

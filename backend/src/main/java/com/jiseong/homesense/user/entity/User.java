@@ -94,9 +94,13 @@ public class User {
                 .build();
     }
 
-    public void withdraw() {
+    /**
+     * 탈퇴 처리(소프트 삭제). 시각은 호출자가 넘긴다 — 유예기간 계산(WithdrawalPolicy)과 같은 KST Clock을 써야
+     * 파기·철회 경계가 JVM 기본 타임존에 흔들리지 않는다.
+     */
+    public void withdraw(LocalDateTime withdrawnAt) {
         this.status = UserStatus.WITHDRAWN;
-        this.withdrawnAt = LocalDateTime.now();
+        this.withdrawnAt = withdrawnAt;
     }
 
     public void changeNickname(String nickname) {
