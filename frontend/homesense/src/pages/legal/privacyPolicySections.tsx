@@ -23,7 +23,12 @@ export interface PrivacySection {
 const brandName = 'HomeSense';
 const officerName = '임지성';
 const officerEmail = 'super15600@gmail.com';
-const effectiveDate = '2026-09-15';
+const initialEffectiveDate = '2026-09-15';
+// v1.1(2026-09-21) — AUTH-02 "만 14세 이상입니다" 자기 확인 체크박스 도입에 맞춰 6항 문구를 갱신하며
+// 시행. 7일 사전 고지 원칙(아래 13항 문구)은 이번엔 적용하지 않았다 — 아직 실사용자(기존 가입자)가
+// 없는 출시 전 단계라 고지 대상 자체가 없기 때문이다(지성 확인). 실제 가입자가 생긴 뒤의 개정부터는
+// 이 원칙대로 최소 7일 전 고지가 필요하다.
+const currentEffectiveDate = '2026-09-21';
 
 export const privacySections: PrivacySection[] = [
   {
@@ -434,11 +439,21 @@ export const privacySections: PrivacySection[] = [
     content: (
       <>
         <P>
-          이 개인정보처리방침은 <strong>{effectiveDate}</strong>부터 적용됩니다. 본 방침은 관계 법령 및
-          회사의 정책에 따라 변경될 수 있으며, 내용의 추가·삭제 및 수정이 있을 경우에는 개정 최소 7일
-          전부터 서비스 내 공지사항(또는 이메일)을 통하여 고지하겠습니다.
+          이 개인정보처리방침은 <strong>{currentEffectiveDate}</strong>부터 적용됩니다. 본 방침은 관계
+          법령 및 회사의 정책에 따라 변경될 수 있으며, 내용의 추가·삭제 및 수정이 있을 경우에는 개정
+          최소 7일 전부터 서비스 내 공지사항(또는 이메일)을 통하여 고지하겠습니다.
         </P>
-        <Table headers={['버전', '시행일자', '비고']} rows={[['v1.0', effectiveDate, '최초 제정']]} />
+        <Table
+          headers={['버전', '시행일자', '비고']}
+          rows={[
+            ['v1.0', initialEffectiveDate, '최초 제정'],
+            [
+              'v1.1',
+              currentEffectiveDate,
+              '6항 연령 확인 관련 문구 수정: 회원가입 시 만 14세 이상 자기 확인 항목 도입 반영',
+            ],
+          ]}
+        />
       </>
     ),
   },
