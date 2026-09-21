@@ -24,8 +24,11 @@ const brandName = 'HomeSense';
 const officerName = '임지성';
 const officerEmail = 'super15600@gmail.com';
 const initialEffectiveDate = '2026-09-15';
-// v1.1(2026-09-21) — 6항 연령 확인 문구 갱신 시행. 7일 사전 고지를 생략한 사유·무효화 조건은
-// CLAUDE.md SCR-LEGAL-01 "연령 확인 절차" 판단 기록 5단계 참고.
+// v1.1(2026-09-21) — 6항 연령 확인 문구 갱신 시행(자기 확인 체크박스 도입 반영).
+const v11EffectiveDate = '2026-09-21';
+// v1.2(2026-09-21) — 6항 연령 확인 문구 갱신 시행(서버 검증 도입 반영). v1.1과 시행일이 같다.
+// v1.1·v1.2 모두 13항의 7일 사전 고지를 생략했다 — 사유(고지할 기존 가입자 없음, 사용자 확인)·
+// 무효화 조건은 CLAUDE.md SCR-LEGAL-01 "연령 확인 절차" 판단 기록 5·7단계 참고.
 const currentEffectiveDate = '2026-09-21';
 
 export const privacySections: PrivacySection[] = [
@@ -455,8 +458,13 @@ export const privacySections: PrivacySection[] = [
             ['v1.0', initialEffectiveDate, '최초 제정'],
             [
               'v1.1',
-              currentEffectiveDate,
+              v11EffectiveDate,
               '6항 연령 확인 관련 문구 수정: 회원가입 시 만 14세 이상 자기 확인 항목 도입 반영',
+            ],
+            [
+              'v1.2',
+              currentEffectiveDate,
+              '6항 연령 확인 관련 문구 수정: 가입 시 서버에서도 연령 확인 항목을 검증하도록 변경 반영',
             ],
           ]}
         />
