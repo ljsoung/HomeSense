@@ -43,6 +43,9 @@ export function SignupPage() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
+  // 두 체크박스 모두 서버로 보내지 않는 클라이언트 전용 게이트다(SignupRequest에 대응 필드 없음 —
+  // CLAUDE.md SCR-AUTH-02 절 "만 14세 이상 확인 체크박스" 판단 기록 참고).
+  const [confirmedAge14, setConfirmedAge14] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [emailCheck, setEmailCheck] = useState<EmailCheckState>({ status: 'idle' });
   const [serverFieldErrors, setServerFieldErrors] = useState<Partial<Record<'email' | 'password' | 'nickname', string>>>({});
@@ -165,6 +168,7 @@ export function SignupPage() {
     passwordPolicy.isValid &&
     passwordConfirmValid &&
     nicknameValid &&
+    confirmedAge14 &&
     agreeToTerms &&
     !isSubmitting;
 
@@ -321,6 +325,21 @@ export function SignupPage() {
 
         <div className="flex w-full flex-col gap-1 pt-1">
           <div className="h-px w-full bg-[#f3f4f6]" />
+          {/* Figma(AUTH-02 프레임)에는 이 행이 없다 — 약관 체크박스 행과 완전히 같은 Checkbox·같은
+              pt-1 래퍼를 그대로 재사용해 새 토큰/간격을 만들지 않았다. */}
+          <div className="pt-1">
+            <Checkbox
+              id="confirmedAge14"
+              checked={confirmedAge14}
+              onChange={setConfirmedAge14}
+              label={
+                <>
+                  <span>만 14세 이상입니다 </span>
+                  <span className="text-[#99a1af]">(필수)</span>
+                </>
+              }
+            />
+          </div>
           <div className="pt-1">
             <Checkbox
               id="agreeToTerms"
