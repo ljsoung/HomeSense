@@ -211,8 +211,12 @@ export function SignupPage() {
             }
           }
           setServerFieldErrors(mapped);
-          if (unmapped.length > 0) {
-            setFormError(unmapped.join(' '));
+          // 같은 문구가 반복 표시되지 않게 한다 — 미매핑 에러끼리 message가 같거나, 이미 필드 아래
+          // 인라인으로 보이는 message와 같으면 폼 단위 에러에서는 뺀다.
+          const inlineMessages = new Set(Object.values(mapped));
+          const formMessages = [...new Set(unmapped)].filter((message) => !inlineMessages.has(message));
+          if (formMessages.length > 0) {
+            setFormError(formMessages.join(' '));
           }
           return;
         }
