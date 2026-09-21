@@ -24,10 +24,8 @@ const brandName = 'HomeSense';
 const officerName = '임지성';
 const officerEmail = 'super15600@gmail.com';
 const initialEffectiveDate = '2026-09-15';
-// v1.1(2026-09-21) — AUTH-02 "만 14세 이상입니다" 자기 확인 체크박스 도입에 맞춰 6항 문구를 갱신하며
-// 시행. 7일 사전 고지 원칙(아래 13항 문구)은 이번엔 적용하지 않았다 — 아직 실사용자(기존 가입자)가
-// 없는 출시 전 단계라 고지 대상 자체가 없기 때문이다(지성 확인). 실제 가입자가 생긴 뒤의 개정부터는
-// 이 원칙대로 최소 7일 전 고지가 필요하다.
+// v1.1(2026-09-21) — 6항 연령 확인 문구 갱신 시행. 7일 사전 고지를 생략한 사유·무효화 조건은
+// CLAUDE.md SCR-LEGAL-01 "연령 확인 절차" 판단 기록 5단계 참고.
 const currentEffectiveDate = '2026-09-21';
 
 export const privacySections: PrivacySection[] = [
