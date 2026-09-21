@@ -13,7 +13,6 @@ public record MatchResult(Long complexId, MatchMethod matchMethod, BigDecimal ma
     public static MatchResult unmatched() {
         return new MatchResult(null, null, null);
     }
-
     public static MatchResult exact(Long complexId, BigDecimal matchConfidence) {
         return new MatchResult(complexId, MatchMethod.EXACT, matchConfidence);
     }
