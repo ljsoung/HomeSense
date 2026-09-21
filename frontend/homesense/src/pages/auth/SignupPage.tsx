@@ -43,8 +43,9 @@ export function SignupPage() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
-  // 두 체크박스 모두 서버로 보내지 않는 클라이언트 전용 게이트다(SignupRequest에 대응 필드 없음 —
-  // CLAUDE.md SCR-AUTH-02 절 "만 14세 이상 확인 체크박스" 판단 기록 참고).
+  // confirmedAge14는 가입 요청에 ageConfirmed로 실어 보내 서버도 검증한다(화면을 거치지 않는 직접
+  // 호출 우회 차단). agreeToTerms는 여전히 서버로 보내지 않는 클라이언트 전용 게이트다 — 이 비대칭은
+  // CLAUDE.md SCR-AUTH-02 절 "만 14세 이상 확인 체크박스"·SCR-LEGAL-01 판단 기록 참고.
   const [confirmedAge14, setConfirmedAge14] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [emailCheck, setEmailCheck] = useState<EmailCheckState>({ status: 'idle' });
@@ -183,6 +184,7 @@ export function SignupPage() {
         email: values.email.trim(),
         password: values.password,
         nickname: values.nickname.trim(),
+        ageConfirmed: confirmedAge14,
       });
       navigate('/', { replace: true });
     } catch (error) {
@@ -197,12 +199,21 @@ export function SignupPage() {
         }
         if (status === 400 && body?.error?.fieldErrors?.length) {
           const mapped: Partial<Record<'email' | 'password' | 'nickname', string>> = {};
+          // 이 폼에 대응 입력이 없는 필드(예: ageConfirmed — 체크박스 게이트를 우회한 요청에서만 발생)의
+          // 에러는 인라인으로 붙일 곳이 없다. 조용히 버리면 사용자에게 아무 피드백이 없으므로 기존
+          // 폼 단위 에러 표시 경로(formError)로 서버 message를 그대로 보여준다.
+          const unmapped: string[] = [];
           for (const fieldError of body.error.fieldErrors) {
             if (fieldError.field === 'email' || fieldError.field === 'password' || fieldError.field === 'nickname') {
               mapped[fieldError.field] = fieldError.message;
+            } else {
+              unmapped.push(fieldError.message);
             }
           }
           setServerFieldErrors(mapped);
+          if (unmapped.length > 0) {
+            setFormError(unmapped.join(' '));
+          }
           return;
         }
       }

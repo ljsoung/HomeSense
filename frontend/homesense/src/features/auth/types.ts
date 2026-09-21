@@ -13,6 +13,11 @@ export interface SignupRequest {
   email: string;
   password: string;
   nickname: string;
+  /**
+   * "만 14세 이상입니다" 자기 확인 체크박스 값. 서버가 @NotNull + @AssertTrue로 검증하고 저장 없이
+   * 폐기한다(SignupRequest.java) — 항상 체크박스 상태 그대로 보내며 true로 하드코딩하지 않는다.
+   */
+  ageConfirmed: boolean;
 }
 
 /**
