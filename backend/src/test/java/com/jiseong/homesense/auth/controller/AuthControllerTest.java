@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -73,7 +75,7 @@ class AuthControllerTest {
 
         mockMvc.perform(post("/api/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"new@test.com\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\"}"))
+                        .content("{\"email\":\"new@test.com\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\",\"ageConfirmed\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.accessToken").value("access-token"))
@@ -84,7 +86,7 @@ class AuthControllerTest {
     void 회원가입_이메일_형식이_잘못되면_400과_필드에러를_반환한다() throws Exception {
         mockMvc.perform(post("/api/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"not-an-email\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\"}"))
+                        .content("{\"email\":\"not-an-email\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\",\"ageConfirmed\":true}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.error.fieldErrors[0].field").value("email"));
@@ -99,10 +101,87 @@ class AuthControllerTest {
 
         mockMvc.perform(post("/api/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"" + tooLongEmail + "\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\"}"))
+                        .content("{\"email\":\"" + tooLongEmail + "\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\",\"ageConfirmed\":true}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.error.fieldErrors[0].field").value("email"));
+    }
+
+    // --- ageConfirmed("만 14세 이상입니다" 서버 검증) ---
+
+    private static final String VALID_SIGNUP_WITHOUT_AGE =
+            "\"email\":\"new@test.com\",\"password\":\"Abcd1234!\",\"nickname\":\"닉네임\"";
+
+    @Test
+    void 회원가입_ageConfirmed가_누락되면_400과_ageConfirmed_필드에러를_반환하고_가입을_시도하지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + VALID_SIGNUP_WITHOUT_AGE + "}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.fieldErrors.length()").value(1))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("ageConfirmed"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].message").value("만 14세 이상 확인이 필요합니다"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void 회원가입_ageConfirmed가_null이면_누락과_동일하게_400이고_가입을_시도하지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + VALID_SIGNUP_WITHOUT_AGE + ",\"ageConfirmed\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.fieldErrors.length()").value(1))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("ageConfirmed"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void 회원가입_ageConfirmed가_false이면_400과_ageConfirmed_필드에러를_반환하고_가입을_시도하지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + VALID_SIGNUP_WITHOUT_AGE + ",\"ageConfirmed\":false}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                // @NotNull은 통과하고 @AssertTrue만 걸리므로 한 필드에 에러가 중복으로 실리지 않는다.
+                .andExpect(jsonPath("$.error.fieldErrors.length()").value(1))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("ageConfirmed"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].message").value("만 14세 이상 확인이 필요합니다"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void 회원가입_ageConfirmed가_true이면_기존_성공_경로를_그대로_탄다() throws Exception {
+        when(authService.signup(new SignupCommand("new@test.com", "Abcd1234!", "닉네임")))
+                .thenReturn(new SignupResponse("access-token", "refresh-token", 1800L, 1L, "new@test.com", "닉네임"));
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + VALID_SIGNUP_WITHOUT_AGE + ",\"ageConfirmed\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken").value("access-token"));
+
+        // ageConfirmed는 서비스로 넘어가지 않는다(SignupCommand에 필드 자체가 없다) — 위 stub이 3필드
+        // SignupCommand와만 매칭되므로 이 호출이 성공한다는 것이 곧 "폐기 후 3필드만 전달"의 증명이다.
+        verify(authService).signup(new SignupCommand("new@test.com", "Abcd1234!", "닉네임"));
+    }
+
+    @Test
+    void 회원가입_ageConfirmed가_불리언으로_해석되지_않는_값이면_표준_포맷의_400이다() throws Exception {
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{" + VALID_SIGNUP_WITHOUT_AGE + ",\"ageConfirmed\":\"abc\"}"))
+                .andDo(print())
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").exists());
+
+        verifyNoInteractions(authService);
     }
 
     @Test
