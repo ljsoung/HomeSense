@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.jiseong.homesense.auth.dto.EmailCheckResponse;
 import com.jiseong.homesense.auth.dto.LoginRequest;
 import com.jiseong.homesense.auth.dto.LoginResponse;
+import com.jiseong.homesense.auth.dto.ReactivateRequest;
 import com.jiseong.homesense.auth.dto.RefreshRequest;
 import com.jiseong.homesense.auth.dto.SignupRequest;
 import com.jiseong.homesense.auth.dto.SignupResponse;
@@ -38,6 +39,12 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success(authService.login(request.toCommand()));
+    }
+
+    /** 탈퇴 철회 — 탈퇴 계정은 로그인할 수 없는 인증 전 요청이라 login/signup처럼 SecurityConfig의 permitAll을 그대로 탄다. */
+    @PostMapping("/reactivate")
+    public ApiResponse<LoginResponse> reactivate(@Valid @RequestBody ReactivateRequest request) {
+        return ApiResponse.success(authService.reactivate(request.toCommand()));
     }
 
     @PostMapping("/refresh")
