@@ -1369,6 +1369,58 @@ Vercel은 rewrite보다 실제 정적 파일 매치를 항상 우선하므로 `/
 `vercel.json` 유무와 무관하게 항상 200을 반환한다(직접 확인: `/privacy`에 curl, 200) — 즉 이 클래스의
 버그는 로컬 개발/프리뷰 서버로는 원천적으로 검증 불가능하고, 실제 Vercel 배포 후에만 확인할 수 있다.
 
+**후속 버그(2026-09-21) — 위 rewrite의 `/(.*)`가 `/api/*`까지 그대로 삼켜 배포된 홈 화면이 완전히
+흰 화면으로 죽었다.** 실 배포(https://home-sense-six.vercel.app/)를 열면 `#root`가 비어 있었고,
+Playwright로 잡은 `pageerror`는 `TypeError: Cannot read properties of undefined (reading 'length')`
+였다 — `RecommendedComplexes.tsx`의 `complexes.length === 0` 줄에서 터졌다. **원인 체인:** (1)
+`VITE_API_BASE_URL`이 빌드에 주입된 적이 없어(Vercel 프로젝트 환경변수 미설정, `httpClient.ts`의
+`?? ''` 폴백이 그대로 적용됨) 모든 API 호출이 프런트와 같은 오리진(`home-sense-six.vercel.app`)으로
+나간다 — 이 배포엔 백엔드(Spring Boot)가 함께 올라가 있지 않아 `/api/*`에 대응하는 서버리스
+함수나 정적 파일이 애초에 없다. (2) 그런데 위 rewrite(`/(.*)`  → `/index.html`)가 경로 패턴을 전혀
+가리지 않아 `/api/complexes/popular` 같은 요청도 이 규칙에 걸려 index.html을 `200 text/html`로
+돌려준다 — 진짜 404 대신 "가짜 성공" 응답이 나가는 것. (3) `features/*/api.ts`의 모든 함수는
+`(data as Extract<ApiResponse<T>, { success: true }>).data`로 무조건 캐스팅한다(주석: "성공 응답은
+HTTP 2xx로만 오므로 이 시점의 data는 항상 success:true다") — 이 전제가 실제 백엔드에 대해서는
+참이지만, (2) 때문에 index.html 문자열이 `data`로 들어와 `.data`가 `undefined`가 된다. axios는
+2xx라 reject하지 않으므로 `.then()` 성공 분기가 그대로 실행되고, `RecommendedComplexes`가
+`setComplexes(undefined)`를 호출한 뒤 `complexes.length`를 가드 없이 읽어 크래시한다 — 에러
+바운더리가 없어 React 트리 전체가 사라지고 흰 화면만 남는다.
+
+**수정**: `vercel.json`의 rewrite 패턴에 음의 전방탐색을 추가해 `/api/`로 시작하는 경로를 제외했다.
+```json
+{ "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }] }
+```
+이제 `/api/*`는 이 rewrite에 걸리지 않아(대응하는 정적 파일도 서버리스 함수도 없으므로) Vercel이
+진짜 404를 반환한다 — axios가 정상적으로 reject하고, 각 `.then()/.catch()`가 이미 그렇게 설계된
+대로(CLAUDE.md SCR-HOME-01 절 "관심 매물 POST 실패 시 에러 노출" 등) 빈 배열/숨김 상태로 우아하게
+폴백한다.
+
+**검증(로컬, 위 문단의 "vite preview로 재현 불가" 원칙을 우회한 방법)**: `vite preview`가
+`vercel.json`을 전혀 해석하지 않는다는 사실 자체는 그대로다 — 대신 Playwright의 `page.route()`로
+`/api/**` 응답을 직접 조작해 두 시나리오를 분리 재현했다: (A) 지금의 버그 그대로 `200
+text/html`(index.html 본문)을 돌려주면 `pageerror`가 정확히 재현된다, (B) 수정 후 실제로 나올
+`404`를 돌려주면 `pageerror` 0건에 `#root`가 정상적으로 채워진다(20,733자, 실제 백엔드가 500을
+반환했을 때와 동일한 길이 — 즉 실패 경로가 정확히 같은 정상 렌더링으로 수렴함을 확인). 이 방식은
+"Vercel의 rewrite 엔진 자체"는 검증하지 못하지만(그건 여전히 실 배포 후에만 확인 가능), "그 rewrite가
+만들어내는 정확한 응답 모양을 로컬에서 흉내 내 컴포넌트가 실제로 크래시/복구하는지"는 배포 없이도
+검증할 수 있다는 걸 보여준다 — 위 "로컬에서는 재현할 수 없다"는 rewrite 엔진 자체에 대해서만 여전히
+맞고, 그 rewrite가 유발하는 하류 버그는 응답을 흉내 내면 로컬에서도 검증 가능하다는 refinement로
+남긴다.
+
+**완결 필요 — `VITE_API_BASE_URL`이 여전히 설정되지 않았다.** 이번 수정은 "흰 화면"을 "정상적으로
+렌더링되지만 데이터가 비어 있는 홈 화면"으로 바꿀 뿐이다 — 실제 데이터가 뜨려면 Vercel 프로젝트
+환경변수에 `VITE_API_BASE_URL`을 실제로 배포된 백엔드 오리진으로 설정해야 한다(백엔드가 아직
+어디에도 배포돼 있지 않다면 그것부터 먼저 해결해야 한다). 이 값을 임의로 채우지 않았다 — 잘못된
+URL을 넣으면 CORS 에러 등 또 다른 실패 모드로 바뀔 뿐이라, 실제 배포 위치를 알아야 정할 수 있는
+지성의 결정 사항이다.
+
+**완결 필요(우선순위 낮음, 이번엔 손대지 않음) — 앱 최상위에 React 에러 바운더리가 없다.** 이번
+크래시가 흰 화면으로 번진 것도, `features/*/api.ts` 전체가 "2xx면 무조건 success:true"를 캐스팅으로만
+강제하는 것도(런타임 검증 없음) 구조적으로 같은 계열의 취약점이다 — 라우팅이 다시 한 번 무언가를
+잘못 삼키거나 백엔드가 예상과 다른 200을 내려주면 똑같이 흰 화면으로 죽는다. `main.tsx`/`App.tsx`
+최상위에 에러 바운더리를 두면 이런 클래스의 실패가 "흰 화면"이 아니라 최소한의 에러 UI로 완충된다 —
+다만 이번 수정의 범위(rewrite 설정 하나)를 넘어서는 아키텍처 추가라 임의로 만들지 않았다.
+
 ## 명령어
 
 ```bash
