@@ -2,6 +2,7 @@ package com.jiseong.homesense.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 import org.junit.jupiter.api.Tag;
@@ -17,6 +18,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jiseong.homesense.auth.entity.RefreshToken;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
+import com.jiseong.homesense.common.security.JwtAuthenticationFilter;
+import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
 
@@ -72,6 +76,10 @@ class AuthServicePasswordResetMariaDbIT {
     private RefreshTokenRepository refreshTokenRepository;
     @Autowired
     private PasswordEncoder passwordEncoder;
+    @Autowired
+    private JwtTokenProvider jwtTokenProvider;
+    @Autowired
+    private AccessTokenEpochService accessTokenEpochService;
 
     @Test
     void 재설정하면_커밋_이후_재조회에서도_새_비밀번호와_토큰_전체_폐기가_모두_반영돼_있고_토큰은_1회성이다() {
@@ -115,5 +123,44 @@ class AuthServicePasswordResetMariaDbIT {
 
         User reloadedUser = userRepository.findById(user.getUserId()).orElseThrow();
         assertThat(passwordEncoder.matches("NewAbcd1234!", reloadedUser.getPassword())).isTrue();
+    }
+
+    /**
+     * 코드리뷰 P1 지적 — Refresh Token 폐기만으로는 재설정 이전에 이미 발급된 Access Token을 막지
+     * 못한다({@code AuthService.resetPassword()} javadoc 참고). 이 IT는 실제 Redis 위에서
+     * {@link JwtAuthenticationFilter}가 매 요청 수행하는 것과 정확히 같은 두 호출
+     * (userStatusResolver.isActive() 상당 + accessTokenEpochService.isIssuedAfterCutoff())을 그대로
+     * 재현해, resetPassword() 이전에 발급된 Access Token이 그 이후에는 걸러지고 이후에 발급된
+     * 새 Access Token은 그대로 통과하는지 확인한다 — Mockito로는 "실제 Redis에 컷오프가 기록되고
+     * 그 값을 다시 읽어 정확히 비교되는지" 자체를 증명할 수 없다.
+     *
+     * <p>{@code Thread.sleep(1100)}는 타이밍을 피해 가는 임시방편이 아니라 이 테스트가 검증하려는
+     * 것 자체의 전제조건이다 — JWT {@code iat}(NumericDate)는 초 단위로 잘리므로(COM-SEC-02
+     * {@code jti} 도입 배경과 같은 특성), stale 토큰과 컷오프가 같은 초 안에서 발급되면(디스크·네트워크
+     * 지연이 없는 이 테스트 환경에서는 그러기가 오히려 쉽다) {@link AccessTokenEpochService}가 의도적으로
+     * "같은 초는 통과시킨다"는 트레이드오프를 택하고 있어(그 클래스 javadoc 참고, 실사용자 로그인을
+     * 최대 30분 막는 반대 방향 오탐을 피하기 위함) stale 토큰이 걸러지지 않는 게 오히려 설계대로다.
+     * 최초 이 테스트를 sleep 없이 작성했다가 정확히 이 이유로 실패해서(실 Redis 위에서 실제로
+     * 재현됨) sleep을 추가했다 — 실 운영에서는 재설정 요청과 그 이전 로그인 사이에 최소 수 초~수 분이
+     * 있어 이 창이 사실상 문제되지 않는다.
+     */
+    @Test
+    void 재설정_이전에_발급된_AccessToken은_재설정_이후_컷오프에_걸리고_이후에_발급된_토큰은_통과한다() throws InterruptedException {
+        User user = userRepository.saveAndFlush(
+                User.createUser("epoch-it@test.com", passwordEncoder.encode("OldAbcd1234!"), "닉네임"));
+        Long userId = user.getUserId();
+        String rawToken = passwordResetTokenService.issueToken(userId);
+
+        String staleAccessToken = jwtTokenProvider.createAccessToken(userId, "USER");
+        Instant staleIssuedAt = jwtTokenProvider.getIssuedAt(staleAccessToken);
+
+        Thread.sleep(1100);
+        authService.resetPassword(rawToken, "NewAbcd1234!");
+
+        String freshAccessToken = jwtTokenProvider.createAccessToken(userId, "USER");
+        Instant freshIssuedAt = jwtTokenProvider.getIssuedAt(freshAccessToken);
+
+        assertThat(accessTokenEpochService.isIssuedAfterCutoff(userId, staleIssuedAt)).isFalse();
+        assertThat(accessTokenEpochService.isIssuedAfterCutoff(userId, freshIssuedAt)).isTrue();
     }
 }

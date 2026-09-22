@@ -2,6 +2,8 @@ package com.jiseong.homesense.common.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
+
 import org.junit.jupiter.api.Test;
 
 import com.jiseong.homesense.common.config.JwtProperties;
@@ -86,5 +88,18 @@ class JwtTokenProviderTest {
         String second = provider.createAccessToken(1L, "USER");
 
         assertThat(first).isNotEqualTo(second);
+    }
+
+    @Test
+    void getIssuedAt은_토큰_발급_시각을_추출한다() {
+        // AccessTokenEpochService가 이 값을 무효화 컷오프와 비교한다 — iat이 초 단위로 잘리므로
+        // "지금"과의 오차가 1초 이내여야 한다.
+        Instant before = Instant.now();
+        String token = provider.createAccessToken(1L, "USER");
+        Instant after = Instant.now();
+
+        Instant issuedAt = provider.getIssuedAt(token);
+
+        assertThat(issuedAt).isBetween(before.minusSeconds(1), after.plusSeconds(1));
     }
 }

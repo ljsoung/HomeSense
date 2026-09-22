@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.common.security.UserPrincipal;
 import com.jiseong.homesense.region.dto.InterestRegionSummaryResponse;
@@ -47,6 +48,8 @@ class RegionControllerTest {
     private JwtTokenProvider jwtTokenProvider;
     @MockitoBean
     private UserStatusResolver userStatusResolver;
+    @MockitoBean
+    private AccessTokenEpochService accessTokenEpochService;
     @MockitoBean
     private AuditLogger auditLogger;
 

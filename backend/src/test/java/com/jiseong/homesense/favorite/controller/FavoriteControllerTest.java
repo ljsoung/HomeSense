@@ -29,6 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.common.security.UserPrincipal;
 import com.jiseong.homesense.favorite.dto.AddFavoritePropertyCommand;
@@ -61,6 +62,8 @@ class FavoriteControllerTest {
     private JwtTokenProvider jwtTokenProvider;
     @MockitoBean
     private UserStatusResolver userStatusResolver;
+    @MockitoBean
+    private AccessTokenEpochService accessTokenEpochService;
     @MockitoBean
     private AuditLogger auditLogger;
 

@@ -84,6 +84,15 @@ public class JwtTokenProvider {
     }
 
     /**
+     * {@code iat}(RFC 7519 §4.1.6) 클레임 — {@link AccessTokenEpochService}가 "이 시각 이전에 발급된
+     * Access Token은 무효"를 판단하는 데 쓴다(비밀번호 재설정 등으로 이미 발급된 Access Token을
+     * 만료 전에 선제 무효화해야 하는 경우).
+     */
+    public Instant getIssuedAt(String token) {
+        return parseClaims(token).getIssuedAt().toInstant();
+    }
+
+    /**
      * {@code jti}(RFC 7519 §4.1.7, 표준 클레임)에 무작위 UUID를 담는다 — 이게 없으면 같은 사용자에게
      * 같은 초(NumericDate는 초 단위) 안에 두 번 발급된 토큰은 sub/type/iat/exp가 전부 같아 서명까지
      * 포함해 바이트 단위로 동일한 문자열이 나온다. Refresh Token은 이 문자열의 해시를

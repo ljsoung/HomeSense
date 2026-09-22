@@ -1,6 +1,7 @@
 package com.jiseong.homesense.auth.service;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,6 +28,7 @@ import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
@@ -59,6 +61,7 @@ public class AuthService {
     private final RefreshTokenReuseHandler refreshTokenReuseHandler;
     private final PasswordResetTokenService passwordResetTokenService;
     private final PasswordResetNotifier passwordResetNotifier;
+    private final AccessTokenEpochService accessTokenEpochService;
 
     public SignupResponse signup(SignupCommand cmd) {
         if (userRepository.existsByEmail(cmd.email())) {
@@ -263,6 +266,17 @@ public class AuthService {
      * 거치지 않고 비밀번호를 바꿀 수 있는 구멍이 된다. 비밀번호 변경(user 엔티티 dirty) 다음에
      * revokeAllByUserId()(벌크 UPDATE)를 호출하는 순서는 {@link RefreshTokenRepository#revokeAllByUserId}의
      * {@code flushAutomatically=true}가 안전하게 처리한다(UserService.withdraw()와 동일한 순서·근거).
+     *
+     * <p><b>Refresh Token 폐기만으로는 계정 탈취 시나리오를 완전히 막지 못한다(코드리뷰 P1 지적).</b>
+     * {@code JwtAuthenticationFilter}는 계정 상태가 ACTIVE이고 서명·만료가 유효하면 이미 발급된
+     * Access Token을 그대로 인증에 쓴다 — 비밀번호 재설정은 계정 상태(status)를 바꾸지 않으므로
+     * (재설정 후에도 여전히 ACTIVE), 공격자가 재설정 이전에 이미 Access Token을 쥐고 있었다면 그
+     * 토큰이 자연 만료될 때까지(최대 {@code accessTokenValidity}, 기본 30분) 재설정 이후에도 계속
+     * 인증된 요청을 보낼 수 있었다 — 정확히 비밀번호 재설정이 복구하려는 "계정 탈취" 시나리오에서
+     * 방어가 뚫려 있었다는 뜻이다. {@link AccessTokenEpochService}에 "지금 이 순간 이전에 발급된
+     * Access Token은 전부 무효"라는 컷오프를 남겨, 다음 요청부터는 그 필터가 이 컷오프와 토큰의
+     * {@code iat}를 비교해 재설정 이전 토큰을 걸러낸다(예외 없이 SecurityContext 설정만 건너뜀 —
+     * 만료·상태불일치 토큰과 같은 패턴).
      */
     public void resetPassword(String rawToken, String newPassword) {
         Long userId = passwordResetTokenService.consumeToken(rawToken).orElseThrow(InvalidResetTokenException::new);
@@ -273,6 +287,7 @@ public class AuthService {
 
         user.changePassword(passwordEncoder.encode(newPassword));
         refreshTokenRepository.revokeAllByUserId(userId);
+        accessTokenEpochService.invalidateTokensIssuedBefore(userId, Instant.now());
 
         log.atInfo()
                 .addKeyValue("auditEvent", "PASSWORD_RESET_COMPLETED")

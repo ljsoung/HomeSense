@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Optional;
@@ -19,6 +20,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -44,6 +46,7 @@ import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
 import com.jiseong.homesense.common.config.WithdrawalProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
@@ -73,6 +76,8 @@ class AuthServiceTest {
     private PasswordResetTokenService passwordResetTokenService;
     @Mock
     private PasswordResetNotifier passwordResetNotifier;
+    @Mock
+    private AccessTokenEpochService accessTokenEpochService;
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 12, 0, 0);
@@ -87,7 +92,8 @@ class AuthServiceTest {
                 new WithdrawalProperties(GRACE_DAYS, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
         authService = new AuthService(userRepository, refreshTokenRepository, passwordEncoder,
                 jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy,
-                refreshTokenRotator, refreshTokenReuseHandler, passwordResetTokenService, passwordResetNotifier);
+                refreshTokenRotator, refreshTokenReuseHandler, passwordResetTokenService, passwordResetNotifier,
+                accessTokenEpochService);
     }
 
     @Test
@@ -537,6 +543,7 @@ class AuthServiceTest {
                 .isInstanceOf(InvalidResetTokenException.class);
 
         verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+        verify(accessTokenEpochService, never()).invalidateTokensIssuedBefore(any(), any());
     }
 
     @Test
@@ -552,19 +559,26 @@ class AuthServiceTest {
 
         assertThat(withdrawnUser.getPassword()).isEqualTo("encoded");
         verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+        verify(accessTokenEpochService, never()).invalidateTokensIssuedBefore(any(), any());
     }
 
     @Test
-    void resetPassword_성공하면_비밀번호를_변경하고_모든_RefreshToken을_폐기한다() {
+    void resetPassword_성공하면_비밀번호를_변경하고_모든_RefreshToken을_폐기하고_기존_AccessToken도_무효화한다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         ReflectionTestUtils.setField(user, "userId", 1L);
         when(passwordResetTokenService.consumeToken("token")).thenReturn(Optional.of(1L));
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordEncoder.encode("NewAbcd1234!")).thenReturn("new-encoded");
 
+        Instant before = Instant.now();
         authService.resetPassword("token", "NewAbcd1234!");
+        Instant after = Instant.now();
 
         assertThat(user.getPassword()).isEqualTo("new-encoded");
         verify(refreshTokenRepository).revokeAllByUserId(1L);
+
+        ArgumentCaptor<Instant> cutoffCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(accessTokenEpochService).invalidateTokensIssuedBefore(eq(1L), cutoffCaptor.capture());
+        assertThat(cutoffCaptor.getValue()).isBetween(before, after);
     }
 }

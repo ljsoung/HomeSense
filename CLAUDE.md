@@ -534,7 +534,65 @@ DB 상태(새 비밀번호로 `matches()` 성공, RefreshToken 전체 폐기, �
 | 2단계 실패 | 토큰이 이미 위 사전검증/제출로 소비됐거나 만료·계정비활성이면 `400` + `INVALID_RESET_TOKEN`(사전검증과 동일 코드·문구) |
 | 토큰 만료 | 30분(발급 시점부터) |
 | 재설정 링크 형식 | `{프론트엔드 오리진}/password-reset?token={토큰}` — 프론트 라우트를 정확히 `/password-reset`으로 만들어야 한다(쿼리 파라미터명 `token`) |
-| 재설정 성공 후 | 서버가 그 사용자의 모든 Refresh Token을 폐기한다 — 다른 기기/탭에 로그인돼 있었다면 전부 로그아웃된다(이 사실을 안내 문구에 반영할지는 프론트 판단) |
+| 재설정 성공 후 | 서버가 그 사용자의 모든 Refresh Token을 폐기하고, 이미 발급됐던 Access Token도 다음 요청부터 거부한다(아래 "AUTH-03 resetPassword() Access Token 즉시 무효화" 절 참고) — 다른 기기/탭에 로그인돼 있었다면 전부 로그아웃된다(이 사실을 안내 문구에 반영할지는 프론트 판단) |
+
+### AUTH-03 resetPassword() — Access Token 즉시 무효화 (2026-09-23, Codex P1 코드리뷰 지적) — `AccessTokenEpochService` 신설
+
+**Refresh Token 전체 폐기만으로는 비밀번호 재설정이 막으려는 "계정 탈취" 시나리오를 완전히 방어하지
+못했다.** `JwtAuthenticationFilter`는 계정 상태가 ACTIVE이고 서명·만료가 유효하면 이미 발급된 Access
+Token을 그대로 인증에 쓴다 — 비밀번호 재설정은 계정 상태(status)를 바꾸지 않으므로(재설정 후에도
+여전히 ACTIVE), 공격자가 재설정 이전에 이미 Access Token을 쥐고 있었다면 그 토큰이 자연 만료될
+때까지(최대 `accessTokenValidity`, 기본 30분) 재설정 이후에도 계속 인증된 요청을 보낼 수 있었다.
+
+**해결: `password-reset:token:...`와 별개로, "이 사용자에게 이 시각 이전 발급된 Access Token은 전부
+무효"라는 컷오프(epoch)를 Redis에 남긴다.** 신규 `AccessTokenEpochService`(`common.security`,
+`UserStatusCacheService`와 같은 형태 — `user:tokenEpoch:{userId}` 키, TTL=`accessTokenValidity`)가
+컷오프를 저장하고, `JwtTokenProvider.getIssuedAt(token)`(신규, JWT `iat` 클레임 추출)으로 얻은 토큰
+발급 시각과 비교한다. `JwtAuthenticationFilter`는 기존 `userStatusResolver.isActive(userId)`에
+`accessTokenEpochService.isIssuedAfterCutoff(userId, issuedAt)`을 AND로 추가해, 컷오프 이전에 발급된
+토큰이면 예외 없이 SecurityContext 설정만 건너뛴다(만료·상태불일치 토큰과 같은 패턴 — 토큰 상태를
+따로 두지 않는 stateless JWT 모델을 유지하면서, 이 필터가 매 요청 이미 하던 Redis 조회 하나를 더
+추가하는 것으로 끝난다). `AuthService.resetPassword()`가 `refreshTokenRepository.revokeAllByUserId()`
+직후 `accessTokenEpochService.invalidateTokensIssuedBefore(userId, Instant.now())`를 호출한다.
+
+**컷오프를 쓰는 지점은 지금 `resetPassword()` 하나뿐이다 — `RefreshTokenReuseHandler.handle()`
+(재사용 탐지로 Refresh Token을 전부 폐기하는 지점)도 구조적으로 같은 갭을 안고 있다는 것을 발견했지만,
+이번 P1이 지목한 지점(비밀번호 재설정)만 우선 닫았다.** 공격자가 탈취한 Refresh Token으로 이미
+Access Token을 발급받아 둔 상태에서 재사용이 탐지되면, Refresh Token은 전부 죽지만 그 Access Token은
+마찬가지로 만료 전까지 계속 통용된다 — 범위가 넓어지는 걸 피하려 이번 P1이 명시한 지점만 고쳤다.
+**완결 필요 — `RefreshTokenReuseHandler.handle()`에도 같은 `accessTokenEpochService.
+invalidateTokensIssuedBefore(userId, Instant.now())` 호출을 추가하는 것을 다음에 검토하라.**
+
+**정밀도 불일치 버그 — 실 Redis로 작성한 IT가 잡아냈다(Mockito로는 드러나지 않았을 결함).** JWT의
+`iat`(NumericDate, RFC 7519)는 라이브러리가 직렬화 시점에 초 단위로 자른다(COM-SEC-02의 `jti` 도입
+배경과 같은 특성). 최초 구현은 컷오프를 밀리초 정밀도(`Instant.now().toEpochMilli()`)로 저장하고
+초 단위로 잘린 `iat`과 그대로 비교했는데, 재설정 직후 같은 초 안에 정당하게 재로그인해 발급된 새
+Access Token의 `iat`이 컷오프보다 초 단위로는 같아도 밀리초로는 여전히 "이전"으로 비교돼 즉시
+걸러지는 오탐이 있었다 — 그 토큰은 컷오프 TTL(최대 30분) 동안 계속 거부되는, 실사용자 로그인이
+막히는 심각한 회귀였다. `AuthServicePasswordResetMariaDbIT`에 추가한 실 Redis 테스트가 정확히 이
+실패를 재현했다(양쪽을 자유롭게 밀리초로 넣을 수 있는 Mockito 목으로는 이 정밀도 불일치 자체가
+드러나지 않았을 것이다). **수정: 컷오프·비교 모두 초 단위(`Instant.getEpochSecond()`)로 통일했다** —
+이러면 컷오프 발생 직전 같은 초 안에 발급된 진짜 stale 토큰이 최대 1초간 걸러지지 않을 수 있는 반대
+방향의 작은 여지가 생기지만, "정당한 로그인을 최대 30분 차단"과 "탈취된 토큰을 최대 1초 늦게 차단"
+중 후자가 명백히 더 안전한 트레이드오프라 그대로 받아들였다(`AccessTokenEpochService` javadoc에 근거
+기록).
+
+**검증**: `AccessTokenEpochServiceTest`(Mockito — 초 단위 저장·컷오프 없음/이전/이후/같은 초 4분기),
+`JwtTokenProviderTest.getIssuedAt은_토큰_발급_시각을_추출한다`(신규),
+`JwtAuthenticationFilterTest.상태는_ACTIVE여도_컷오프_이전에_발급된_토큰이면_인증정보를_채우지_않는다`(신규),
+`AuthServiceTest.resetPassword_성공하면_...`(컷오프 호출 검증 추가). **`AuthServicePasswordResetMariaDbIT.
+재설정_이전에_발급된_AccessToken은_재설정_이후_컷오프에_걸리고_이후에_발급된_토큰은_통과한다`(신규,
+Testcontainers+실 Redis)** — stale 토큰 발급 → `Thread.sleep(1100)`(초 경계를 실제로 건너기 위한
+필수 전제조건이지 타이밍 회피가 아니다, iat 자체가 초 단위라 이보다 짧은 간격으로는 이 테스트가
+검증하려는 것 자체가 성립하지 않는다) → `resetPassword()` → 새 토큰 발급 → stale은 컷오프에 걸리고
+fresh는 통과함을 실 Redis로 확인. `@WebMvcTest` 슬라이스 12개 전부 `JwtAuthenticationFilter`가 항상
+컨텍스트에 오르는 기존 패턴(트러블슈팅 노트 참고)대로 `@MockitoBean AccessTokenEpochService`를
+추가했다. **2026-09-23, Docker가 가동 중인 세션에서 `./gradlew test`(576 테스트)와
+`./gradlew integrationTest`(15개 MariaDB IT 클래스, 62 테스트, 이 신규 케이스 포함) 둘 다 실행해
+그린 확인했다.**
+
+**완결 필요**: 프로그램설계서 3.1절(AUTH-03 처리 로직)에 이 컷오프 메커니즘을 반영해야 한다(문서
+반영은 claude.ai 세션에서 별도 진행). 위 `RefreshTokenReuseHandler` 확장 항목도 함께.
 
 ### SVC-USER-01 구현 결정 사항
 

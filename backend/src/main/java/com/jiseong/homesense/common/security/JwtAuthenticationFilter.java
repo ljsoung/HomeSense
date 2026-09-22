@@ -31,6 +31,11 @@ import lombok.RequiredArgsConstructor;
  * 불일치도 만료·위조 토큰과 같은 패턴으로 처리한다 — 401을 직접 던지지 않고 SecurityContext
  * 설정만 건너뛴 채 필터 체인을 계속 진행한다. Redis 캐시미스일 때 DB로 폴백하는 로직은
  * {@link UserStatusResolver}로 옮겨져 있다 — 이 필터는 캐시 인프라의 존재를 몰라도 된다.
+ *
+ * <p>계정 status가 그대로 ACTIVE인 채로 기존 Access Token만 무효화해야 하는 경우(예: 비밀번호
+ * 재설정 — 코드리뷰 P1 지적)는 status 검사로 잡히지 않는다 — {@link AccessTokenEpochService}가
+ * 토큰의 발급 시각({@code iat})과 사용자별 무효화 컷오프를 비교해 이 경우도 같은 패턴(예외 없이
+ * SecurityContext 설정만 건너뜀)으로 처리한다.
  */
 @Component
 @RequiredArgsConstructor
@@ -41,6 +46,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserStatusResolver userStatusResolver;
+    private final AccessTokenEpochService accessTokenEpochService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -48,7 +54,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = resolveToken(request);
         if (token != null && jwtTokenProvider.validateToken(token) && jwtTokenProvider.isAccessToken(token)) {
             Long userId = jwtTokenProvider.getUserId(token);
-            if (userStatusResolver.isActive(userId)) {
+            if (userStatusResolver.isActive(userId)
+                    && accessTokenEpochService.isIssuedAfterCutoff(userId, jwtTokenProvider.getIssuedAt(token))) {
                 SecurityContextHolder.getContext().setAuthentication(createAuthentication(token, userId));
             }
         }
