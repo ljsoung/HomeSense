@@ -52,24 +52,25 @@ class UserStatusResolverTest {
     }
 
     @Test
-    void 캐시미스면_Redis가_재시작된_경우처럼_DB에서_상태를_읽어_반환하고_캐시를_다시_채운다() {
+    void 캐시미스면_Redis가_재시작된_경우처럼_DB에서_상태를_읽어_반환하고_setIfAbsent로_캐시를_다시_채운다() {
         when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.empty());
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         assertThat(resolver.isActive(1L)).isTrue();
-        verify(userStatusCacheService).setStatus(1L, UserStatus.ACTIVE);
+        verify(userStatusCacheService).setIfAbsent(1L, UserStatus.ACTIVE);
+        verify(userStatusCacheService, never()).setStatus(anyLong(), any());
     }
 
     @Test
-    void 캐시미스이고_DB_상태가_ACTIVE가_아니면_그_상태로_캐시를_채우고_false를_반환한다() {
+    void 캐시미스이고_DB_상태가_ACTIVE가_아니면_그_상태로_setIfAbsent를_시도하고_false를_반환한다() {
         when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.empty());
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         user.withdraw(LocalDateTime.now());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         assertThat(resolver.isActive(1L)).isFalse();
-        verify(userStatusCacheService).setStatus(1L, UserStatus.WITHDRAWN);
+        verify(userStatusCacheService).setIfAbsent(1L, UserStatus.WITHDRAWN);
     }
 
     @Test
@@ -79,6 +80,29 @@ class UserStatusResolverTest {
         when(userRepository.findById(1L)).thenReturn(Optional.empty());
 
         assertThat(resolver.isActive(1L)).isFalse();
+        verify(userStatusCacheService, never()).setIfAbsent(anyLong(), any());
+    }
+
+    /*
+     * 코드리뷰 P1 지적(2026-09-22) — 이 resolver의 DB 읽기도 "읽고 나서 늦게 쓰는" 패턴이라
+     * AuthService가 겪었던 것과 같은 모양의 race를 좁은 창에서 재현할 수 있다: T1에 이 resolver가
+     * DB에서 ACTIVE를 읽고, T2에 동시 실행된 withdraw()가 DB+캐시에 WITHDRAWN을 먼저 반영하고,
+     * T3(T2보다 늦음)에 이 resolver가 뒤늦게 재개돼 캐시에 쓰려 한다 — setIfAbsent이므로 이 시도는
+     * no-op이어야 하고(WITHDRAWN 보존), 그와 별개로 이 요청 자신의 인가 판단은 자신이 실제로 읽은
+     * 값(ACTIVE)을 그대로 쓴다 — 이미 진행 중인 요청 하나의 판단을 소급 취소할 방법은 없고, 이
+     * 테스트가 보장하려는 것은 "공유 캐시가 오염되지 않는다"는 것이지 "이 한 요청도 즉시 막힌다"가
+     * 아니다.
+     */
+    @Test
+    void 캐시미스_DB읽기_이후_경쟁으로_setIfAbsent가_지면_공유_캐시는_보존되지만_이_요청_자신의_판단은_그대로_반환한다() {
+        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.empty());
+        User user = User.createUser("user@test.com", "encoded", "닉네임");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        // 동시에 커밋된 withdraw()가 이미 WITHDRAWN을 선점해 둔 상황을 흉내낸다 — setIfAbsent가 진다.
+        when(userStatusCacheService.setIfAbsent(1L, UserStatus.ACTIVE)).thenReturn(false);
+
+        assertThat(resolver.isActive(1L)).isTrue();
+        verify(userStatusCacheService).setIfAbsent(1L, UserStatus.ACTIVE);
         verify(userStatusCacheService, never()).setStatus(anyLong(), any());
     }
 }

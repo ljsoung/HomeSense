@@ -181,28 +181,72 @@ setStatus(userId, ACTIVE)`를 무조건 실행하는 코드는 그대로 남아 
 **수정: 두 메서드 모두에서 `ACTIVE` 캐시 쓰기를 완전히 제거했다** — 버전 관리나 Lua 스크립트 같은
 동시성 장치를 추가하는 대신,애초에 "읽은 뒤 나중에 쓰는" 이 패턴 자체를 없앴다. 새로 발급된 토큰으로
 오는 바로 다음 인증 요청은 캐시가 비어 있을 것이므로 `UserStatusResolver`가 그 시점에 DB를 다시 읽어
-캐시를 채운다 — 이 읽기는 `findById()` 한 번짜리 짧은 조회라 "읽고 나서 쓰기까지" 사이에 다른
-트랜잭션이 끼어들 창이 사실상 없다(수 마이크로초 수준). `UserService.withdraw()`의 `WITHDRAWN` 쓰기는
-그대로 두었다 — **"차단은 즉시, 해제는 다음 확인 때"라는 의도적 비대칭이 이 설계의 핵심이다.** 더
-제한적인 상태(WITHDRAWN)를 먼저 반영해도 최악의 경우 과잉 차단인데, 이는 다음 정상 요청에서
-`UserStatusResolver`가 최신 값을 다시 읽으며 스스로 바로잡힌다 — 반대로 더 허용적인 상태(ACTIVE)를
-먼저 반영하면 과소 차단(보안 구멍)이 되고, 그 구멍은 캐시 TTL(최대 30분) 동안 자연히 닫히지 않는다.
-이 비대칭 때문에 ADM 도메인이 나중에 `SUSPENDED`를 쓰게 되더라도(위 "완결 필요" 행) 그 쓰기는 안전하다
-— WITHDRAWN과 마찬가지로 "더 제한적인" 방향이기 때문이다.
+캐시를 채운다. `UserService.withdraw()`의 `WITHDRAWN` 쓰기는 그대로 두었다 — **"차단은 즉시, 해제는
+다음 확인 때"라는 의도적 비대칭이 이 설계의 핵심이다.** 더 제한적인 상태(WITHDRAWN)를 먼저 반영해도
+최악의 경우 과잉 차단인데, 이는 다음 정상 요청에서 `UserStatusResolver`가 최신 값을 다시 읽으며 스스로
+바로잡힌다 — 반대로 더 허용적인 상태(ACTIVE)를 먼저 반영하면 과소 차단(보안 구멍)이 되고, 그 구멍은
+캐시 TTL(최대 30분) 동안 자연히 닫히지 않는다. 이 비대칭 때문에 ADM 도메인이 나중에 `SUSPENDED`를
+쓰게 되더라도(위 "완결 필요" 행) 그 쓰기는 안전하다 — WITHDRAWN과 마찬가지로 "더 제한적인" 방향이기
+때문이다.
+
+**[처리완료 2026-09-22, 네 번째 P1 코드리뷰] 위 문단이 "창이 사실상 없다"고 썼던 것 자체가 틀린
+확률적 근거였다 — `UserStatusResolver`의 복구용 쓰기도 무조건 덮어쓰기(SET)였다는 점에서 방금 고친
+버그와 구조가 완전히 같았다.** 지성이 직접 지적했다: `UserStatusResolver.refreshFromDatabase()`도
+결국 "DB 읽기 → 그 값으로 캐시 SET"이고, 이 SET이 무조건 덮어쓰기라면 창이 좁아졌을 뿐 같은 모양의
+race가 그대로 남는다 — T1에 resolver가 DB에서 ACTIVE를 읽고(withdraw 커밋 전), T2에 동시 실행된
+withdraw()가 DB+캐시에 WITHDRAWN을 먼저 반영하고, T3(T2보다 늦게, GC 정지 등으로 지연된 뒤)에
+resolver가 뒤늦게 캐시에 ACTIVE를 써 WITHDRAWN을 도로 덮어쓸 수 있다. "실제로 이 창이 훨씬 좁다(DB
+조회 한 번+캐시 쓰기 한 번)"는 사실이 race 자체를 없애지 않는다 — 위에서 이미 "GC 정지·스레드
+스케줄링 지연이 plausible하다"고 스스로 인정해 놓고, 그 전제를 login/refresh 경로에만 국한할 근거가
+없었다. 확률로 완화된 취약점을 "낮은 확률"이라는 이유로 남겨두는 것은 방금 P1으로 잡은 것과 본질적으로
+같은 종류의 결함이다.
+
+**수정: `UserStatusCacheService`에 `setIfAbsent`(Redis SETNX)를 신설하고, `UserStatusResolver`의
+복구용 쓰기를 이걸로 교체했다 — 무조건 덮어쓰기(`setStatus`)는 이제 `UserService.withdraw()`처럼
+"그 순간 DB의 최신 상태를 직접 확정한 쓰기"에만 쓴다.** 이렇게 하면 순서와 무관하게 항상 옳은 결과가
+나온다: withdraw()의 WITHDRAWN이 먼저 도착하면 resolver의 SETNX는 키가 이미 있어 no-op(WITHDRAWN
+보존), resolver가 먼저 도착해도 이후 withdraw()의 무조건 쓰기가 그 위에 WITHDRAWN을 그대로 덮어쓴다
+(WITHDRAWN 보존) — "더 제한적인 값이 이긴다"는 원칙이 확률적 근사치가 아니라 실제 불변식이 된다.
+이 resolver 자신의 이번 요청 인가 판단(`isActive()`의 반환값)은 SETNX의 성패와 무관하게 자신이 실제로
+읽은 DB 값을 그대로 쓴다 — 이미 시작된 이 요청 하나의 판단을 소급 취소할 방법은 없고, 이 수정이
+보장하는 것은 "공유 캐시가 오염되지 않아 이후의 모든 요청은 정확히 판단한다"는 것이다(이 값 하나의
+staleness는 DB만으로 인가하는 어떤 시스템에도 존재하는 환원 불가능한 최소 창이다). 이 프로젝트가 이미
+한 번 쓴 패턴과 같은 방향이다 — BAT-LOD-01의 `dedup_hash` upsert race도 처음엔 `REQUIRES_NEW` 게이트웨이로
+우회하려다 결국 원자적 `INSERT ... ON DUPLICATE KEY UPDATE`로 바꿔 타이밍 의존성 자체를 없앴다(위
+"`REQUIRES_NEW` 격리 INSERT 게이트웨이 패턴" 절 참고) — 이번에도 "확률적 완화"에서 "원자적 연산으로
+구조적 제거"로 한 단계 더 간 것이다.
+
+**완결 필요(우선순위 낮음, 이번에 발견했으나 현재 도달 불가능해 고치지 않음) — 탈퇴 직후 짧은 시간
+안에 재로그인하면(현재는 재활성화, reactivate) 낡은 WITHDRAWN 캐시 때문에 최대 TTL(30분)만큼 오히려
+잠길 수 있다.** `reactivate()`는 (위 두 수정 이후) 성공해도 `ACTIVE`를 캐시에 쓰지 않는다 — 오직
+`UserStatusResolver`의 캐시미스 경로만 채운다. 그런데 `withdraw()`가 남긴 `WITHDRAWN` 캐시 엔트리가
+아직 TTL(최대 30분) 안에 있다면, reactivate() 성공 직후의 인증 요청은 **캐시 히트**(WITHDRAWN)라
+`UserStatusResolver`가 DB를 다시 확인하지 않고 그대로 차단한다 — 방금 도입한 `setIfAbsent`는 이 경로에
+전혀 관여하지 않는다(캐시 미스가 아니라 히트이기 때문). 즉 탈퇴 후 30분 안에 재활성화하면 그 사용자는
+자기 계정을 최대 30분 더 못 쓸 수 있다. **지금 당장 고치지 않는 이유:** `POST /api/auth/reactivate`를
+호출하는 프론트 화면이 아직 없어(CLAUDE.md SCR-LEGAL-01/AUTH-02 절 — "프론트엔드 철회 화면" 항목) 이
+경로 자체가 실사용자에게 아직 도달 불가능하다. 고칠 때는 `reactivate()`가 `reactivateIfWithinGrace()`
+성공 직후(같은 트랜잭션의 current read라 이 시점의 "ACTIVE"는 신선하다) 캐시를 명시적으로 evict하거나
+덮어쓰는 방법을 검토하되, 그 자체도 "reactivate 이후 곧바로 또 다른 withdraw가 온다"는 대칭적인 race를
+새로 만들 수 있다는 점을 놓치지 말 것 — 진짜 구조적으로 닫으려면 상태값에 버전/타임스탬프를 함께
+저장해 비교하는 CAS가 필요할 가능성이 높다. 프론트 철회 화면이 실제로 만들어지는 시점에 이 항목부터
+재검토하라.
 
 **남은 과제(완결 필요, 우선순위 중간) — 프론트 401→refresh 인터셉터 자체는 여전히 없다.** 이 절의
-두 수정 모두 백엔드가 스스로를 안전하게 지키도록 만든 것뿐이다 — 진짜 만료된 Access Token(캐시가
+세 수정 모두 백엔드가 스스로를 안전하게 지키도록 만든 것뿐이다 — 진짜 만료된 Access Token(캐시가
 아니라 JWT 자체의 exp 클레임 만료)에 대해서는 여전히 프론트가 401을 받고도 자동으로 `/api/auth/
 refresh`를 호출해 재시도하지 않는다(SCR-HOME-01 절이 이미 이 갭을 "보호된 라우트가 실제로 생기는
-시점에 추가"로 유예해 뒀다). 이 갭은 이번 두 수정으로도 닫히지 않았다 — 인터셉터를 실제로 붙일 때
+시점에 추가"로 유예해 뒀다). 이 갭은 이번 세 수정으로도 닫히지 않았다 — 인터셉터를 실제로 붙일 때
 이 항목부터 다시 확인하라.
 
-검증: `UserStatusCacheServiceTest`(키·TTL·직렬화), `UserStatusResolverTest`(캐시 히트 시 DB 미조회,
-캐시미스+DB에 ACTIVE/비ACTIVE 각각의 캐시 재기록, 캐시미스+DB에도 없음), `JwtAuthenticationFilterTest`
-(리졸버가 반환하는 boolean만으로 SecurityContext 설정 여부 결정), `UserServiceTest`(withdraw 성공
-경로에서 캐시 쓰기, 실패 경로에서 미호출 검증). `AuthServiceTest`는 이제 `UserStatusCacheService`를
-전혀 의존하지 않는다 — ACTIVE 쓰기가 존재하지 않는다는 사실 자체가 (그 의존성을 제거한) 생성자
-시그니처로 증명된다, 별도 `verify(..., never())`가 필요 없다. Redis 연결은 `LoginAttemptService`가 이미
+검증: `UserStatusCacheServiceTest`(키·TTL·직렬화, `setIfAbsent`의 성공/실패 양쪽 반환값), `UserStatusResolverTest`
+(캐시 히트 시 DB 미조회, 캐시미스+DB에 ACTIVE/비ACTIVE 각각을 `setIfAbsent`로 재기록, 캐시미스+DB에도
+없음, **`setIfAbsent`가 경쟁에서 져도 이 요청 자신의 인가 판단은 자신이 읽은 DB 값을 그대로 반환하고
+무조건 쓰기(`setStatus`)는 절대 호출하지 않는다**), `JwtAuthenticationFilterTest`(리졸버가 반환하는
+boolean만으로 SecurityContext 설정 여부 결정), `UserServiceTest`(withdraw 성공 경로에서 캐시 쓰기,
+실패 경로에서 미호출 검증). `AuthServiceTest`는 이제 `UserStatusCacheService`를 전혀 의존하지 않는다
+— ACTIVE 쓰기가 존재하지 않는다는 사실 자체가 (그 의존성을 제거한) 생성자 시그니처로 증명된다, 별도
+`verify(..., never())`가 필요 없다. Redis 연결은 `LoginAttemptService`가 이미
 요구하던 인프라라 이 변경으로 새로 추가된 테스트 인프라 요구사항은 없다 — **2026-09-22, Docker가
 가동 중인 세션에서 `./gradlew integrationTest`로 실제 실행해 확인했다**(13개 MariaDB IT 클래스, 57
 테스트 전부 그린, `UserStatusResolver` 리팩터링 이후에도 그린 유지 재확인 — `AuthService`/
