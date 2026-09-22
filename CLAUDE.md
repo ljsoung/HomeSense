@@ -594,6 +594,14 @@ fresh는 통과함을 실 Redis로 확인. `@WebMvcTest` 슬라이스 12개 전�
 **완결 필요**: 프로그램설계서 3.1절(AUTH-03 처리 로직)에 이 컷오프 메커니즘을 반영해야 한다(문서
 반영은 claude.ai 세션에서 별도 진행). 위 `RefreshTokenReuseHandler` 확장 항목도 함께.
 
+**완결 필요(문서 추적성) — `AccessTokenEpochService`가 프로그램목록서·프로그램설계서 어디에도 프로그램
+ID로 등록돼 있지 않다(코드리뷰 지적, 2026-09-23).** COM-SEC-01(`JwtAuthenticationFilter`/
+`UserStatusCacheService`/`UserStatusResolver`)·COM-SEC-02(`JwtTokenProvider`)와 같은 급의 공통 보안
+컴포넌트인데, 이번 신설이 신규 프로그램 목록 갱신 없이 기존 COM-SEC-01/02 절 아래 코드로만 들어갔다.
+다음 문서 동기화 시점에 **COM-SEC-03**(가칭)으로 프로그램목록서 3장 총괄표·8.2절 FR 추적표에 등록하고
+(위 "프로그램 인벤토리" 절의 COM 8개 목록도 함께 9개로 갱신), 프로그램설계서에도 클래스·메서드
+시그니처를 반영하라 — 지금 당장 막을 일은 아니다.
+
 ### SVC-USER-01 구현 결정 사항
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |
