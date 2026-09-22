@@ -2,6 +2,7 @@ package com.jiseong.homesense.user.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -23,6 +24,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.WithdrawalProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
+import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.user.dto.UpdateUserCommand;
 import com.jiseong.homesense.user.dto.UserResponse;
 import com.jiseong.homesense.user.dto.WithdrawCommand;
@@ -40,6 +42,8 @@ class UserServiceTest {
     private RefreshTokenRepository refreshTokenRepository;
     @Mock
     private PasswordEncoder passwordEncoder;
+    @Mock
+    private UserStatusCacheService userStatusCacheService;
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 12, 0, 0);
@@ -51,7 +55,8 @@ class UserServiceTest {
         Clock fixedClock = Clock.fixed(NOW.atZone(KST).toInstant(), KST);
         WithdrawalPolicy withdrawalPolicy = new WithdrawalPolicy(fixedClock,
                 new WithdrawalProperties(7, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
-        userService = new UserService(userRepository, refreshTokenRepository, passwordEncoder, withdrawalPolicy);
+        userService = new UserService(userRepository, refreshTokenRepository, passwordEncoder, withdrawalPolicy,
+                userStatusCacheService);
     }
 
     @Test
@@ -156,6 +161,7 @@ class UserServiceTest {
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
+        verify(userStatusCacheService, never()).setStatus(anyLong(), any());
     }
 
     @Test
@@ -170,5 +176,6 @@ class UserServiceTest {
         // 탈퇴 시각은 유예기간 계산과 같은 Clock(KST)에서 나와야 한다 — JVM 기본 타임존이 아니다.
         assertThat(user.getWithdrawnAt()).isEqualTo(NOW);
         verify(refreshTokenRepository).revokeAllByUserId(eq(1L));
+        verify(userStatusCacheService).setStatus(1L, UserStatus.WITHDRAWN);
     }
 }

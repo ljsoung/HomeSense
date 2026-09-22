@@ -6,10 +6,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
+import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.user.dto.UpdateUserCommand;
 import com.jiseong.homesense.user.dto.UserResponse;
 import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.entity.User;
+import com.jiseong.homesense.user.entity.UserStatus;
 import com.jiseong.homesense.user.exception.UserNotFoundException;
 import com.jiseong.homesense.user.repository.UserRepository;
 
@@ -30,6 +32,7 @@ public class UserService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final WithdrawalPolicy withdrawalPolicy;
+    private final UserStatusCacheService userStatusCacheService;
 
     @Transactional(readOnly = true)
     public UserResponse getUser(Long userId) {
@@ -62,6 +65,7 @@ public class UserService {
 
         user.withdraw(withdrawalPolicy.now());
         refreshTokenRepository.revokeAllByUserId(userId);
+        userStatusCacheService.setStatus(userId, UserStatus.WITHDRAWN);
     }
 
     private User findUser(Long userId) {

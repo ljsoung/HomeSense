@@ -120,10 +120,31 @@ com.homesense
 - 모든 요청은 JWT 필터를 통과하되, **토큰이 없어도 요청을 차단하지 않습니다** — 비로그인 조회를 전면 허용하는 게 이 서비스의 원칙입니다.
 - 인증이 실제로 필요한 엔드포인트(`POST /api/auth/logout`, `/api/users/**`(SVC-USER-01), 관심등록, 알림설정, 관리자)만 Spring Security 설정에서 별도로 인증을 강제합니다. `logout()`/USER 도메인 세 엔드포인트는 전부 `UserPrincipal me` 파라미터가 있어야 성립하는 연산이라 구현 시점에 순서대로 추가됐습니다 — 요구사항정의서 2.4절 원문은 이 목록에서 로그아웃과 마이페이지를 빠뜨리고 있으니(관심등록/알림설정/관리자만 예시로 듦) 문서 업데이트가 필요합니다.
 
-**알려진 잔여 리스크 — 탈퇴/정지 직후에도 기존 Access Token이 한동안 유효합니다.** `JwtAuthenticationFilter`는 매 요청 DB를 재조회하지 않고 토큰 클레임만 검증하므로, `refreshAccessToken()`(SVC-AUTH-01, 코드리뷰에서 지적되어 이미 상태 검사를 추가함)과 달리 `/api/users/**`(SVC-USER-01의 getMe/updateMe/withdraw)는 계정이 방금 탈퇴·정지됐어도 만료 전(최대 `accessTokenValidity`, 기본 30분)까지 기존 Access Token으로 계속 호출할 수 있습니다. SVC-USER-01 설계 시점에 지성이 검토했고, 지금 세 메서드에 개별적으로 상태 검사를 추가하는 대신 **FAV/NTF 도메인까지 구현한 뒤 COM-SEC-01(`JwtAuthenticationFilter`) 레벨에서 한 번에** 해결하기로 결정했다 — 예: Redis에 `user:status:{userId}` 같은 짧은 TTL 캐시를 두고 필터가 매 요청 그 캐시만 확인(로그아웃/탈퇴/정지 시 evict)하는 식. 프로그램설계서의 "신규 제안, 반영 전 검토 필요"(로그인 실패 잠금, 아래 SVC-AUTH-01 표) 항목과 같은 카테고리의 미확정/유예 사항으로 취급하라 — 개별 도메인 메서드에 임기응변으로 상태 검사를 흩뿌리지 말 것.
+**[처리완료 2026-09-22] 탈퇴/정지 직후에도 기존 Access Token이 한동안 유효하던 잔여 리스크 — COM-SEC-01 레벨 실시간 상태 체크로 해소.** 이전에는 `JwtAuthenticationFilter`가 매 요청 DB를 재조회하지 않고 토큰 클레임만 검증해, `/api/users/**`(SVC-USER-01의 getMe/updateMe/withdraw)를 포함한 모든 인증 경로가 계정이 방금 탈퇴·정지됐어도 만료 전(최대 `accessTokenValidity`, 기본 30분)까지 기존 Access Token으로 계속 호출 가능했다. FAV/NTF 도메인 구현을 트리거로 예고했던 대로 COM-SEC-01/02 레벨에서 한 번에 해결했다 — 자세한 구현 결정 사항은 바로 다음 "COM-SEC-01/02 실시간 회원 상태 체크" 절 참고.
 - 관리자 엔드포인트는 인증 + `@PreAuthorize("hasRole('ADMIN')")` 이중 체크.
 - 비밀번호는 반드시 BCrypt. 평문 저장/로깅 금지.
 - 미인증 접근이 거부될 때는 Spring Security 기본 401 대신 `RestAuthenticationEntryPoint`(`common/security/`)가 COM-RES-01 표준 에러 포맷을 유지한다.
+
+### COM-SEC-01/02 실시간 회원 상태 체크 (2026-09-22) — Redis `user:status:{userId}` 캐시
+
+바로 위 항목이 예고했던 조치를 실행에 옮겼다. FAV/NTF 도메인 구현이 끝난 시점을 트리거로 개별 도메인
+메서드에 상태 검사를 흩뿌리지 않고 COM-SEC-01(`JwtAuthenticationFilter`) 레벨에서 한 번에 처리했다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 신설 클래스 | `UserStatusCacheService`(`common.security`) — `StringRedisTemplate`만 사용(Repository 직접 의존 없음, 계층 원칙 준수). `setStatus(userId, status)`/`getStatus(userId): Optional<UserStatus>` |
+| Redis 키 | `user:status:{userId}` |
+| TTL | `JwtProperties.accessTokenValidity()`(기본 1,800,000ms=30분)를 그대로 참조 — Access Token 만료 시각과 정확히 동기화 |
+| 쓰기 지점 | `AuthService.loginInternal()`(login/signup/reactivate 세 성공 경로가 공유)과 `refreshAccessToken()` 성공 시 `ACTIVE`로 SETEX. `UserService.withdraw()` 성공 시 `WITHDRAWN`으로 SETEX |
+| 필터 동작 | `JwtAuthenticationFilter`가 `validateToken()`+`isAccessToken()` 통과 후 `getStatus(userId)`를 조회 — `ACTIVE`가 아니거나 캐시미스(empty)면 SecurityContext 설정을 건너뛰고 필터 체인만 계속 진행한다(401을 직접 던지지 않음, 기존 만료 토큰 처리와 동일 패턴). **DB 폴백은 두지 않는다** — 캐시미스를 곧바로 미인증으로 취급하므로, Redis가 비어 있으면(재시작 등) 이미 발급된 Access Token도 다음 재발급/재로그인 전까지 일시적으로 미인증 처리된다(자연 치유: 클라이언트가 401을 받고 `/api/auth/refresh`를 호출하면 그 성공 경로가 캐시를 다시 채운다). |
+| **무효화 조건** | `JwtProperties.accessTokenValidity` 값 자체가 바뀌면 `UserStatusCacheService`의 TTL도 같은 값을 참조하는 생성자 로직이므로 자동으로 함께 바뀐다 — 다만 TTL을 이 값과 별도로 관리하도록 리팩터링하면 그 즉시 동기화가 깨지니 재검토하라. |
+| **완결 필요 — `SUSPENDED` 쓰기 지점 없음** | 이 캐시에 `SUSPENDED`를 실제로 쓰는 코드가 아직 없다 — ADM 도메인(5단계 선택 범위, `AdminService.updateUserStatus()`)이 구현되지 않았기 때문이다. ADM-01 구현 시 정지 처리 지점에서 `userStatusCacheService.setStatus(userId, SUSPENDED)`를 반드시 추가하라 — 이 항목이 빠지면 관리자가 계정을 정지시켜도 캐시가 TTL(최대 30분) 동안 옛 `ACTIVE` 값을 계속 반환해 정지가 즉시 반영되지 않는다. |
+| BAT-USR-01 파기(purge)와의 관계 | `WithdrawnUserPurgeService.purgeOne()`(사용자 행 물리 삭제)은 캐시를 evict하지 않는다 — 파기는 탈퇴 후 유예기간(기본 7일)이 지나야 실행되는데, 그 시점엔 탈퇴 시점에 SETEX한 `WITHDRAWN` 캐시가 TTL(최대 30분)로 이미 자연 만료된 지 오래라 별도 evict가 실질적 의미를 갖지 않는다 — 위 "BAT-USR-01" 절 체크리스트의 "purge에서도 키를 갱신/삭제" 항목은 이 분석에 따라 처리 불필요로 재확인됐다. |
+
+검증: `UserStatusCacheServiceTest`(키·TTL·직렬화), `JwtAuthenticationFilterTest`(ACTIVE 통과, WITHDRAWN/
+SUSPENDED/캐시미스 전부 차단), `AuthServiceTest`/`UserServiceTest`(성공 경로에서 캐시 쓰기, 실패
+경로에서 미호출 검증). Redis 연결은 `LoginAttemptService`가 이미 요구하던 인프라라 이 변경으로 새로
+추가된 테스트 인프라 요구사항은 없다.
 
 ### SVC-AUTH-01 구현 결정 사항
 프로그램 설계서 3.1절이 상세히 기술하지 않았거나 미확정으로 남겨둔 세부 사항을 구현 시점에 확정한 내용이다. 설계서 자체를 아직 갱신하지 못했으니, 설계서를 다시 볼 때는 아래 표를 함께 참고하고, 가능하면 설계서 쪽에도 반영하라.
@@ -141,7 +162,7 @@ com.homesense
 | `UpdateUserRequest`의 닉네임/비밀번호 검증 | "닉네임/비밀번호 각각 선택적"만 언급, 검증 방식은 없음 | `@ValidNickname`/`@ValidPassword`를 그대로 못 쓰고 `@ValidNicknameIfPresent`/`@ValidPasswordIfPresent`(`common/validation/`) 신설 | 기존 두 애노테이션은 null을 무효로 처리하도록 설계돼(COM-VAL-01, 회원가입처럼 필수 필드 전용) 부분 수정의 "필드 생략 시 변경 안 함" 의미와 정면으로 충돌한다. 새 애노테이션은 null만 유효로 통과시키고 non-null 값은 기존 `NicknameValidator`/`PasswordValidator`에 그대로 위임한다(로직 중복 없음). |
 | **닉네임 "특수문자 제한" — 3.2절과 5.8절이 서로 다른 말을 했던 문제(해결됨, 지성 확인 완료)** | 3.2절(`updateUser()` 처리 로직)은 "2~12자·**특수문자 제한 규칙**(COM-VAL-01)을 통과한 값으로 갱신"이라고 적어 뒀지만, COM-VAL-01을 확정 정의하는 5.8절은 "2~12자"만 규정하고 문자 집합 제한은 아예 언급하지 않는다. **요구사항정의서 FR-1.1**(이메일·비밀번호·닉네임 입력/이메일 형식·중복 확인/비밀번호 단방향 암호화만 명시, 닉네임 형식 제약 없음)과 **UI정의서 5.1절 AUTH-02 예외처리표**("비밀번호 정책 미충족" 행만 있고 닉네임 관련 행 자체가 없음) 어디에도 "특수문자 제한"의 근거가 없다 — 이 문구는 프로그램설계서 3.2절 한 곳에만 고립돼 등장한다. **결론(지성 확정): 3.2절의 "특수문자 제한 규칙" 문구는 COM-VAL-01이 5.8절로 확정되기 전 초안 단계에서 남은 낡은 서술이며, 실제로 반영된 적이 없다 — 5.8절(2~12자, 문자 제한 없음)이 확정 스펙이 맞다.** 3.2절 쪽을 5.8절과 일치하도록 갱신하는 것이 다음 문서 동기화 시점의 할 일이다. | `NicknameValidator`/`NicknameIfPresentValidator`는 길이(codePointCount 2~12)만 검사하고 문자 집합 검사는 없다. `UserService.changeNickname()`도 추가 검증 없이 그대로 대입한다 — **이 구현이 맞는 스펙(5.8절)을 그대로 따르고 있으므로 코드 변경 불필요.** SCR-AUTH-02 프론트(`features/auth/validation.ts`의 `isValidNickname()`)도 이 확정된 동작을 그대로 미러링해 길이만 검사한다 — 이 역시 수정 불필요 | 최초엔 "코드에 특수문자 제한이 구현/제거된 흔적이 없다"(테스트에 특수문자 케이스 없음, git log상 관련 파일을 건드린 커밋이 COM-VAL-01 최초 구현 `1a8e48b`/SVC-USER-01 `e2bc1db` 둘뿐)는 것을 드리프트 가설의 근거로 들었는데, 이건 틀린 추론이었다(지성 지적) — "3.2절이 방치된 드리프트다"와 "COM-VAL-01 구현이 3.2절 요구사항을 놓쳤다" 두 가설 모두 정확히 같은 코드 증거를 만들어내는 대칭적 증거라 코드만으로는 구분이 불가능했다. **실제 결정력 있는 근거는 상위 문서였다** — 진짜 의도된 설계였다면 요구사항정의서나 UI정의서 예외처리표 어딘가에는 흔적이 남았을 텐데, "특수문자 제한"이 3.2절 한 곳에만 고립돼 등장한다는 사실이 드리프트 가설을 사실상 확정 지었다(지성 교차 확인). 이 항목은 프론트/백엔드 어느 쪽 코드도 고칠 필요가 없다는 점에서 종료됐고, 남은 액션은 3.2절 문서 자체를 5.8절에 맞춰 갱신하는 것뿐이다. |
 | `WithdrawRequest` 필드 구성 | 설계서에 검증 언급 없음(컨트롤러 시그니처만 `withdraw(UserPrincipal me, WithdrawRequest req)`) | `password`(필수, `@NotBlank`, `PasswordEncoder.matches()`로 재확인 실패 시 `InvalidCredentialsException`) + `reason`(선택, 검증 없음, 저장하지 않고 받기만 함) | UI정의서 MY-01 이벤트 정의("탈퇴 사유 확인 → 최종 확인 다이얼로그")에 `reason`이 이미 명시돼 있다. `password`는 세션 탈취·오조작으로 인한 계정 삭제 사고를 막는 통상적 방어선이며, 컨트롤러가 애초에 body를 받도록 설계된 것 자체가 빈 바디가 아니었다는 정황 증거다. `reason`을 저장할 스키마가 없어 지금은 버리고, 필요해지면 `User` row가 물리 삭제되지 않으므로 나중에 컬럼을 추가해도 된다. |
-| 계정 status=ACTIVE 검사 | 예외표에 없음 | getMe/updateMe/withdraw 세 메서드 모두 **추가하지 않음** | 위 "알려진 잔여 리스크" 참고 — FAV/NTF까지 구현한 뒤 COM-SEC-01 레벨에서 한 번에 처리하기로 결정. |
+| 계정 status=ACTIVE 검사 | 예외표에 없음 | getMe/updateMe/withdraw 세 메서드 모두 **개별로는 추가하지 않음 — [처리완료 2026-09-22]** COM-SEC-01 레벨(`JwtAuthenticationFilter`)의 `user:status` Redis 캐시 체크가 모든 인증 경로에 일괄 적용돼 이 세 메서드도 자동으로 보호된다(위 "COM-SEC-01/02 실시간 회원 상태 체크" 절 참고). |
 
 ### BAT-USR-01 / SVC-AUTH-01.reactivate() 탈퇴 계정 자동 파기와 탈퇴 철회 (신규 제안 — 프로그램목록서·설계서 미반영)
 
@@ -165,7 +186,7 @@ com.homesense
 **구현 시점에 지킬 것(체크리스트):**
 - [ ] **BAT-NTF-01/BAT-MAIL-01 구현 시** `status=ACTIVE` 회원만 대상으로 하고(유예 중 WITHDRAWN 계정에 알림 발송 금지), 실행 시간을 05:00 파기와 겹치지 않게 조정한다(`WITHDRAWAL_PURGE_CRON` 또는 알림 스케줄 쪽).
 - [ ] **AdminService `updateUserStatus`(5단계)가 상태를 `WITHDRAWN`으로 바꿀 때 `withdrawn_at`을 반드시 세팅한다** — `WITHDRAWN`인데 `withdrawn_at`이 NULL이면 파기가 그 행을 영영 건드리지 않고 WARN(`malformedWithdrawn`)만 남긴다. 세팅은 `WithdrawalPolicy.now()`를 쓴다.
-- [ ] **`user:status` Redis 필터(위 "알려진 잔여 리스크") 도입 시** withdraw·reactivate·purge 세 곳 모두에서 키를 갱신/삭제한다.
+- [x] **`user:status` Redis 필터 도입** — 2026-09-22 완료. withdraw/reactivate는 각각 `UserService.withdraw()`/`AuthService.loginInternal()`에서 키를 갱신한다. purge는 갱신하지 않기로 확정했다(TTL이 유예기간보다 훨씬 짧아 파기 시점엔 이미 자연 만료됨 — 아래 "COM-SEC-01/02 실시간 회원 상태 체크" 절 참고).
 - [ ] **MY-01 탈퇴 확인 모달**에 유예기간(N일)·자동 파기 고지가 있어야 한다(현재 MY-01은 미구현 — 방침과 같은 N을 쓴다).
 - [ ] **철회 UI**(AUTH-01의 `ACCOUNT_WITHDRAWN` 에러코드 분기 + 철회 CTA)는 Figma 프레임이 준비된 뒤 후속 작업이다. 이 UI가 생기면 방침 2항·`login()`의 탈퇴 문구에 "철회할 수 있습니다" 안내를 추가할 수 있고, 그때 위 "유예 중 같은 이메일 가입" UX도 함께 정리하라.
 - [ ] **배포 시 JVM 기본 타임존을 `Asia/Seoul`로 고정한다**(`-Duser.timezone=Asia/Seoul` 또는 컨테이너 `TZ=Asia/Seoul`). 공용 KST `Clock`은 `withdrawn_at`·파기·철회만 KST로 맞춘다 — `created_at`/`updated_at`(auditing)과 `RefreshToken` 만료 시각은 여전히 JVM 기본 타임존이라, UTC가 기본인 EC2에 그대로 올리면 같은 `user` 행에서 `withdrawn_at`(KST)과 `updated_at`(UTC)이 9시간 어긋난다. JDBC URL의 `serverTimezone=Asia/Seoul`은 이 문제를 해결하지 않는다(애플리케이션이 만든 `LocalDateTime` 값 자체는 그대로 저장된다). JVM 타임존을 고정하면 이 한계가 한 번에 정리된다.

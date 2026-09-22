@@ -40,6 +40,7 @@ import com.jiseong.homesense.auth.service.AuthService;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.common.security.UserPrincipal;
 import com.jiseong.homesense.user.entity.UserStatus;
 
@@ -59,6 +60,8 @@ class AuthControllerTest {
      */
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+    @MockitoBean
+    private UserStatusCacheService userStatusCacheService;
     @MockitoBean
     private AuditLogger auditLogger;
 

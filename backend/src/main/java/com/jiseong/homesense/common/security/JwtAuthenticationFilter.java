@@ -10,6 +10,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import com.jiseong.homesense.user.entity.UserStatus;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,6 +25,13 @@ import lombok.RequiredArgsConstructor;
  * 필요한 엔드포인트의 401/403은 SecurityConfig의 authorizeHttpRequests가 별도로 반환한다.
  * Refresh Token도 같은 서명 키로 서명되어 validateToken()을 통과하므로, isAccessToken()으로
  * Access Token인지 추가로 확인한 뒤에만 인증 정보를 채운다.
+ *
+ * <p>구조적으로 유효한 Access Token이어도 {@link UserStatusCacheService}에 캐시된 계정 상태가
+ * ACTIVE가 아니면(또는 캐시미스면) 인증 정보를 채우지 않는다 — 이 필터는 토큰 클레임만 보고 매
+ * 요청 DB를 재조회하지 않으므로, 이 검사가 없으면 탈퇴·정지 직후에도 만료 전까지(최대
+ * accessTokenValidity) 기존 Access Token이 그대로 통용되는 잔여 리스크가 있었다(CLAUDE.md 인증
+ * 절 참고). 상태 불일치도 만료·위조 토큰과 같은 패턴으로 처리한다 — 401을 직접 던지지 않고
+ * SecurityContext 설정만 건너뛴 채 필터 체인을 계속 진행한다.
  */
 @Component
 @RequiredArgsConstructor
@@ -32,15 +41,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final UserStatusCacheService userStatusCacheService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String token = resolveToken(request);
         if (token != null && jwtTokenProvider.validateToken(token) && jwtTokenProvider.isAccessToken(token)) {
-            SecurityContextHolder.getContext().setAuthentication(createAuthentication(token));
+            Long userId = jwtTokenProvider.getUserId(token);
+            if (isActive(userId)) {
+                SecurityContextHolder.getContext().setAuthentication(createAuthentication(token, userId));
+            }
         }
         filterChain.doFilter(request, response);
+    }
+
+    private boolean isActive(Long userId) {
+        return userStatusCacheService.getStatus(userId)
+                .filter(UserStatus.ACTIVE::equals)
+                .isPresent();
     }
 
     private String resolveToken(HttpServletRequest request) {
@@ -51,8 +70,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private Authentication createAuthentication(String token) {
-        Long userId = jwtTokenProvider.getUserId(token);
+    private Authentication createAuthentication(String token, Long userId) {
         String role = jwtTokenProvider.getRole(token);
         UserPrincipal principal = new UserPrincipal(userId, role);
         var authority = new SimpleGrantedAuthority("ROLE_" + role);

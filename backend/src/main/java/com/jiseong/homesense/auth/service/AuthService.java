@@ -25,6 +25,7 @@ import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
 import com.jiseong.homesense.user.repository.UserRepository;
@@ -52,6 +53,7 @@ public class AuthService {
     private final RefreshTokenHasher refreshTokenHasher;
     private final LoginAttemptService loginAttemptService;
     private final WithdrawalPolicy withdrawalPolicy;
+    private final UserStatusCacheService userStatusCacheService;
 
     public SignupResponse signup(SignupCommand cmd) {
         if (userRepository.existsByEmail(cmd.email())) {
@@ -177,6 +179,7 @@ public class AuthService {
         }
 
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId(), user.getRole().name());
+        userStatusCacheService.setStatus(user.getUserId(), UserStatus.ACTIVE);
         return new TokenResponse(accessToken, accessTokenExpiresInSeconds());
     }
 
@@ -197,7 +200,10 @@ public class AuthService {
     /**
      * 설계서 Service 설계표가 명시한 loginInternal() — login()의 토큰 발급 로직 본체다. signup()이
      * 방금 생성한 계정으로 이 메서드를 그대로 재사용해 자동 로그인을 구현하고, login()은 자격 증명
-     * 검증(잠금·존재·상태·비밀번호 확인)을 마친 뒤 이 메서드로 토큰 발급만 위임한다.
+     * 검증(잠금·존재·상태·비밀번호 확인)을 마친 뒤 이 메서드로 토큰 발급만 위임한다. reactivate()도
+     * DB 상태를 ACTIVE로 되돌린 뒤 이 메서드를 재사용해 자동 로그인한다 — 세 호출부 모두 여기서
+     * 상태 캐시를 ACTIVE로 SETEX하므로 login()/signup()/reactivate() 성공 지점을 개별로 건드릴
+     * 필요가 없다.
      */
     private IssuedTokens loginInternal(User user) {
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId(), user.getRole().name());
@@ -205,6 +211,7 @@ public class AuthService {
 
         LocalDateTime expiresAt = LocalDateTime.now().plus(Duration.ofMillis(jwtProperties.refreshTokenValidity()));
         refreshTokenRepository.save(RefreshToken.issue(user, refreshTokenHasher.hash(refreshToken), expiresAt));
+        userStatusCacheService.setStatus(user.getUserId(), UserStatus.ACTIVE);
 
         return new IssuedTokens(accessToken, refreshToken, accessTokenExpiresInSeconds());
     }

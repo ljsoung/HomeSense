@@ -6,6 +6,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Optional;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,11 +19,15 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import com.jiseong.homesense.user.entity.UserStatus;
+
 @ExtendWith(MockitoExtension.class)
 class JwtAuthenticationFilterTest {
 
     @Mock
     private JwtTokenProvider jwtTokenProvider;
+    @Mock
+    private UserStatusCacheService userStatusCacheService;
 
     @InjectMocks
     private JwtAuthenticationFilter filter;
@@ -44,11 +50,12 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    void 유효한_Access_Token이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
+    void 유효한_Access_Token이고_캐시_상태가_ACTIVE이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
         when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
         when(jwtTokenProvider.getRole("valid-token")).thenReturn("ADMIN");
+        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.of(UserStatus.ACTIVE));
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer valid-token");
@@ -63,6 +70,57 @@ class JwtAuthenticationFilterTest {
         assertThat(authentication.getAuthorities())
                 .extracting(Object::toString)
                 .containsExactly("ROLE_ADMIN");
+    }
+
+    @Test
+    void 유효한_Access_Token이어도_캐시_상태가_WITHDRAWN이면_인증정보를_채우지_않는다() throws Exception {
+        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
+        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.of(UserStatus.WITHDRAWN));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer valid-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    void 유효한_Access_Token이어도_캐시_상태가_SUSPENDED이면_인증정보를_채우지_않는다() throws Exception {
+        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
+        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.of(UserStatus.SUSPENDED));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer valid-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    void 유효한_Access_Token이어도_상태_캐시가_TTL_만료로_비어있으면_미인증_처리한다() throws Exception {
+        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
+        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.empty());
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer valid-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test
