@@ -96,4 +96,24 @@ class AuthServicePasswordResetMariaDbIT {
         // 토큰은 GETDEL로 이미 소비됐다 — 같은 토큰으로 다시 consume을 시도하면 빈 Optional이어야 한다.
         assertThat(passwordResetTokenService.consumeToken(rawToken)).isEmpty();
     }
+
+    @Test
+    void 같은_사용자가_재설정을_다시_요청하면_이전_토큰은_새_토큰_발급과_동시에_무효화된다() {
+        User user = userRepository.saveAndFlush(
+                User.createUser("reissue-it@test.com", passwordEncoder.encode("OldAbcd1234!"), "닉네임"));
+
+        String firstRawToken = passwordResetTokenService.issueToken(user.getUserId());
+        String secondRawToken = passwordResetTokenService.issueToken(user.getUserId());
+
+        // 오래된 이메일 링크(첫 번째 토큰)는 두 번째 발급과 동시에 죽어야 한다 — 실제 Redis에서
+        // issueToken()의 invalidatePreviousToken()이 정확히 동작하는지 확인한다(Mockito로는 이
+        // 무효화 자체가 실제로 일어나는지 증명할 수 없다).
+        assertThat(passwordResetTokenService.peekToken(firstRawToken)).isEmpty();
+        assertThat(passwordResetTokenService.peekToken(secondRawToken)).contains(user.getUserId());
+
+        authService.resetPassword(secondRawToken, "NewAbcd1234!");
+
+        User reloadedUser = userRepository.findById(user.getUserId()).orElseThrow();
+        assertThat(passwordEncoder.matches("NewAbcd1234!", reloadedUser.getPassword())).isTrue();
+    }
 }

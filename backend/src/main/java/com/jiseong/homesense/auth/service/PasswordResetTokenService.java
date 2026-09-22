@@ -19,11 +19,18 @@ import org.springframework.stereotype.Component;
  * 혼동 금지). DB에 원문을 저장하지 않는 {@link RefreshTokenHasher}와 같은 이유로, Redis 키도 원문이
  * 아니라 SHA-256 해시로 만든다(같은 패키지의 그 해시기를 그대로 재사용 — 범용 문자열 해셔라 재설정
  * 토큰에도 그대로 적용된다).
+ *
+ * <p>{@code password-reset:active-token:{userId}} 키가 그 사용자의 "현재 유효한 토큰"의 해시를
+ * 가리킨다 — {@link #issueToken}이 새 토큰을 발급할 때마다 이 포인터로 이전 토큰을 찾아 함께
+ * 무효화한다(P1 코드리뷰 지적: 재전송 쿨다운만으로는 이전에 발급된 토큰이 그대로 30분간 살아있어,
+ * 오래된 이메일로도 나중에 계정을 되찾을 수 있는 구멍이었다). {@link #consumeToken}이 성공하면 이
+ * 포인터도 함께 지운다.
  */
 @Component
 class PasswordResetTokenService {
 
     private static final String TOKEN_KEY_PREFIX = "password-reset:token:";
+    private static final String ACTIVE_TOKEN_KEY_PREFIX = "password-reset:active-token:";
     private static final String COOLDOWN_KEY_PREFIX = "password-reset:cooldown:";
     private static final Duration TOKEN_TTL = Duration.ofMinutes(30);
     private static final Duration COOLDOWN_TTL = Duration.ofSeconds(60);
@@ -38,11 +45,29 @@ class PasswordResetTokenService {
         this.tokenHasher = tokenHasher;
     }
 
-    /** 새 토큰을 발급하고 Redis에 {@code userId}를 값으로 저장한다. 반환값(원문)만 이메일 링크에 실린다. */
+    /**
+     * 새 토큰을 발급하고 Redis에 {@code userId}를 값으로 저장한다. 반환값(원문)만 이메일 링크에 실린다.
+     *
+     * <p>발급 직전에 이 사용자의 이전 활성 토큰이 있으면 함께 무효화한다 — 그러지 않으면 재전송
+     * 쿨다운(60초) 경과 후 다시 요청할 때마다 독립적인 키로 토큰이 쌓여, 오래된 이메일(공유 메일함,
+     * 열람 지연 등으로 나중에 읽힐 수 있다)로도 30분 내내 비밀번호를 재설정할 수 있는 구멍이 된다 —
+     * 최신 토큰만 유효해야 한다(P1 코드리뷰 지적).
+     */
     String issueToken(Long userId) {
+        invalidatePreviousToken(userId);
+
         String rawToken = generateRawToken();
-        redisTemplate.opsForValue().set(tokenKey(rawToken), String.valueOf(userId), TOKEN_TTL);
+        String hash = tokenHasher.hash(rawToken);
+        redisTemplate.opsForValue().set(TOKEN_KEY_PREFIX + hash, String.valueOf(userId), TOKEN_TTL);
+        redisTemplate.opsForValue().set(activeTokenKey(userId), hash, TOKEN_TTL);
         return rawToken;
+    }
+
+    private void invalidatePreviousToken(Long userId) {
+        String previousHash = redisTemplate.opsForValue().get(activeTokenKey(userId));
+        if (previousHash != null) {
+            redisTemplate.delete(TOKEN_KEY_PREFIX + previousHash);
+        }
     }
 
     /**
@@ -60,7 +85,9 @@ class PasswordResetTokenService {
      * DB처럼 별도 트랜잭션/스냅샷 문제가 애초에 생기지 않는다.
      */
     Optional<Long> consumeToken(String rawToken) {
-        return parse(redisTemplate.opsForValue().getAndDelete(tokenKey(rawToken)));
+        Optional<Long> userId = parse(redisTemplate.opsForValue().getAndDelete(tokenKey(rawToken)));
+        userId.ifPresent(id -> redisTemplate.delete(activeTokenKey(id)));
+        return userId;
     }
 
     boolean isCoolingDown(String normalizedEmail) {
@@ -91,5 +118,9 @@ class PasswordResetTokenService {
 
     private String cooldownKey(String normalizedEmail) {
         return COOLDOWN_KEY_PREFIX + normalizedEmail;
+    }
+
+    private String activeTokenKey(Long userId) {
+        return ACTIVE_TOKEN_KEY_PREFIX + userId;
     }
 }
