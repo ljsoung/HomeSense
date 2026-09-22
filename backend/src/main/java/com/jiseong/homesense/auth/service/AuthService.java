@@ -159,6 +159,15 @@ public class AuthService {
      * 계정 상태를 다시 조회하지 않으므로, 로그인 이후 탈퇴·정지된 계정이라도 이 검사가 없으면 Refresh
      * Token이 만료될 때까지(최대 refreshTokenValidity) 계속 새 Access Token을 발급받을 수 있다 —
      * login()과 동일한 상태 검사를 재발급 경로에도 강제해 막는다(코드리뷰에서 지적된 결함).
+     *
+     * <p>이 메서드는 성공해도 {@code user:status} 캐시에 ACTIVE를 쓰지 않는다 — 위에서 읽은
+     * {@code user.getStatus()}는 이 메서드가 시작될 때(정확히는 findByTokenValue()가 REPEATABLE
+     * READ 스냅샷을 여는 시점)의 값이라, 이 메서드가 실행되는 도중(GC 정지·스레드 스케줄링 지연 등)
+     * 다른 트랜잭션이 같은 사용자를 탈퇴시켜 캐시에 WITHDRAWN을 먼저 써 놓았다면, 그 뒤에 이 메서드가
+     * 뒤늦게 재개돼 캐시를 ACTIVE로 덮어써 버릴 수 있다(코드리뷰 P1 지적) — 이러면 이 기능 전체의
+     * 목적(탈퇴 즉시 차단)이 무력화된다. 캐시는 {@link com.jiseong.homesense.common.security.UserStatusResolver}가
+     * 다음 인증 요청에서 캐시미스를 만나는 순간 그 시점의 최신 DB 값을 읽어 채운다 — 그 읽기는
+     * 이 메서드처럼 긴 트랜잭션에 묶여 있지 않고 단발성 조회라 staleness 창이 사실상 없다.
      */
     public TokenResponse refreshAccessToken(String refreshTokenValue) {
         if (!jwtTokenProvider.validateToken(refreshTokenValue) || jwtTokenProvider.isAccessToken(refreshTokenValue)) {
@@ -197,7 +206,17 @@ public class AuthService {
     /**
      * 설계서 Service 설계표가 명시한 loginInternal() — login()의 토큰 발급 로직 본체다. signup()이
      * 방금 생성한 계정으로 이 메서드를 그대로 재사용해 자동 로그인을 구현하고, login()은 자격 증명
-     * 검증(잠금·존재·상태·비밀번호 확인)을 마친 뒤 이 메서드로 토큰 발급만 위임한다.
+     * 검증(잠금·존재·상태·비밀번호 확인)을 마친 뒤 이 메서드로 토큰 발급만 위임한다. reactivate()도
+     * DB 상태를 ACTIVE로 되돌린 뒤 이 메서드를 재사용해 자동 로그인한다.
+     *
+     * <p>이 메서드도 {@code user:status} 캐시에 ACTIVE를 쓰지 않는다 — {@link #refreshAccessToken}의
+     * javadoc과 같은 이유(코드리뷰 P1 지적)로, 여기서 읽은 {@code user}의 상태가 이 메서드 실행 도중
+     * 다른 트랜잭션의 탈퇴 처리에 의해 이미 낡은 값이 됐을 수 있어 무조건 ACTIVE로 덮어쓰면 안 된다.
+     * 새로 발급된 토큰으로 오는 다음 인증 요청은 캐시가 비어 있을 것이므로
+     * {@link com.jiseong.homesense.common.security.UserStatusResolver}가 그 시점에 DB를 다시 읽어
+     * 캐시를 채운다 — "블록은 즉시, 언블록은 다음 확인 때"라는 비대칭이 이 설계의 핵심이다: WITHDRAWN을
+     * 먼저 반영해도(과잉 차단) 다음 정상 요청에서 스스로 바로잡히지만, ACTIVE를 먼저 반영하면(과소
+     * 차단) 그 캐시 TTL 동안 탈퇴된 계정이 계속 인증된 것처럼 취급되는 보안 구멍이 된다.
      */
     private IssuedTokens loginInternal(User user) {
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId(), user.getRole().name());

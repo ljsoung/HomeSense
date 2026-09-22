@@ -22,6 +22,8 @@ class JwtAuthenticationFilterTest {
 
     @Mock
     private JwtTokenProvider jwtTokenProvider;
+    @Mock
+    private UserStatusResolver userStatusResolver;
 
     @InjectMocks
     private JwtAuthenticationFilter filter;
@@ -44,11 +46,12 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    void 유효한_Access_Token이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
+    void 유효한_Access_Token이고_상태_확인_결과가_ACTIVE이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
         when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
         when(jwtTokenProvider.getRole("valid-token")).thenReturn("ADMIN");
+        when(userStatusResolver.isActive(1L)).thenReturn(true);
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer valid-token");
@@ -63,6 +66,28 @@ class JwtAuthenticationFilterTest {
         assertThat(authentication.getAuthorities())
                 .extracting(Object::toString)
                 .containsExactly("ROLE_ADMIN");
+    }
+
+    /*
+     * ACTIVE/WITHDRAWN/SUSPENDED/캐시미스+DB폴백의 세부 분기는 UserStatusResolverTest가 담당한다 —
+     * 이 필터는 그 결과(boolean)만 보고 SecurityContext를 채울지 결정하므로, 여기서는 true/false
+     * 두 경우만 검증하면 된다.
+     */
+    @Test
+    void 유효한_Access_Token이어도_상태_확인_결과가_false이면_인증정보를_채우지_않는다() throws Exception {
+        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
+        when(userStatusResolver.isActive(1L)).thenReturn(false);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer valid-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test
@@ -80,6 +105,7 @@ class JwtAuthenticationFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(userStatusResolver, never()).isActive(any());
     }
 
     @Test
