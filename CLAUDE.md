@@ -144,7 +144,11 @@ com.homesense
 검증: `UserStatusCacheServiceTest`(키·TTL·직렬화), `JwtAuthenticationFilterTest`(ACTIVE 통과, WITHDRAWN/
 SUSPENDED/캐시미스 전부 차단), `AuthServiceTest`/`UserServiceTest`(성공 경로에서 캐시 쓰기, 실패
 경로에서 미호출 검증). Redis 연결은 `LoginAttemptService`가 이미 요구하던 인프라라 이 변경으로 새로
-추가된 테스트 인프라 요구사항은 없다.
+추가된 테스트 인프라 요구사항은 없다 — **2026-09-22, Docker가 가동 중인 세션에서 `./gradlew
+integrationTest`로 실제 실행해 확인했다**(13개 MariaDB IT 클래스, 57 테스트 전부 그린 — `AuthService`/
+`UserService`가 실제 `UserStatusCacheService`+Redis와 함께 조립된 전체 Spring 컨텍스트로 도는 것까지
+검증됨, 그중 `AuthServiceMariaDbIT`/`AuthServiceReactivateMariaDbIT`/`UserServiceMariaDbIT`가 이 변경이
+건드린 두 서비스를 직접 실행한다).
 
 ### SVC-AUTH-01 구현 결정 사항
 프로그램 설계서 3.1절이 상세히 기술하지 않았거나 미확정으로 남겨둔 세부 사항을 구현 시점에 확정한 내용이다. 설계서 자체를 아직 갱신하지 못했으니, 설계서를 다시 볼 때는 아래 표를 함께 참고하고, 가능하면 설계서 쪽에도 반영하라.
