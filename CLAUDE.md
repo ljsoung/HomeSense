@@ -216,21 +216,39 @@ staleness는 DB만으로 인가하는 어떤 시스템에도 존재하는 환원
 "`REQUIRES_NEW` 격리 INSERT 게이트웨이 패턴" 절 참고) — 이번에도 "확률적 완화"에서 "원자적 연산으로
 구조적 제거"로 한 단계 더 간 것이다.
 
-**완결 필요(우선순위 낮음, 이번에 발견했으나 현재 도달 불가능해 고치지 않음) — 탈퇴 직후 짧은 시간
-안에 재로그인하면(현재는 재활성화, reactivate) 낡은 WITHDRAWN 캐시 때문에 최대 TTL(30분)만큼 오히려
-잠길 수 있다.** `reactivate()`는 (위 두 수정 이후) 성공해도 `ACTIVE`를 캐시에 쓰지 않는다 — 오직
-`UserStatusResolver`의 캐시미스 경로만 채운다. 그런데 `withdraw()`가 남긴 `WITHDRAWN` 캐시 엔트리가
-아직 TTL(최대 30분) 안에 있다면, reactivate() 성공 직후의 인증 요청은 **캐시 히트**(WITHDRAWN)라
-`UserStatusResolver`가 DB를 다시 확인하지 않고 그대로 차단한다 — 방금 도입한 `setIfAbsent`는 이 경로에
-전혀 관여하지 않는다(캐시 미스가 아니라 히트이기 때문). 즉 탈퇴 후 30분 안에 재활성화하면 그 사용자는
-자기 계정을 최대 30분 더 못 쓸 수 있다. **지금 당장 고치지 않는 이유:** `POST /api/auth/reactivate`를
-호출하는 프론트 화면이 아직 없어(CLAUDE.md SCR-LEGAL-01/AUTH-02 절 — "프론트엔드 철회 화면" 항목) 이
-경로 자체가 실사용자에게 아직 도달 불가능하다. 고칠 때는 `reactivate()`가 `reactivateIfWithinGrace()`
-성공 직후(같은 트랜잭션의 current read라 이 시점의 "ACTIVE"는 신선하다) 캐시를 명시적으로 evict하거나
-덮어쓰는 방법을 검토하되, 그 자체도 "reactivate 이후 곧바로 또 다른 withdraw가 온다"는 대칭적인 race를
-새로 만들 수 있다는 점을 놓치지 말 것 — 진짜 구조적으로 닫으려면 상태값에 버전/타임스탬프를 함께
-저장해 비교하는 CAS가 필요할 가능성이 높다. 프론트 철회 화면이 실제로 만들어지는 시점에 이 항목부터
-재검토하라.
+**완결 필요(우선순위 낮음, 이번에 발견했으나 지금 고치지 않음) — 탈퇴 직후 짧은 시간 안에
+재활성화(reactivate)하면 낡은 WITHDRAWN 캐시 때문에 최대 TTL(30분)만큼 오히려 잠길 수 있다.**
+`reactivate()`는 (위 두 수정 이후) 성공해도 `ACTIVE`를 캐시에 쓰지 않는다 — 오직 `UserStatusResolver`의
+캐시미스 경로만 채운다. 그런데 `withdraw()`가 남긴 `WITHDRAWN` 캐시 엔트리가 아직 TTL(최대 30분)
+안에 있다면, reactivate() 성공 직후의 인증 요청은 **캐시 히트**(WITHDRAWN)라 `UserStatusResolver`가
+DB를 다시 확인하지 않고 그대로 차단한다 — 방금 도입한 `setIfAbsent`는 이 경로에 전혀 관여하지 않는다
+(캐시 미스가 아니라 히트이기 때문). 즉 탈퇴 후 30분 안에 재활성화하면 그 사용자는 자기 계정을 최대
+30분 더 못 쓸 수 있다.
+
+**지금 당장 고치지 않는 더 정확한 이유(지성 정정) — "프론트가 안 불러서 안전"이 아니라 "이 엔드포인트
+자체가 아직 문서화된 MVP API 표면 밖에 있다".** `POST /api/auth/reactivate`는 프로그램설계서 3.1절
+`AuthController`의 문서화된 시그니처(signup/login/refresh/logout/check-email)에도, UI정의서 화면
+목록에도 없다 — 위 "BAT-USR-01 / SVC-AUTH-01.reactivate()" 절 제목 자체가 이미 "신규 제안 —
+프로그램목록서·설계서 미반영"이라고 명시하고 있다. 프론트 화면이 없다는 사실은 이 부재의 *결과*일
+뿐이지 안전성의 *근거*는 아니다 — 더 튼튼한 근거는 이 엔드포인트가 애초에 노출을 의도한 스펙 밖에
+있다는 사실 자체다. **참고(향후 확장 시) — 정지(SUSPENDED)에서 복구하는 경로가 필요해지면, 본인이
+호출하는 `/api/auth/reactivate`보다는 5단계 ADM 도메인의 `PATCH /api/admin/users`(관리자 전용)가
+문서상 더 자연스러운 자리일 수 있다** — ADM-01을 구현하며 이 엔드포인트를 실제로 연결할 때 한 번
+검토하라.
+
+**고칠 때의 방향(정정) — CAS/버전 관리가 아니라 evict-after-commit 리스너 하나로 충분하다.** 이전
+버전은 "eager write를 유지하되 무엇을 쓸지"로 문제를 좁혀 CAS(버전/타임스탬프 비교)가 필요하다고
+결론 냈는데, 이는 과한 처방이었다(지성 지적). `reactivate()`가 커밋 후 `ACTIVE`를 **쓰는** 대신 그
+사용자의 캐시 키를 **evict**하기만 하면 CAS 없이도 구조적으로 안전하다 — evict는 "특정 값을 미리
+써서 다른 쓰기와 경합하는" 방식이 아니라 "판단을 다시 진실의 원천(DB)에 위임하는" 방식이라, 이번에
+고친 것과 같은 클래스의 race가 애초에 발생할 지점이 없다. 다음 요청은 무조건 캐시미스가 되고,
+`UserStatusResolver`가 DB를 다시 읽어 `setIfAbsent`로 안전하게 채운다(위에서 이미 고친 경로를 그대로
+재사용). 이 프로젝트가 이미 문서화한 **evict-after-commit 패턴**
+(`@TransactionalEventListener(phase = AFTER_COMMIT, fallbackExecution = true)`, 위 "캐싱" 절의
+`CacheEvictionListener`와 같은 모양 — 커밋과 캐시 무효화 사이에 stale 재채움이 끼어들 여지를 없애려고
+AFTER_COMMIT에 건다)을 `withdraw()`가 아니라 `reactivate()` 쪽에 리스너 하나 추가하는 정도로 충분하다.
+프론트 재활성화(철회) 화면이 실제로 만들어지고 이 엔드포인트가 문서화된 API 표면에 들어오는 시점에
+이 항목부터 재검토하라.
 
 **남은 과제(완결 필요, 우선순위 중간) — 프론트 401→refresh 인터셉터 자체는 여전히 없다.** 이 절의
 세 수정 모두 백엔드가 스스로를 안전하게 지키도록 만든 것뿐이다 — 진짜 만료된 Access Token(캐시가
