@@ -297,6 +297,27 @@ class AuthServiceTest {
         authService.logout(1L, "token");
 
         assertThat(stored.isUsable()).isFalse();
+        verify(refreshTokenReuseHandler, never()).handle(any());
+    }
+
+    /**
+     * 코드리뷰 P1 지적 — 공격자가 탈취한 토큰으로 먼저 rotation해 후속 토큰을 쥔 뒤, 정상 사용자가
+     * 나중에 원래(이미 rotation된) 토큰으로 로그아웃을 시도하는 시나리오. 예전 코드는 이를 "이미
+     * 폐기된 토큰을 다시 폐기"하는 것으로만 보고 조용히 성공 처리해 공격자의 후속 토큰을 전혀
+     * 건드리지 않았다.
+     */
+    @Test
+    void logout_이미_rotation된_토큰이면_재사용_탐지로_전체_폐기하고_예외_없이_종료한다() {
+        User owner = mock(User.class);
+        when(owner.getUserId()).thenReturn(1L);
+        RefreshToken stored = RefreshToken.issue(owner, "hashed-token", LocalDateTime.now().plusDays(1));
+        ReflectionTestUtils.setField(stored, "rotatedYn", true);
+        when(refreshTokenHasher.hash("token")).thenReturn("hashed-token");
+        when(refreshTokenRepository.findByTokenValue("hashed-token")).thenReturn(Optional.of(stored));
+
+        authService.logout(1L, "token");
+
+        verify(refreshTokenReuseHandler).handle(1L);
     }
 
     // --- reactivate (탈퇴 철회) ---

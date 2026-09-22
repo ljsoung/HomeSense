@@ -30,19 +30,25 @@ import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.service.WithdrawalTestSeed;
 
 /**
- * SVC-AUTH-01.refreshAccessToken() Rotation의 동시성 전제를 실제 MariaDB 위에서 검증한다.
- * {@code AuthServiceTest}(Mockito)는 {@code revokeIfUnrevoked()}의 반환값을 직접 목킹해 "0이면
- * 재사용 탐지로 분기한다"까지만 증명한다 — 그 전제, 즉 "같은 Refresh Token으로 두 요청이 실제로
- * 동시에 재발급을 시도하면 정확히 하나만 1을, 다른 하나는 0을 받는다"는 실제 DB의 행 잠금 없이는
- * 증명할 수 없다.
+ * SVC-AUTH-01.refreshAccessToken() Rotation의 동시성 전제와, Rotation+logout()이 얽히는 재사용 탐지
+ * 시나리오를 실제 MariaDB 위에서 검증한다.
  *
- * <p>{@code TradeChunkLoaderMariaDbIT}/{@code AuthServiceMariaDbIT}와 달리 이 레이스는 별도의
- * {@code CountDownLatch} 오케스트레이션이 필요 없다 — {@code revokeIfUnrevoked()}의 UPDATE는
- * InnoDB에서 "current read"(잠금 읽기)라 REPEATABLE READ 스냅샷을 우회하고 항상 최신 커밋 상태를
- * 본다: 먼저 도착한 스레드가 그 행의 배타 잠금을 잡고 성공(1)하며, 늦게 도착한 스레드는 그 잠금이
- * 풀릴 때까지(=먼저 도착한 트랜잭션이 커밋할 때까지) 자연히 블록됐다가, 풀린 뒤 재평가한 WHERE절이
- * 이미 {@code revoked_yn=true}로 바뀐 걸 보고 0을 받는다 — 두 스레드를 그냥 동시에 제출하기만 하면
- * DB가 순서를 직렬화해 준다.
+ * <p><b>동시성 전제(첫 번째 테스트).</b> {@code AuthServiceTest}(Mockito)는 {@code revokeIfUnrevoked()}의
+ * 반환값을 직접 목킹해 "0이면 재사용 탐지로 분기한다"까지만 증명한다 — 그 전제, 즉 "같은 Refresh
+ * Token으로 두 요청이 실제로 동시에 재발급을 시도하면 정확히 하나만 1을, 다른 하나는 0을 받는다"는
+ * 실제 DB의 행 잠금 없이는 증명할 수 없다. {@code TradeChunkLoaderMariaDbIT}/{@code AuthServiceMariaDbIT}와
+ * 달리 이 레이스는 별도의 {@code CountDownLatch} 오케스트레이션이 필요 없다 — {@code revokeIfUnrevoked()}의
+ * UPDATE는 InnoDB에서 "current read"(잠금 읽기)라 REPEATABLE READ 스냅샷을 우회하고 항상 최신 커밋
+ * 상태를 본다: 먼저 도착한 스레드가 그 행의 배타 잠금을 잡고 성공(1)하며, 늦게 도착한 스레드는 그
+ * 잠금이 풀릴 때까지(=먼저 도착한 트랜잭션이 커밋할 때까지) 자연히 블록됐다가, 풀린 뒤 재평가한
+ * WHERE절이 이미 {@code revoked_yn=true}로 바뀐 걸 보고 0을 받는다 — 두 스레드를 그냥 동시에
+ * 제출하기만 하면 DB가 순서를 직렬화해 준다.
+ *
+ * <p><b>logout()의 재사용 탐지(두 번째 테스트).</b> {@code rotated_yn}이 실제 DB 컬럼에 원자적으로
+ * 반영되고, {@code AuthService.logout()}이 그 값을 정확히 읽어 분기하는지는 컬럼 매핑·JPQL 오타 같은
+ * 실수가 Mockito로는 절대 드러나지 않는 종류라(설정이 실제로 다 맞아야만 통과하는 회귀 테스트)
+ * 실 DB로 끝까지 태운다 — 공격자 역할로 실제 rotation을 한 번 호출해 후속 토큰을 만든 뒤, 정상
+ * 사용자 역할로 원래(이미 rotation된) 토큰으로 logout()을 호출해 그 후속 토큰까지 폐기되는지 확인한다.
  */
 @SpringBootTest
 @Testcontainers
@@ -139,5 +145,33 @@ class AuthServiceRefreshRotationMariaDbIT {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    /**
+     * 코드리뷰 P1 지적 — 공격자가 탈취한 토큰으로 먼저 rotation해 후속 토큰(공격자 세션)을 쥔 뒤,
+     * 정상 사용자가 나중에 원래(이미 rotation된) 토큰으로 로그아웃을 시도하면, 예전 코드는 이를 그냥
+     * "이미 폐기된 토큰을 다시 폐기하는 것"으로만 보고 조용히 성공 처리해 공격자의 후속 토큰을 전혀
+     * 건드리지 않았다.
+     */
+    @Test
+    void 이미_rotation된_토큰으로_로그아웃하면_후속_토큰까지_포함해_전부_폐기된다() throws Exception {
+        long userId = seed.user("victim@test.com", "unused-encoded-password", "ACTIVE", null);
+        String originalToken = jwtTokenProvider.createRefreshToken(userId);
+        seed.refreshToken(userId, refreshTokenHasher.hash(originalToken), false);
+        Thread.sleep(1100); // 위 첫 테스트와 같은 이유(JWT NumericDate 초 단위 절삭) — 시드 토큰과
+                             // rotation이 발급하는 후속 토큰이 같은 초에 서명되지 않게 한다.
+
+        // 공격자가 탈취한 originalToken으로 먼저 회전해 후속 토큰(공격자 세션)을 확보한다.
+        authService.refreshAccessToken(originalToken);
+        assertThat(seed.count("SELECT COUNT(*) FROM refresh_token WHERE user_id = ?", userId)).isEqualTo(2);
+
+        // 정상 사용자가 (공격자의 rotation을 모른 채) 원래 토큰으로 로그아웃을 시도한다 — 예외 없이
+        // 정상 종료돼야 한다(사용자 입장에선 "로그아웃"이 실패해 보이면 안 된다).
+        authService.logout(userId, originalToken);
+
+        // 공격자의 후속 토큰까지 포함해 이 사용자의 Refresh Token이 전부 폐기됐어야 한다.
+        assertThat(seed.count("SELECT COUNT(*) FROM refresh_token WHERE user_id = ? AND revoked_yn = FALSE", userId))
+                .isZero();
+        verify(auditLogger).logRefreshTokenReuseDetected(userId);
     }
 }

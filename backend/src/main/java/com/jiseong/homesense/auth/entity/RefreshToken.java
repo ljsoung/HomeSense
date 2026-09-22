@@ -47,6 +47,16 @@ public class RefreshToken {
     @Column(name = "revoked_yn", nullable = false)
     private boolean revokedYn;
 
+    /**
+     * 이 토큰이 revoked_yn=true가 된 원인이 rotation(=이 토큰으로 재발급이 성공해 후속 토큰이 이미
+     * 발급됨)이었는지 구분한다. 로그아웃이나 재사용 탐지의 일괄 폐기로 인한 revoked_yn=true와 구분해야
+     * 하는 이유는 {@link com.jiseong.homesense.auth.service.AuthService#logout} 참고 — 도메인
+     * 메서드로 세팅하지 않는다(항상 {@code RefreshTokenRepository#revokeIfUnrevoked}의 원자적 UPDATE가
+     * revoked_yn과 함께 같은 문장에서 세팅한다, TOCTOU 없이).
+     */
+    @Column(name = "rotated_yn", nullable = false)
+    private boolean rotatedYn;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -57,6 +67,7 @@ public class RefreshToken {
         this.tokenValue = tokenValue;
         this.expiresAt = expiresAt;
         this.revokedYn = false;
+        this.rotatedYn = false;
     }
 
     public static RefreshToken issue(User user, String tokenValue, LocalDateTime expiresAt) {
@@ -77,6 +88,10 @@ public class RefreshToken {
 
     public boolean isRevoked() {
         return revokedYn;
+    }
+
+    public boolean isRotated() {
+        return rotatedYn;
     }
 
     public boolean isExpired() {

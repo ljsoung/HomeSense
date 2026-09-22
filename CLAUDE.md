@@ -370,6 +370,70 @@ InnoDB의 락 대기가 스레드를 자연히 직렬화해 주므로(먼저 도
 **완결 필요** — 프로그램설계서 3.1절의 "Rotation 미적용" 문구를 이 구현에 맞게 갱신하는 것은 문서
 원본 반영 세션(claude.ai)에서 처리한다. 이 세션은 PR 요약과 이 결정 로그만 남긴다.
 
+### SVC-AUTH-01 logout() 재사용 탐지 공백 (2026-09-22, 같은 날 P1 코드리뷰) — `rotated_yn` 컬럼 신설
+
+**위 Rotation 구현이 놓친 구멍 — 공격자가 탈취한 토큰으로 먼저 rotation하면, 정상 사용자의 `logout()`이
+그 후속 토큰(공격자 세션)을 전혀 건드리지 못한 채 조용히 성공했다.** 시나리오: 공격자가 탈취한
+Refresh Token(T1)으로 `refreshAccessToken()`을 먼저 호출해 rotation에 성공 — T1은 `revoked_yn=true`가
+되고 공격자는 새 토큰 T2를 쥔다. 그 사이 정상 사용자는 (아직 살아있는 Access Token으로) 자기 세션을
+끝내려고 원래 T1으로 `logout()`을 호출한다 — 기존 코드는 `findByTokenValue()`로 T1을 찾아 소유자
+검증을 통과시키고 `stored.revoke()`를 부르는데, T1은 이미 `revoked_yn=true`라 이 호출은 그냥 아무
+의미 없는 재확인일 뿐이었다 — **T2에 대해서는 아무 일도 일어나지 않고, `logout()`은 예외 없이
+정상 종료된다.** 즉 정상 사용자는 "로그아웃했다"고 믿지만 공격자의 세션(T2)은 살아남아, 계속
+회전시키며 사실상 무기한 접근을 유지할 수 있었다.
+
+**두 가지 수정 방향(코드리뷰가 제시)을 검토했다: (1) rotation family linkage(부모-자식 토큰 체인
+추적), (2) logout()이 이미 폐기된 제출 토큰을 재사용으로 취급.** (1)은 self-referencing FK나 family
+ID 같은 스키마 확장과 체인 순회 로직이 필요해 이 프로젝트 단계에 비해 과한 처방이라고 판단했다(YAGNI
+— 이 버그를 고치는 데 체인 전체를 추적할 필요는 없다, "이 토큰이 rotation으로 교체됐는가" 하나만
+알면 충분하다). **(2)를 그대로 적용하면 새로운 문제가 생긴다** — `revoked_yn=true`는 rotation
+때문일 수도, 단순 중복 로그아웃(더블클릭·네트워크 재시도로 흔히 발생) 때문일 수도, 이미 재사용 탐지로
+전체 폐기됐기 때문일 수도 있는데, DB에 이 셋을 구분할 정보가 없으면 (2)는 평범한 중복 로그아웃까지
+매번 "이 사용자의 다른 모든 세션을 강제 로그아웃"시키는 과잉 반응이 된다 — refresh(드문 경쟁)와
+달리 logout은 클라이언트가 자주 재시도하는 성격의 엔드포인트라 이 부작용이 실제로 자주 트리거될
+위험이 있다.
+
+**최종 결정: `refresh_token.rotated_yn`(BOOLEAN NOT NULL DEFAULT FALSE) 신설 — "이 토큰이 rotation으로
+교체됐는가"만 구분하는 최소 정보.** `RefreshTokenRepository.revokeIfUnrevoked()`가 `revoked_yn`과
+`rotated_yn`을 **같은 UPDATE 문에서 함께** true로 세팅한다(원자적 — 별도 쿼리로 나누면 그 사이
+"revoked=true인데 rotated=false"인 순간이 관측될 수 있다). 이 플래그를 세팅하는 지점은 오직 여기
+하나뿐이다 — `logout()`의 평범한 `stored.revoke()`도, 재사용 탐지의 `revokeAllByUserId()`도
+`rotated_yn`을 건드리지 않는다(둘 다 기본값 `false`로 남는다). 이렇게 하면:
+- 평범한 중복 로그아웃(`rotated_yn=false`인 채로 `revoked_yn=true`) → `logout()`은 조용히 재확인만
+  하고 넘어간다(기존 동작 그대로, 과잉 반응 없음).
+- 이미 재사용 탐지로 전체 폐기된 토큰(`rotated_yn=false`) → 마찬가지로 재트리거하지 않는다 — 그
+  가족은 첫 탐지 시점에 이미 다 죽었으므로 추가로 할 일이 없다.
+- **rotation으로 교체된 토큰(`rotated_yn=true`)** → `logout()`이 이 경우만 정확히 골라내
+  `RefreshTokenReuseHandler.handle(userId)`(기존 클래스 재사용, 새 클래스 없음)로 위임해 그 사용자의
+  Refresh Token을 전부 폐기한다. 호출자(정상 사용자)에게는 여전히 예외 없는 정상 종료로 보인다 —
+  "로그아웃"이 의도한 결과(내 세션이 끝난다)를 오히려 더 강하게 충족시키기 때문이다(공격자 세션까지
+  함께 끊긴다).
+
+**`RefreshTokenReuseHandler`를 `logout()`에서 부를 때는 `refreshAccessToken()`이 겪었던 자기 교착
+걱정이 없다 — 그 클래스의 안전 조건을 다시 확인한 결과다.** 실제 필요 조건은 "호출자에게 열린
+트랜잭션이 전혀 없어야 한다"가 아니라 "호출자가 이 사용자의 refresh_token 행 중 어느 것에도 아직
+락을 쥐고 있지 않아야 한다"는 것이다 — `logout()`은 이 호출 전까지 `findByTokenValue()`(비잠금
+SELECT)만 수행하고 `revokeIfUnrevoked()` 같은 조건부 UPDATE를 거치지 않으므로, 클래스 레벨
+`@Transactional`(REQUIRED)이 열려 있어도 안전하다(애초에 어떤 행도 잠근 적이 없다). 그래서 `logout()`은
+`refreshAccessToken()`처럼 `NOT_SUPPORTED`+별도 자기완결 트랜잭션으로 재구성할 필요가 없었다 — 이
+차이를 `RefreshTokenReuseHandler`의 javadoc에 명시해, 다음 호출부를 추가할 때 "트랜잭션이 아예
+없어야 한다"는 더 강한 요구로 오해해 불필요하게 패턴을 복제하지 않도록 해뒀다.
+
+**스키마 변경 3곳 동기화** — 프로덕션 배포가 아직 없어(로컬 전용) ALTER 마이그레이션 없이 DDL
+자체를 고쳤다: `schema_all.sql`(v2.2, 변경 이력 주석 추가), `testcontainers/user-withdraw-schema.sql`,
+`testcontainers/withdrawn-user-purge-schema.sql`. `WithdrawalTestSeed.refreshToken()`의 INSERT는
+컬럼을 명시적으로 나열하지 않는 컬럼에 DEFAULT가 적용되므로 수정 불필요.
+
+검증: `AuthServiceTest`(logout이 `rotated_yn=false`면 기존대로 `revoke()`만 하고 핸들러를 부르지
+않음, `rotated_yn=true`(ReflectionTestUtils로 세팅)면 핸들러를 부르고 예외 없이 종료), 신규
+`AuthServiceRefreshRotationMariaDbIT` 테스트 케이스(공격자 역할로 실제 rotation 호출 → 정상 사용자
+역할로 원래 토큰으로 logout() → 후속 토큰까지 포함해 이 사용자의 Refresh Token이 전부 폐기됨을 커밋된
+DB 상태로 확인, `AuditLogger.logRefreshTokenReuseDetected` 호출도 함께 확인). `./gradlew test`(533
+테스트)와 `./gradlew integrationTest`(59 테스트) 전부 그린.
+
+**완결 필요** — 이 컬럼도 프로그램설계서 3.1절 문서 원본 반영 시 함께 언급해야 한다(문서 반영은
+claude.ai 세션에서 별도 진행).
+
 ### SVC-USER-01 구현 결정 사항
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |

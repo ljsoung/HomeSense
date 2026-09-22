@@ -176,11 +176,31 @@ public class AuthService {
         };
     }
 
+    /**
+     * 제출된 토큰이 이미 rotation으로 교체된 상태({@code stored.isRotated()})라면 그냥 조용히
+     * 성공(no-op)시키지 않는다 — 이는 "내가 모르는 사이 이 토큰으로 재발급이 이미 성공해 후속
+     * 토큰이 존재한다"는 뜻이라, 탈취된 사본이 그 사이 사용됐을 강한 신호다(코드리뷰 P1 지적: 공격자가
+     * 훔친 토큰으로 먼저 회전해 새 토큰을 쥔 뒤, 정상 사용자가 나중에 원래 토큰으로 로그아웃을 호출하면
+     * 이 메서드가 "이미 폐기된 토큰을 다시 폐기"하는 것으로만 보여 그 후속 토큰(공격자 세션)을 전혀
+     * 건드리지 않은 채 성공을 반환하고 있었다). {@link RefreshTokenReuseHandler}로 위임해
+     * {@code refreshAccessToken()}의 재사용 탐지와 동일하게 해당 사용자의 Refresh Token을 전부
+     * 폐기한다 — 호출자(로그아웃을 시도한 정상 사용자)에게는 여전히 정상 종료(예외 없음)로 보이는데,
+     * "로그아웃"이 의도한 결과(내 세션이 끝난다)를 오히려 더 강하게 충족시키기 때문이다(공격자
+     * 세션까지 함께 끊긴다). 이 호출은 {@code refreshAccessToken()}의 재사용 탐지와 달리 이 메서드
+     * 자신의 트랜잭션 안에서 그대로 REQUIRES_NEW를 불러도 안전하다 — 여기까지 오는 동안 이 메서드가
+     * 수행한 건 비잠금 SELECT뿐이라(revokeIfUnrevoked 같은 조건부 UPDATE를 거치지 않는다) 붙잡고 있는
+     * 락이 없고, 새 트랜잭션이 필요한 락을 즉시 잡을 수 있다 — RefreshTokenRotator처럼 별도의 자기완결
+     * 트랜잭션으로 분리할 필요가 없다(자세한 이유는 RefreshTokenReuseHandler의 javadoc 참고).
+     */
     public void logout(Long userId, String refreshTokenValue) {
         RefreshToken stored = refreshTokenRepository.findByTokenValue(refreshTokenHasher.hash(refreshTokenValue))
                 .orElseThrow(InvalidRefreshTokenException::new);
         if (!stored.getUser().getUserId().equals(userId)) {
             throw new InvalidRefreshTokenException();
+        }
+        if (stored.isRotated()) {
+            refreshTokenReuseHandler.handle(userId);
+            return;
         }
         stored.revoke();
     }

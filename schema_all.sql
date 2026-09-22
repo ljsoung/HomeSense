@@ -91,7 +91,10 @@ CREATE TABLE batch_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='배치실행이력';
 
 -- ----------------------------------------------------------------------------
--- refresh_token (리프레시토큰)  ENT-AUTH-01  [변경 없음]
+-- refresh_token (리프레시토큰)  ENT-AUTH-01  [v2.2 변경]
+-- v2.2: rotated_yn 추가 — API-AUTH-01 Refresh Token Rotation(2026-09-22). revoked_yn=true가
+-- rotation(후속 토큰 발급 성공)으로 인한 것인지 구분한다. 로그아웃이 이미 rotation된 토큰을
+-- 제출받으면 재사용 탐지로 전환하는 데 쓰인다(CLAUDE.md SVC-AUTH-01 Refresh Token Rotation 절 참고).
 -- ----------------------------------------------------------------------------
 CREATE TABLE refresh_token (
     refresh_token_id  BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
@@ -99,6 +102,7 @@ CREATE TABLE refresh_token (
     token_value       VARCHAR(255)     NOT NULL,
     expires_at        DATETIME         NOT NULL,
     revoked_yn        BOOLEAN          NOT NULL,
+    rotated_yn        BOOLEAN          NOT NULL DEFAULT FALSE,
     created_at        DATETIME         NOT NULL,
     PRIMARY KEY (refresh_token_id),
     UNIQUE KEY uk_refresh_token_value (token_value),

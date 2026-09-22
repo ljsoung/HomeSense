@@ -49,8 +49,15 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
      * 읽는 코드가 없어 clear로 얻을 이점도 없다. {@code flushAutomatically}는 방어적으로 유지한다
      * (호출 시점에 flush할 대상이 없어 지금은 사실상 no-op이지만, 다른 형제 메서드들과의 일관성을
      * 위해).
+     *
+     * <p>{@code rotatedYn}도 같은 UPDATE 문에서 함께 true로 세팅한다 — revoked_yn과 별도 쿼리로
+     * 나누면 그 사이에 이 행을 들여다보는 다른 트랜잭션이 "revoked=true인데 rotated=false"인 순간을
+     * 관측할 수 있다(코드리뷰 P1 지적: 탈취된 옛 토큰으로 `logout()`이 호출됐을 때 이 플래그로
+     * "이미 rotation됨"을 판정하는데, 그 판정이 이 원자성에 의존한다 — {@code AuthService#logout}
+     * 참고).
      */
     @Modifying(flushAutomatically = true)
-    @Query("UPDATE RefreshToken r SET r.revokedYn = true WHERE r.refreshTokenId = :id AND r.revokedYn = false")
+    @Query("UPDATE RefreshToken r SET r.revokedYn = true, r.rotatedYn = true "
+            + "WHERE r.refreshTokenId = :id AND r.revokedYn = false")
     int revokeIfUnrevoked(@Param("id") Long refreshTokenId);
 }

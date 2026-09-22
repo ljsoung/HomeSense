@@ -10,12 +10,21 @@ import com.jiseong.homesense.common.logging.AuditLogger;
 import lombok.RequiredArgsConstructor;
 
 /**
- * SVC-AUTH-01.refreshAccessToken() 재사용 탐지 전용 — 반드시 호출자({@link AuthService#
- * refreshAccessToken})가 아무 트랜잭션도 열려 있지 않은 상태에서 불러야 한다. 이 요구사항은 실제
- * 동시성 IT({@code AuthServiceRefreshRotationMariaDbIT})로 두 단계에 걸쳐 발견·확정됐다 — 처음엔
- * 아래 이유들을 모른 채 {@link com.jiseong.homesense.auth.service.RefreshTokenRotator}의 트랜잭션이
- * 아직 열려 있는 도중(자기 자신이 방금 실패한 조건부 UPDATE로 잠가 둔 그 행이 살아있는 채로) 이 클래스를
- * 호출했다가 자기 자신과 교착(self-deadlock)해 IT가 타임아웃으로 실패했다.
+ * SVC-AUTH-01 재사용 탐지 전용 — 정확한 안전 조건은 "호출자에게 열린 트랜잭션이 전혀 없어야 한다"가
+ * 아니라 "호출자가 이 사용자의 refresh_token 행 중 어느 것에도 아직 락을 쥐고 있지 않아야 한다"다.
+ * 이 요구사항은 실제 동시성 IT({@code AuthServiceRefreshRotationMariaDbIT})로 두 단계에 걸쳐
+ * 발견·확정됐다 — 처음엔 아래 이유들을 모른 채 {@link com.jiseong.homesense.auth.service.RefreshTokenRotator}의
+ * 트랜잭션이 아직 열려 있는 도중(자기 자신이 방금 실패한 조건부 UPDATE로 잠가 둔 그 행이 살아있는
+ * 채로) 이 클래스를 호출했다가 자기 자신과 교착(self-deadlock)해 IT가 타임아웃으로 실패했다.
+ *
+ * <p>현재 호출부는 둘이다. {@link AuthService#refreshAccessToken}은 검증+회전 시도 전체를
+ * {@link RefreshTokenRotator}(자기완결 트랜잭션)에 위임하고 자신은 {@code NOT_SUPPORTED}로 트랜잭션
+ * 자체를 열지 않는다 — 아래 (3)의 교착을 실제로 겪었던 경로라 가장 보수적으로 "트랜잭션 자체가 없음"을
+ * 보장한다. {@link AuthService#logout}은 이 메서드를 부르기 전까지 {@code findByTokenValue()}(비잠금
+ * SELECT)만 수행하므로 — {@code revokeIfUnrevoked()} 같은 조건부 UPDATE를 거치지 않는다 — 클래스
+ * 레벨 {@code @Transactional}(REQUIRED)이 열려 있어도 안전하다: 애초에 어떤 행도 잠근 적이 없기
+ * 때문이다. 새 호출부를 추가할 때는 이 조건(그 시점까지 잠근 행이 있는가)만 확인하면 되고, "트랜잭션이
+ * 아예 없어야 한다"는 더 강한 요구로 오해해 불필요하게 NOT_SUPPORTED 패턴을 복제하지 않아도 된다.
  *
  * <p>(1) <b>가시성</b> — 같은 Refresh Token으로 두 요청이 경쟁해 진 쪽(loser)의 트랜잭션은 REPEATABLE
  * READ 스냅샷을 이긴 쪽(winner)이 커밋하기 훨씬 전에 이미 열어 뒀다. winner가 새로 INSERT한 행은

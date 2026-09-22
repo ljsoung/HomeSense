@@ -23,6 +23,7 @@ CREATE TABLE refresh_token (
     token_value VARCHAR(255) NOT NULL UNIQUE,
     expires_at DATETIME NOT NULL,
     revoked_yn BOOLEAN NOT NULL,
+    rotated_yn BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME NOT NULL,
     CONSTRAINT fk_refresh_token_user_id FOREIGN KEY (user_id)
         REFERENCES user (user_id) ON UPDATE RESTRICT ON DELETE CASCADE
