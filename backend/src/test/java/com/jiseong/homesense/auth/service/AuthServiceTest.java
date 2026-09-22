@@ -63,6 +63,10 @@ class AuthServiceTest {
     private RefreshTokenHasher refreshTokenHasher;
     @Mock
     private LoginAttemptService loginAttemptService;
+    @Mock
+    private RefreshTokenRotator refreshTokenRotator;
+    @Mock
+    private RefreshTokenReuseHandler refreshTokenReuseHandler;
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 12, 0, 0);
@@ -76,7 +80,8 @@ class AuthServiceTest {
         WithdrawalPolicy withdrawalPolicy = new WithdrawalPolicy(Clock.fixed(NOW.atZone(KST).toInstant(), KST),
                 new WithdrawalProperties(GRACE_DAYS, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
         authService = new AuthService(userRepository, refreshTokenRepository, passwordEncoder,
-                jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy);
+                jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy,
+                refreshTokenRotator, refreshTokenReuseHandler);
     }
 
     @Test
@@ -222,97 +227,41 @@ class AuthServiceTest {
         verify(loginAttemptService).reset("user@test.com");
     }
 
+    /*
+     * refreshAccessToken()은 이제 검증+회전 로직을 RefreshTokenRotator.attempt()에 전부 위임하는 얇은
+     * 오케스트레이터다 — malformed/만료/계정 비활성/성공 회전 등 세부 분기는 RefreshTokenRotatorTest가
+     * 담당하고, 여기서는 attempt()의 두 결과(Rotated/ReuseDetected)에 대한 이 메서드 자신의 분기만
+     * 검증한다.
+     */
     @Test
-    void refresh_토큰_형식이_유효하지_않으면_InvalidRefreshTokenException을_던진다() {
-        when(jwtTokenProvider.validateToken("malformed")).thenReturn(false);
+    void refresh_회전에_성공하면_Rotator의_결과를_그대로_반환하고_ReuseHandler를_부르지_않는다() {
+        TokenResponse tokenResponse = new TokenResponse("access", "refresh", 1800L);
+        when(refreshTokenRotator.attempt("valid")).thenReturn(new RefreshRotationResult.Rotated(tokenResponse));
+
+        TokenResponse response = authService.refreshAccessToken("valid");
+
+        assertThat(response).isEqualTo(tokenResponse);
+        verify(refreshTokenReuseHandler, never()).handle(any());
+    }
+
+    @Test
+    void refresh_재사용이_탐지되면_ReuseHandler를_부른_뒤_InvalidRefreshTokenException을_던진다() {
+        when(refreshTokenRotator.attempt("revoked")).thenReturn(new RefreshRotationResult.ReuseDetected(1L));
+
+        assertThatThrownBy(() -> authService.refreshAccessToken("revoked"))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+
+        verify(refreshTokenReuseHandler).handle(1L);
+    }
+
+    @Test
+    void refresh_Rotator가_던진_예외는_그대로_전파된다() {
+        when(refreshTokenRotator.attempt("malformed")).thenThrow(new InvalidRefreshTokenException());
 
         assertThatThrownBy(() -> authService.refreshAccessToken("malformed"))
                 .isInstanceOf(InvalidRefreshTokenException.class);
 
-        verify(jwtTokenProvider, never()).isAccessToken(anyString());
-    }
-
-    @Test
-    void refresh_Access_Token이_제출되면_InvalidRefreshTokenException을_던진다() {
-        when(jwtTokenProvider.validateToken("access-token")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("access-token")).thenReturn(true);
-
-        assertThatThrownBy(() -> authService.refreshAccessToken("access-token"))
-                .isInstanceOf(InvalidRefreshTokenException.class);
-
-        verify(refreshTokenRepository, never()).findByTokenValue(anyString());
-    }
-
-    @Test
-    void refresh_DB에_없는_토큰이면_InvalidRefreshTokenException을_던진다() {
-        when(jwtTokenProvider.validateToken("unknown")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("unknown")).thenReturn(false);
-        when(refreshTokenHasher.hash("unknown")).thenReturn("hashed-unknown");
-        when(refreshTokenRepository.findByTokenValue("hashed-unknown")).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> authService.refreshAccessToken("unknown"))
-                .isInstanceOf(InvalidRefreshTokenException.class);
-    }
-
-    @Test
-    void refresh_폐기된_토큰이면_InvalidRefreshTokenException을_던진다() {
-        User user = User.createUser("user@test.com", "encoded", "닉네임");
-        RefreshToken revoked = RefreshToken.issue(user, "hashed-revoked", LocalDateTime.now().plusDays(1));
-        revoked.revoke();
-        when(jwtTokenProvider.validateToken("revoked")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("revoked")).thenReturn(false);
-        when(refreshTokenHasher.hash("revoked")).thenReturn("hashed-revoked");
-        when(refreshTokenRepository.findByTokenValue("hashed-revoked")).thenReturn(Optional.of(revoked));
-
-        assertThatThrownBy(() -> authService.refreshAccessToken("revoked"))
-                .isInstanceOf(InvalidRefreshTokenException.class);
-    }
-
-    @Test
-    void refresh_만료된_토큰이면_InvalidRefreshTokenException을_던진다() {
-        User user = User.createUser("user@test.com", "encoded", "닉네임");
-        RefreshToken expired = RefreshToken.issue(user, "hashed-expired", LocalDateTime.now().minusMinutes(1));
-        when(jwtTokenProvider.validateToken("expired")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("expired")).thenReturn(false);
-        when(refreshTokenHasher.hash("expired")).thenReturn("hashed-expired");
-        when(refreshTokenRepository.findByTokenValue("hashed-expired")).thenReturn(Optional.of(expired));
-
-        assertThatThrownBy(() -> authService.refreshAccessToken("expired"))
-                .isInstanceOf(InvalidRefreshTokenException.class);
-    }
-
-    @Test
-    void refresh_탈퇴하거나_정지된_계정이면_AccountNotActiveException을_던진다() {
-        User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
-        withdrawnUser.withdraw(NOW);
-        RefreshToken stored = RefreshToken.issue(withdrawnUser, "hashed-token", LocalDateTime.now().plusDays(1));
-        when(jwtTokenProvider.validateToken("token")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("token")).thenReturn(false);
-        when(refreshTokenHasher.hash("token")).thenReturn("hashed-token");
-        when(refreshTokenRepository.findByTokenValue("hashed-token")).thenReturn(Optional.of(stored));
-
-        assertThatThrownBy(() -> authService.refreshAccessToken("token"))
-                .isInstanceOfSatisfying(AccountNotActiveException.class,
-                        e -> assertThat(e.errorCode()).isEqualTo("ACCOUNT_WITHDRAWN"));
-
-        verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
-    }
-
-    @Test
-    void refresh_성공하면_새_Access_Token만_발급한다() {
-        User user = User.createUser("user@test.com", "encoded", "닉네임");
-        RefreshToken valid = RefreshToken.issue(user, "hashed-valid", LocalDateTime.now().plusDays(1));
-        when(jwtTokenProvider.validateToken("valid")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("valid")).thenReturn(false);
-        when(refreshTokenHasher.hash("valid")).thenReturn("hashed-valid");
-        when(refreshTokenRepository.findByTokenValue("hashed-valid")).thenReturn(Optional.of(valid));
-        when(jwtTokenProvider.createAccessToken(any(), eq("USER"))).thenReturn("new-access-token");
-
-        TokenResponse response = authService.refreshAccessToken("valid");
-
-        assertThat(response.accessToken()).isEqualTo("new-access-token");
-        assertThat(response.expiresIn()).isEqualTo(1800L);
-        verify(jwtTokenProvider, never()).createRefreshToken(anyLong());
+        verify(refreshTokenReuseHandler, never()).handle(any());
     }
 
     @Test

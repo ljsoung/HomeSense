@@ -280,6 +280,96 @@ boolean만으로 SecurityContext 설정 여부 결정), `UserServiceTest`(withdr
 | 로그인 실패 잠금(5회/5분) | "신규 제안, 반영 전 검토 필요"로 미확정 표시 | 사용자 확인 후 구현 확정. Redis 키(`login:fail:{email}`)의 TTL을 **실패마다 5분으로 다시 건다** — 첫 실패 시점 고정 만료가 아니라 마지막 실패로부터 5분 뒤 잠금이 풀리는 슬라이딩 윈도우 | 설계서 문구("약 5분 TTL로 잠금")가 고정/슬라이딩 여부를 명시하지 않아, 마지막 시도 기준으로 5분을 보장하는 쪽이 사용자에게 더 예측 가능하다고 판단해 슬라이딩으로 결정(`LoginAttemptService.recordFailure()`) |
 | `logout()` 소유자 검증 | 설계서 3.1절에 세부 로직 없음(시그니처만 `logout(Long userId, String refreshTokenValue)`) | 조회된 Refresh Token의 소유자(`user_id`)가 인자로 받은 `userId`와 다르면 `InvalidRefreshTokenException` | 시그니처가 굳이 `userId`를 받는 이유가 이 검증 외엔 없고, FAV 도메인 등 다른 프로그램의 "소유자 검증 후 삭제" 패턴과 일관됨(`AuthService.logout()`) |
 
+### SVC-AUTH-01 Refresh Token Rotation + 재사용 탐지 (2026-09-22)
+
+**배경.** 프로그램설계서 3.1절이 `refreshAccessToken()`을 "신규 Access Token만 발급한다(Refresh Token은
+재사용 — Rotation 미적용, NFR-4 참고)"로 명시하고 있었다 — 즉 탈취된 Refresh Token은 만료(14일)까지
+무제한 재사용이 가능했다. 이 절이 그 갭을 closed 상태로 옮긴다: Rotation(재발급마다 기존 토큰 폐기 +
+새 토큰 발급) + 재사용 탐지(이미 폐기된 토큰으로 재발급이 시도되면 탈취 신호로 보고 해당 사용자의
+Refresh Token을 전부 폐기)를 구현했다. **설계서 3.1절 문구 자체는 이 세션에서 고치지 않았다** —
+사용자 지시에 따라 문서 원본(claude.ai Project Knowledge) 반영은 별도 claude.ai 세션에서 진행하고,
+여기서는 코드와 이 결정 로그만 남긴다.
+
+**최종 구조 — 세 개의 새 클래스로 나뉜 이유가 단순한 리팩터링 취향이 아니라 세 가지 실제 버그를
+순서대로 잡아가며 굳어진 결과다(아래 "겪은 문제" 참고).**
+
+| 클래스 | 역할 | 트랜잭션 |
+| --- | --- | --- |
+| `RefreshTokenRotator`(신규, `auth.service`) | 검증(형식·만료·계정 상태) + 원자적 회전 시도. 결과를 `RefreshRotationResult`(sealed interface: `Rotated`/`ReuseDetected`)로 반환한다 | `@Transactional`(REQUIRED, 자기완결) |
+| `AuthService.refreshAccessToken()` | `RefreshTokenRotator`를 부르고 결과에 따라 분기하는 얇은 오케스트레이터. 실제 DB 작업을 전혀 하지 않는다 | `@Transactional(propagation = NOT_SUPPORTED)` — 의도적으로 트랜잭션을 열지 않는다 |
+| `RefreshTokenReuseHandler`(신규, `auth.service`) | 재사용 탐지 시 해당 사용자의 Refresh Token 전부 폐기(`RefreshTokenRepository.revokeAllByUserId()` 재사용) + `AuditLogger.logRefreshTokenReuseDetected()` | `@Transactional(propagation = REQUIRES_NEW)` |
+
+`RefreshTokenRepository.revokeIfUnrevoked(refreshTokenId)`(신규, 조건부 UPDATE `WHERE refresh_token_id=:id
+AND revoked_yn=false`, affected rows로 판정)가 "이미 폐기됨"의 판정과 폐기 자체를 원자적으로 묶는다 —
+`stored.isRevoked()`로 먼저 읽고 나서 revoke하는 TOCTOU 패턴을 쓰지 않는다(`UserRepository.
+reactivateIfWithinGrace`와 같은 "affected rows로 경합 판정" 패턴). `RefreshToken` 엔티티에 `isRevoked()`/
+`isExpired()`를 신설했다(기존 `isUsable()`은 `!isRevoked() && !isExpired()`로 재정의 — 하위 호환).
+`TokenResponse`에 `refreshToken` 필드를 추가해 `LoginResponse`와 필드 순서(`accessToken, refreshToken,
+expiresIn`)를 통일했다.
+
+**만료 vs 폐기를 서비스 레이어에서 명확히 분기한다(요구사항 3번).** `stored.isExpired()`는
+`revokeIfUnrevoked()`를 시도하지도 않고 곧바로 `InvalidRefreshTokenException`을 던진다(재사용 탐지
+미발동) — 평범한 재로그인 유도 상황이다. 반면 `revokeIfUnrevoked()`가 0을 반환하면(이미 `revoked_yn=
+true`) `ReuseDetected`로 이어진다. 두 경로 모두 응답은 같은 401(`InvalidRefreshTokenException`)로
+통일해 공격자에게 탐지 사실을 드러내지 않는다(요구사항 2번 "재로그인 유도, 문구 구분 안 함") — 실제
+구분은 `AuditLogger.logRefreshTokenReuseDetected(userId)`(신규, COM-LOG-01)에만 남는다.
+
+**겪은 문제 세 가지 — 전부 `AuthServiceRefreshRotationMariaDbIT`(신규, Testcontainers, 동시 두 요청이
+같은 토큰으로 경쟁)로만 발견됐다. Mockito 단위 테스트(`RefreshTokenRotatorTest`)는 이 중 어느 것도
+잡지 못했을 것이다 — 셋 다 "여러 트랜잭션이 실제로 겹칠 때"만 드러나는 종류다.**
+
+1. **JWT NumericDate 초 단위 절삭(테스트 아티팩트, 프로덕션 버그 아님, 그래도 처음엔 진짜 버그로
+   오인했다).** IT가 시드한 "구" 토큰과 회전으로 발급되는 "신" 토큰이 `token_value` UNIQUE 제약을
+   위반했다 — 원인을 처음엔 밀리초 단위 시계 해상도로 추측해 10ms→100ms로 늘려봤지만 둘 다 불충분했다.
+   실제 원인은 JWT의 `iat`/`exp` 클레임(RFC 7519 NumericDate)이 **초 단위**로 잘린다는 사실 — 같은
+   사용자에 대해 같은 초 안에 두 번 서명하면 헤더+페이로드+서명까지 완전히 동일한 토큰 문자열이
+   나온다. IT는 시드와 회전 시도 사이에 1.1초를 넣어 피한다. **실제 운영에서는 로그인과 재발급 사이에
+   최소 수 초~수 분이 지나 이 충돌이 사실상 발생하지 않는다** — 이 프로젝트 코드의 결함이 아니라 IT가
+   "로그인 직후 곧바로 재발급"이라는 비현실적으로 빠른 시나리오를 만들어서 드러난 테스트 전용 현상이다.
+2. **REPEATABLE READ phantom row — `REQUIRES_NEW`만으로는 승자(winner)의 새 토큰이 재사용 탐지의
+   전체 폐기를 피해 간다.** 패자(loser)의 트랜잭션은 winner가 커밋하기 훨씬 전에 이미 스냅샷을 열어
+   뒀다 — `revokeIfUnrevoked()`가 그 스냅샷을 우회해 "현재" 값을 보는 건 그 UPDATE가 winner가 잠근
+   바로 그 행에서 잠금 대기 후 재확인하기 때문이지, loser 트랜잭션 전체가 최신 상태를 보게 되는 게
+   아니다. `REQUIRES_NEW`(당시엔 `RefreshTokenReuseHandler` 하나만 있었고 `RefreshTokenRotator`는
+   아직 분리 전이었다)로 새 트랜잭션을 열면 이 phantom 문제는 해결됐다 — 그 새 트랜잭션은 winner의
+   커밋 이후 시작하는 새 스냅샷에서 출발하기 때문이다. IT의 "`revoked_yn=FALSE` 건수는 0이어야 한다"
+   단언이 이 버그를 잡았다(고치기 전엔 1이 나왔다 — winner의 새 토큰이 살아남았다는 뜻).
+3. **자기 교착(self-deadlock) — (2)의 수정만으로는 IT가 여전히 타임아웃으로 실패했다.**
+   `revokeIfUnrevoked()`가 0건을 갱신했더라도(조건절이 안 맞아서) InnoDB는 WHERE절을 평가하려 그 행을
+   조회하는 과정에서 이미 배타 락을 걸어 둔다 — 이 락은 loser의 바깥쪽 트랜잭션이 끝날 때까지 풀리지
+   않는다. 그 트랜잭션이 열려 있는 채로 `REQUIRES_NEW`로 `RefreshTokenReuseHandler`를 부르면, 새
+   트랜잭션의 `revokeAllByUserId()`가 정확히 그 같은 행을 다시 잠그려다 자기 자신(같은 애플리케이션
+   스레드, 다른 DB 커넥션)과 교착한다 — 두 트랜잭션 다 "락을 기다리는 중"이지 "다른 락을 요청하며
+   대기 중"이 아니라서 InnoDB의 데드락 탐지기가 이 사이클을 못 잡고, `innodb_lock_wait_timeout`(기본
+   50초)까지 그냥 멈춘다. `REQUIRES_NEW` 자체로는 풀 수 없는 문제였다 — 호출자가 이 메서드를 부르기
+   *전에* 자신의 트랜잭션을 완전히 끝내야 한다는 게 결론이었고, 이것이 위 표의 최종 3-클래스 구조(
+   `RefreshTokenRotator`를 별도 자기완결 트랜잭션으로 분리하고 `AuthService.refreshAccessToken()`은
+   `NOT_SUPPORTED`로 트랜잭션 자체를 열지 않는다)로 이어졌다.
+
+**이 프로젝트가 REQUIRES_NEW 게이트웨이 패턴(TradeInsertGateway 등)을 원자적 upsert로 교체한 선례와
+모순되지 않는다** — 그때는 "UNIQUE 위반을 피해 INSERT 하나만 격리"하려다 스냅샷 문제를 새로 만든 것이
+문제였다(재시도 로직이 필요 없어져야 했는데 남아 있었다). 여기는 재시도가 전혀 없고 "호출자가 이미
+트랜잭션을 끝낸 뒤, 최신 커밋을 보는 새 트랜잭션에서 한 번만 실행하고 독립적으로 커밋한다"는
+REQUIRES_NEW 본연의 용도다.
+
+**"동시 요청 시나리오는 Testcontainers IT가 필요한지만 판단해서 알려달라"는 원 요청에 대한 답 —
+필요했고, 실제로 작성해 위 세 문제를 전부 이걸로 잡았다.** 판단만 하고 미루지 않은 이유: 이 세션에
+Docker가 이미 가동 중이었고, `AuthServiceMariaDbIT`가 확립한 "메인 스레드는 조율만, 실제 DB 작업은
+워커 스레드 안에서"라는 기존 패턴을 그대로 재사용할 수 있어 작성 비용이 낮았다 — 다만 이번 레이스는
+InnoDB의 락 대기가 스레드를 자연히 직렬화해 주므로(먼저 도착한 쪽이 배타 락을 잡고, 늦은 쪽은 그 잠금이
+풀릴 때까지 블록됐다가 재평가한다) `CountDownLatch` 오케스트레이션 없이 두 스레드를 그냥 동시에
+제출하기만 하면 됐다(`AuthServiceMariaDbIT`의 신규 가입 경쟁 테스트보다 단순하다).
+
+검증: `RefreshTokenRotatorTest`(형식 오류/Access Token 제출/미존재/만료/계정 비활성/재사용 탐지 결과
+반환/성공 회전 — 전부 Mockito), `RefreshTokenReuseHandlerTest`(전체 폐기+로그 호출), `AuthServiceTest`
+(오케스트레이션만: Rotated 결과 그대로 반환, ReuseDetected 결과 시 핸들러 호출 후 예외, Rotator가 던진
+예외 그대로 전파), `AuthServiceRefreshRotationMariaDbIT`(신규 — 동시 경쟁 시 정확히 하나만 성공, 패자는
+재사용 탐지로 처리, 최종적으로 이 사용자의 모든 Refresh Token이 폐기됨을 커밋된 DB 상태로 확인).
+`./gradlew test`(532 테스트)와 `./gradlew integrationTest`(58 테스트, 이 IT 포함) 전부 그린.
+
+**완결 필요** — 프로그램설계서 3.1절의 "Rotation 미적용" 문구를 이 구현에 맞게 갱신하는 것은 문서
+원본 반영 세션(claude.ai)에서 처리한다. 이 세션은 PR 요약과 이 결정 로그만 남긴다.
+
 ### SVC-USER-01 구현 결정 사항
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |

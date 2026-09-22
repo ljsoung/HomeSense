@@ -72,6 +72,14 @@ public class RefreshToken {
     }
 
     public boolean isUsable() {
-        return !revokedYn && expiresAt.isAfter(LocalDateTime.now());
+        return !isRevoked() && !isExpired();
+    }
+
+    public boolean isRevoked() {
+        return revokedYn;
+    }
+
+    public boolean isExpired() {
+        return !expiresAt.isAfter(LocalDateTime.now());
     }
 }

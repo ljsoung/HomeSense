@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.jiseong.homesense.auth.dto.LoginCommand;
@@ -52,6 +53,8 @@ public class AuthService {
     private final RefreshTokenHasher refreshTokenHasher;
     private final LoginAttemptService loginAttemptService;
     private final WithdrawalPolicy withdrawalPolicy;
+    private final RefreshTokenRotator refreshTokenRotator;
+    private final RefreshTokenReuseHandler refreshTokenReuseHandler;
 
     public SignupResponse signup(SignupCommand cmd) {
         if (userRepository.existsByEmail(cmd.email())) {
@@ -155,38 +158,22 @@ public class AuthService {
     }
 
     /**
-     * status를 여기서도 확인한다 — JwtAuthenticationFilter는 Access Token의 클레임만 검증할 뿐 매 요청마다
-     * 계정 상태를 다시 조회하지 않으므로, 로그인 이후 탈퇴·정지된 계정이라도 이 검사가 없으면 Refresh
-     * Token이 만료될 때까지(최대 refreshTokenValidity) 계속 새 Access Token을 발급받을 수 있다 —
-     * login()과 동일한 상태 검사를 재발급 경로에도 강제해 막는다(코드리뷰에서 지적된 결함).
-     *
-     * <p>이 메서드는 성공해도 {@code user:status} 캐시에 ACTIVE를 쓰지 않는다 — 위에서 읽은
-     * {@code user.getStatus()}는 이 메서드가 시작될 때(정확히는 findByTokenValue()가 REPEATABLE
-     * READ 스냅샷을 여는 시점)의 값이라, 이 메서드가 실행되는 도중(GC 정지·스레드 스케줄링 지연 등)
-     * 다른 트랜잭션이 같은 사용자를 탈퇴시켜 캐시에 WITHDRAWN을 먼저 써 놓았다면, 그 뒤에 이 메서드가
-     * 뒤늦게 재개돼 캐시를 ACTIVE로 덮어써 버릴 수 있다(코드리뷰 P1 지적) — 이러면 이 기능 전체의
-     * 목적(탈퇴 즉시 차단)이 무력화된다. 캐시는 {@link com.jiseong.homesense.common.security.UserStatusResolver}가
-     * 다음 인증 요청에서 캐시미스를 만나는 순간 그 시점의 최신 DB 값을 읽어 채운다 — 그 읽기는
-     * 이 메서드처럼 긴 트랜잭션에 묶여 있지 않고 단발성 조회라 staleness 창이 사실상 없다.
+     * 검증+회전 시도 자체는 {@link RefreshTokenRotator#attempt}(자기완결 트랜잭션)에 전부 위임하고,
+     * 이 메서드는 그 결과만 보고 분기하는 얇은 오케스트레이터다. {@code NOT_SUPPORTED}로 이 메서드
+     * 자신은 트랜잭션을 열지 않는다 — 재사용 탐지 시 뒤이어 부르는 {@link RefreshTokenReuseHandler}가
+     * 독립된 새 트랜잭션에서 안전하게 락을 잡으려면, 그 호출 시점에 이 메서드(또는 그 위 어디에도)
+     * 열린 트랜잭션이 전혀 없어야 한다 — 자세한 이유는 {@link RefreshTokenReuseHandler}의 javadoc
+     * 참고(자기 교착을 실제 동시성 IT로 재현하고서야 확정한 설계다).
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public TokenResponse refreshAccessToken(String refreshTokenValue) {
-        if (!jwtTokenProvider.validateToken(refreshTokenValue) || jwtTokenProvider.isAccessToken(refreshTokenValue)) {
-            throw new InvalidRefreshTokenException();
-        }
-
-        RefreshToken stored = refreshTokenRepository.findByTokenValue(refreshTokenHasher.hash(refreshTokenValue))
-                .orElseThrow(InvalidRefreshTokenException::new);
-        if (!stored.isUsable()) {
-            throw new InvalidRefreshTokenException();
-        }
-
-        User user = stored.getUser();
-        if (user.getStatus() != UserStatus.ACTIVE) {
-            throw new AccountNotActiveException(user.getStatus());
-        }
-
-        String accessToken = jwtTokenProvider.createAccessToken(user.getUserId(), user.getRole().name());
-        return new TokenResponse(accessToken, accessTokenExpiresInSeconds());
+        return switch (refreshTokenRotator.attempt(refreshTokenValue)) {
+            case RefreshRotationResult.Rotated(TokenResponse tokenResponse) -> tokenResponse;
+            case RefreshRotationResult.ReuseDetected(Long userId) -> {
+                refreshTokenReuseHandler.handle(userId);
+                throw new InvalidRefreshTokenException();
+            }
+        };
     }
 
     public void logout(Long userId, String refreshTokenValue) {
