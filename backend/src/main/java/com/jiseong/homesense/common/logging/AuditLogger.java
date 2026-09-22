@@ -8,7 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * COM-LOG-01. 배치 실패(BAT-ERR-01)·매칭 실패(BAT-MAT-02)·지오코딩 실패(BAT-GEO-01)·예상치 못한
- * 예외(COM-EXC-01)를 SLF4J를 통해 구조화(JSON) 로그로 남긴다(NFR-10). batch_log 테이블 기록과는
+ * 예외(COM-EXC-01)·Refresh Token 재사용 탐지(SVC-AUTH-01)를 SLF4J를 통해 구조화(JSON) 로그로
+ * 남긴다(NFR-10). batch_log 테이블 기록과는
  * 별개의 관측 경로다 — 여기서는 로그 레벨에서만 관리하는 상세(스택트레이스 등)를 담고, batch_log에는
  * 담지 않는다.
  *
@@ -57,5 +58,20 @@ public class AuditLogger {
                 .addKeyValue("address", address)
                 .addKeyValue("reason", reason)
                 .log("GEOCODING_FAILURE reason={}", reason);
+    }
+
+    /**
+     * Refresh Token 재사용 탐지(SVC-AUTH-01.refreshAccessToken()) — 이미 폐기된(rotation으로
+     * 교체됐거나 로그아웃된) Refresh Token으로 재발급이 시도되면 토큰 탈취의 강한 신호로 본다.
+     * 응답에는 만료/미존재 토큰과 동일한 401만 노출해 공격자에게 탐지 사실을 드러내지 않으므로,
+     * 이 로그가 유일한 관측 지점이다 — 시각은 구조화 로깅이 레코드마다 자동으로 남기므로 별도
+     * 필드로 중복 기록하지 않는다.
+     */
+    public void logRefreshTokenReuseDetected(Long userId) {
+        log.atWarn()
+                .addKeyValue("auditEvent", "REFRESH_TOKEN_REUSE_DETECTED")
+                .addKeyValue("auditSeverity", "HIGH")
+                .addKeyValue("userId", userId)
+                .log("REFRESH_TOKEN_REUSE_DETECTED userId={}", userId);
     }
 }

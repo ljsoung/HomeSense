@@ -32,4 +32,32 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("UPDATE RefreshToken r SET r.revokedYn = true WHERE r.user.userId = :userId AND r.revokedYn = false")
     void revokeAllByUserId(@Param("userId") Long userId);
+
+    /**
+     * SVC-AUTH-01.refreshAccessToken() Rotation — "조회 후 폐기"의 TOCTOU를 막는 조건부 UPDATE다.
+     * 같은(아직 유효해 보이는) Refresh Token으로 두 요청이 거의 동시에 재발급을 시도하면, 조회
+     * (findByTokenValue) 시점엔 둘 다 유효해 보이지만 이 UPDATE는 그중 하나만 먼저
+     * {@code revoked_yn=false → true}로 성공시키고(영향받은 행=1), 늦게 도착한 쪽은 0을 받는다 — 진
+     * 쪽은 "이미 폐기된 토큰의 재사용"과 정확히 같은 신호이므로 재사용 탐지(전체 폐기 + 감사 로그)로
+     * 넘긴다. {@code reactivateIfWithinGrace}(UserRepository)와 같은 "affected rows로 경합 판정"
+     * 패턴이다.
+     *
+     * <p>형제 메서드들과 달리 {@code clearAutomatically}를 걸지 않는다 — 이 쿼리는 조회해 둔
+     * {@code RefreshToken}(stored)만 갱신할 뿐, 호출부가 이후에도 계속 써야 하는 {@code User} 엔티티는
+     * 건드리지 않는다. 영속성 컨텍스트를 비우면 그 User 참조가 detach돼, 성공 경로에서 그 User를
+     * 참조로 넘겨 새 RefreshToken을 저장할 때 불필요한 위험을 만든다 — 이 쿼리 이후 stored를 다시
+     * 읽는 코드가 없어 clear로 얻을 이점도 없다. {@code flushAutomatically}는 방어적으로 유지한다
+     * (호출 시점에 flush할 대상이 없어 지금은 사실상 no-op이지만, 다른 형제 메서드들과의 일관성을
+     * 위해).
+     *
+     * <p>{@code rotatedYn}도 같은 UPDATE 문에서 함께 true로 세팅한다 — revoked_yn과 별도 쿼리로
+     * 나누면 그 사이에 이 행을 들여다보는 다른 트랜잭션이 "revoked=true인데 rotated=false"인 순간을
+     * 관측할 수 있다(코드리뷰 P1 지적: 탈취된 옛 토큰으로 `logout()`이 호출됐을 때 이 플래그로
+     * "이미 rotation됨"을 판정하는데, 그 판정이 이 원자성에 의존한다 — {@code AuthService#logout}
+     * 참고).
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE RefreshToken r SET r.revokedYn = true, r.rotatedYn = true "
+            + "WHERE r.refreshTokenId = :id AND r.revokedYn = false")
+    int revokeIfUnrevoked(@Param("id") Long refreshTokenId);
 }

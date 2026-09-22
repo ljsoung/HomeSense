@@ -314,14 +314,16 @@ class AuthControllerTest {
     }
 
     @Test
-    void 토큰_재발급이_성공하면_200과_새_Access_Token을_반환한다() throws Exception {
-        when(authService.refreshAccessToken("refresh-token")).thenReturn(new TokenResponse("new-access-token", 1800L));
+    void 토큰_재발급이_성공하면_200과_새_Access_Refresh_Token_쌍을_반환한다() throws Exception {
+        when(authService.refreshAccessToken("refresh-token"))
+                .thenReturn(new TokenResponse("new-access-token", "new-refresh-token", 1800L));
 
         mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"refreshToken\":\"refresh-token\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.accessToken").value("new-access-token"));
+                .andExpect(jsonPath("$.data.accessToken").value("new-access-token"))
+                .andExpect(jsonPath("$.data.refreshToken").value("new-refresh-token"));
     }
 
     @Test

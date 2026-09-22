@@ -64,4 +64,27 @@ class JwtTokenProviderTest {
     void 형식이_올바르지_않은_토큰은_검증에_실패한다() {
         assertThat(provider.validateToken("not-a-jwt")).isFalse();
     }
+
+    /**
+     * 코드리뷰 P2 지적 — jti(무작위 UUID) 없이는 같은 사용자에게 같은 초 안에 발급된 두 Refresh
+     * Token의 클레임(sub/type/iat/exp)이 완전히 같아져 서명까지 포함해 바이트 단위로 동일한 문자열이
+     * 나온다. Refresh Token은 이 문자열의 해시를 UNIQUE 컬럼(refresh_token.token_value)에 저장하므로,
+     * rotation이 연달아 호출되는 상황(클라이언트 재시도, 여러 탭 등)에서 실제 제약 위반으로 이어졌다
+     * — "로그인과 재발급 사이엔 보통 수 초~수 분이 있다"는 가정만으로는 막히지 않는 실제 시나리오다.
+     */
+    @Test
+    void 같은_사용자에게_연달아_발급한_RefreshToken은_서로_다르다() {
+        String first = provider.createRefreshToken(1L);
+        String second = provider.createRefreshToken(1L);
+
+        assertThat(first).isNotEqualTo(second);
+    }
+
+    @Test
+    void 같은_사용자에게_연달아_발급한_AccessToken도_서로_다르다() {
+        String first = provider.createAccessToken(1L, "USER");
+        String second = provider.createAccessToken(1L, "USER");
+
+        assertThat(first).isNotEqualTo(second);
+    }
 }

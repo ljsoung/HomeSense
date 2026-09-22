@@ -181,28 +181,90 @@ setStatus(userId, ACTIVE)`를 무조건 실행하는 코드는 그대로 남아 
 **수정: 두 메서드 모두에서 `ACTIVE` 캐시 쓰기를 완전히 제거했다** — 버전 관리나 Lua 스크립트 같은
 동시성 장치를 추가하는 대신,애초에 "읽은 뒤 나중에 쓰는" 이 패턴 자체를 없앴다. 새로 발급된 토큰으로
 오는 바로 다음 인증 요청은 캐시가 비어 있을 것이므로 `UserStatusResolver`가 그 시점에 DB를 다시 읽어
-캐시를 채운다 — 이 읽기는 `findById()` 한 번짜리 짧은 조회라 "읽고 나서 쓰기까지" 사이에 다른
-트랜잭션이 끼어들 창이 사실상 없다(수 마이크로초 수준). `UserService.withdraw()`의 `WITHDRAWN` 쓰기는
-그대로 두었다 — **"차단은 즉시, 해제는 다음 확인 때"라는 의도적 비대칭이 이 설계의 핵심이다.** 더
-제한적인 상태(WITHDRAWN)를 먼저 반영해도 최악의 경우 과잉 차단인데, 이는 다음 정상 요청에서
-`UserStatusResolver`가 최신 값을 다시 읽으며 스스로 바로잡힌다 — 반대로 더 허용적인 상태(ACTIVE)를
-먼저 반영하면 과소 차단(보안 구멍)이 되고, 그 구멍은 캐시 TTL(최대 30분) 동안 자연히 닫히지 않는다.
-이 비대칭 때문에 ADM 도메인이 나중에 `SUSPENDED`를 쓰게 되더라도(위 "완결 필요" 행) 그 쓰기는 안전하다
-— WITHDRAWN과 마찬가지로 "더 제한적인" 방향이기 때문이다.
+캐시를 채운다. `UserService.withdraw()`의 `WITHDRAWN` 쓰기는 그대로 두었다 — **"차단은 즉시, 해제는
+다음 확인 때"라는 의도적 비대칭이 이 설계의 핵심이다.** 더 제한적인 상태(WITHDRAWN)를 먼저 반영해도
+최악의 경우 과잉 차단인데, 이는 다음 정상 요청에서 `UserStatusResolver`가 최신 값을 다시 읽으며 스스로
+바로잡힌다 — 반대로 더 허용적인 상태(ACTIVE)를 먼저 반영하면 과소 차단(보안 구멍)이 되고, 그 구멍은
+캐시 TTL(최대 30분) 동안 자연히 닫히지 않는다. 이 비대칭 때문에 ADM 도메인이 나중에 `SUSPENDED`를
+쓰게 되더라도(위 "완결 필요" 행) 그 쓰기는 안전하다 — WITHDRAWN과 마찬가지로 "더 제한적인" 방향이기
+때문이다.
+
+**[처리완료 2026-09-22, 네 번째 P1 코드리뷰] 위 문단이 "창이 사실상 없다"고 썼던 것 자체가 틀린
+확률적 근거였다 — `UserStatusResolver`의 복구용 쓰기도 무조건 덮어쓰기(SET)였다는 점에서 방금 고친
+버그와 구조가 완전히 같았다.** 지성이 직접 지적했다: `UserStatusResolver.refreshFromDatabase()`도
+결국 "DB 읽기 → 그 값으로 캐시 SET"이고, 이 SET이 무조건 덮어쓰기라면 창이 좁아졌을 뿐 같은 모양의
+race가 그대로 남는다 — T1에 resolver가 DB에서 ACTIVE를 읽고(withdraw 커밋 전), T2에 동시 실행된
+withdraw()가 DB+캐시에 WITHDRAWN을 먼저 반영하고, T3(T2보다 늦게, GC 정지 등으로 지연된 뒤)에
+resolver가 뒤늦게 캐시에 ACTIVE를 써 WITHDRAWN을 도로 덮어쓸 수 있다. "실제로 이 창이 훨씬 좁다(DB
+조회 한 번+캐시 쓰기 한 번)"는 사실이 race 자체를 없애지 않는다 — 위에서 이미 "GC 정지·스레드
+스케줄링 지연이 plausible하다"고 스스로 인정해 놓고, 그 전제를 login/refresh 경로에만 국한할 근거가
+없었다. 확률로 완화된 취약점을 "낮은 확률"이라는 이유로 남겨두는 것은 방금 P1으로 잡은 것과 본질적으로
+같은 종류의 결함이다.
+
+**수정: `UserStatusCacheService`에 `setIfAbsent`(Redis SETNX)를 신설하고, `UserStatusResolver`의
+복구용 쓰기를 이걸로 교체했다 — 무조건 덮어쓰기(`setStatus`)는 이제 `UserService.withdraw()`처럼
+"그 순간 DB의 최신 상태를 직접 확정한 쓰기"에만 쓴다.** 이렇게 하면 순서와 무관하게 항상 옳은 결과가
+나온다: withdraw()의 WITHDRAWN이 먼저 도착하면 resolver의 SETNX는 키가 이미 있어 no-op(WITHDRAWN
+보존), resolver가 먼저 도착해도 이후 withdraw()의 무조건 쓰기가 그 위에 WITHDRAWN을 그대로 덮어쓴다
+(WITHDRAWN 보존) — "더 제한적인 값이 이긴다"는 원칙이 확률적 근사치가 아니라 실제 불변식이 된다.
+이 resolver 자신의 이번 요청 인가 판단(`isActive()`의 반환값)은 SETNX의 성패와 무관하게 자신이 실제로
+읽은 DB 값을 그대로 쓴다 — 이미 시작된 이 요청 하나의 판단을 소급 취소할 방법은 없고, 이 수정이
+보장하는 것은 "공유 캐시가 오염되지 않아 이후의 모든 요청은 정확히 판단한다"는 것이다(이 값 하나의
+staleness는 DB만으로 인가하는 어떤 시스템에도 존재하는 환원 불가능한 최소 창이다). 이 프로젝트가 이미
+한 번 쓴 패턴과 같은 방향이다 — BAT-LOD-01의 `dedup_hash` upsert race도 처음엔 `REQUIRES_NEW` 게이트웨이로
+우회하려다 결국 원자적 `INSERT ... ON DUPLICATE KEY UPDATE`로 바꿔 타이밍 의존성 자체를 없앴다(위
+"`REQUIRES_NEW` 격리 INSERT 게이트웨이 패턴" 절 참고) — 이번에도 "확률적 완화"에서 "원자적 연산으로
+구조적 제거"로 한 단계 더 간 것이다.
+
+**완결 필요(우선순위 낮음, 이번에 발견했으나 지금 고치지 않음) — 탈퇴 직후 짧은 시간 안에
+재활성화(reactivate)하면 낡은 WITHDRAWN 캐시 때문에 최대 TTL(30분)만큼 오히려 잠길 수 있다.**
+`reactivate()`는 (위 두 수정 이후) 성공해도 `ACTIVE`를 캐시에 쓰지 않는다 — 오직 `UserStatusResolver`의
+캐시미스 경로만 채운다. 그런데 `withdraw()`가 남긴 `WITHDRAWN` 캐시 엔트리가 아직 TTL(최대 30분)
+안에 있다면, reactivate() 성공 직후의 인증 요청은 **캐시 히트**(WITHDRAWN)라 `UserStatusResolver`가
+DB를 다시 확인하지 않고 그대로 차단한다 — 방금 도입한 `setIfAbsent`는 이 경로에 전혀 관여하지 않는다
+(캐시 미스가 아니라 히트이기 때문). 즉 탈퇴 후 30분 안에 재활성화하면 그 사용자는 자기 계정을 최대
+30분 더 못 쓸 수 있다.
+
+**지금 당장 고치지 않는 더 정확한 이유(지성 정정) — "프론트가 안 불러서 안전"이 아니라 "이 엔드포인트
+자체가 아직 문서화된 MVP API 표면 밖에 있다".** `POST /api/auth/reactivate`는 프로그램설계서 3.1절
+`AuthController`의 문서화된 시그니처(signup/login/refresh/logout/check-email)에도, UI정의서 화면
+목록에도 없다 — 위 "BAT-USR-01 / SVC-AUTH-01.reactivate()" 절 제목 자체가 이미 "신규 제안 —
+프로그램목록서·설계서 미반영"이라고 명시하고 있다. 프론트 화면이 없다는 사실은 이 부재의 *결과*일
+뿐이지 안전성의 *근거*는 아니다 — 더 튼튼한 근거는 이 엔드포인트가 애초에 노출을 의도한 스펙 밖에
+있다는 사실 자체다. **참고(향후 확장 시) — 정지(SUSPENDED)에서 복구하는 경로가 필요해지면, 본인이
+호출하는 `/api/auth/reactivate`보다는 5단계 ADM 도메인의 `PATCH /api/admin/users`(관리자 전용)가
+문서상 더 자연스러운 자리일 수 있다** — ADM-01을 구현하며 이 엔드포인트를 실제로 연결할 때 한 번
+검토하라.
+
+**고칠 때의 방향(정정) — CAS/버전 관리가 아니라 evict-after-commit 리스너 하나로 충분하다.** 이전
+버전은 "eager write를 유지하되 무엇을 쓸지"로 문제를 좁혀 CAS(버전/타임스탬프 비교)가 필요하다고
+결론 냈는데, 이는 과한 처방이었다(지성 지적). `reactivate()`가 커밋 후 `ACTIVE`를 **쓰는** 대신 그
+사용자의 캐시 키를 **evict**하기만 하면 CAS 없이도 구조적으로 안전하다 — evict는 "특정 값을 미리
+써서 다른 쓰기와 경합하는" 방식이 아니라 "판단을 다시 진실의 원천(DB)에 위임하는" 방식이라, 이번에
+고친 것과 같은 클래스의 race가 애초에 발생할 지점이 없다. 다음 요청은 무조건 캐시미스가 되고,
+`UserStatusResolver`가 DB를 다시 읽어 `setIfAbsent`로 안전하게 채운다(위에서 이미 고친 경로를 그대로
+재사용). 이 프로젝트가 이미 문서화한 **evict-after-commit 패턴**
+(`@TransactionalEventListener(phase = AFTER_COMMIT, fallbackExecution = true)`, 위 "캐싱" 절의
+`CacheEvictionListener`와 같은 모양 — 커밋과 캐시 무효화 사이에 stale 재채움이 끼어들 여지를 없애려고
+AFTER_COMMIT에 건다)을 `withdraw()`가 아니라 `reactivate()` 쪽에 리스너 하나 추가하는 정도로 충분하다.
+프론트 재활성화(철회) 화면이 실제로 만들어지고 이 엔드포인트가 문서화된 API 표면에 들어오는 시점에
+이 항목부터 재검토하라.
 
 **남은 과제(완결 필요, 우선순위 중간) — 프론트 401→refresh 인터셉터 자체는 여전히 없다.** 이 절의
-두 수정 모두 백엔드가 스스로를 안전하게 지키도록 만든 것뿐이다 — 진짜 만료된 Access Token(캐시가
+세 수정 모두 백엔드가 스스로를 안전하게 지키도록 만든 것뿐이다 — 진짜 만료된 Access Token(캐시가
 아니라 JWT 자체의 exp 클레임 만료)에 대해서는 여전히 프론트가 401을 받고도 자동으로 `/api/auth/
 refresh`를 호출해 재시도하지 않는다(SCR-HOME-01 절이 이미 이 갭을 "보호된 라우트가 실제로 생기는
-시점에 추가"로 유예해 뒀다). 이 갭은 이번 두 수정으로도 닫히지 않았다 — 인터셉터를 실제로 붙일 때
+시점에 추가"로 유예해 뒀다). 이 갭은 이번 세 수정으로도 닫히지 않았다 — 인터셉터를 실제로 붙일 때
 이 항목부터 다시 확인하라.
 
-검증: `UserStatusCacheServiceTest`(키·TTL·직렬화), `UserStatusResolverTest`(캐시 히트 시 DB 미조회,
-캐시미스+DB에 ACTIVE/비ACTIVE 각각의 캐시 재기록, 캐시미스+DB에도 없음), `JwtAuthenticationFilterTest`
-(리졸버가 반환하는 boolean만으로 SecurityContext 설정 여부 결정), `UserServiceTest`(withdraw 성공
-경로에서 캐시 쓰기, 실패 경로에서 미호출 검증). `AuthServiceTest`는 이제 `UserStatusCacheService`를
-전혀 의존하지 않는다 — ACTIVE 쓰기가 존재하지 않는다는 사실 자체가 (그 의존성을 제거한) 생성자
-시그니처로 증명된다, 별도 `verify(..., never())`가 필요 없다. Redis 연결은 `LoginAttemptService`가 이미
+검증: `UserStatusCacheServiceTest`(키·TTL·직렬화, `setIfAbsent`의 성공/실패 양쪽 반환값), `UserStatusResolverTest`
+(캐시 히트 시 DB 미조회, 캐시미스+DB에 ACTIVE/비ACTIVE 각각을 `setIfAbsent`로 재기록, 캐시미스+DB에도
+없음, **`setIfAbsent`가 경쟁에서 져도 이 요청 자신의 인가 판단은 자신이 읽은 DB 값을 그대로 반환하고
+무조건 쓰기(`setStatus`)는 절대 호출하지 않는다**), `JwtAuthenticationFilterTest`(리졸버가 반환하는
+boolean만으로 SecurityContext 설정 여부 결정), `UserServiceTest`(withdraw 성공 경로에서 캐시 쓰기,
+실패 경로에서 미호출 검증). `AuthServiceTest`는 이제 `UserStatusCacheService`를 전혀 의존하지 않는다
+— ACTIVE 쓰기가 존재하지 않는다는 사실 자체가 (그 의존성을 제거한) 생성자 시그니처로 증명된다, 별도
+`verify(..., never())`가 필요 없다. Redis 연결은 `LoginAttemptService`가 이미
 요구하던 인프라라 이 변경으로 새로 추가된 테스트 인프라 요구사항은 없다 — **2026-09-22, Docker가
 가동 중인 세션에서 `./gradlew integrationTest`로 실제 실행해 확인했다**(13개 MariaDB IT 클래스, 57
 테스트 전부 그린, `UserStatusResolver` 리팩터링 이후에도 그린 유지 재확인 — `AuthService`/
@@ -217,6 +279,198 @@ refresh`를 호출해 재시도하지 않는다(SCR-HOME-01 절이 이미 이 �
 | --- | --- | --- | --- |
 | 로그인 실패 잠금(5회/5분) | "신규 제안, 반영 전 검토 필요"로 미확정 표시 | 사용자 확인 후 구현 확정. Redis 키(`login:fail:{email}`)의 TTL을 **실패마다 5분으로 다시 건다** — 첫 실패 시점 고정 만료가 아니라 마지막 실패로부터 5분 뒤 잠금이 풀리는 슬라이딩 윈도우 | 설계서 문구("약 5분 TTL로 잠금")가 고정/슬라이딩 여부를 명시하지 않아, 마지막 시도 기준으로 5분을 보장하는 쪽이 사용자에게 더 예측 가능하다고 판단해 슬라이딩으로 결정(`LoginAttemptService.recordFailure()`) |
 | `logout()` 소유자 검증 | 설계서 3.1절에 세부 로직 없음(시그니처만 `logout(Long userId, String refreshTokenValue)`) | 조회된 Refresh Token의 소유자(`user_id`)가 인자로 받은 `userId`와 다르면 `InvalidRefreshTokenException` | 시그니처가 굳이 `userId`를 받는 이유가 이 검증 외엔 없고, FAV 도메인 등 다른 프로그램의 "소유자 검증 후 삭제" 패턴과 일관됨(`AuthService.logout()`) |
+
+### SVC-AUTH-01 Refresh Token Rotation + 재사용 탐지 (2026-09-22)
+
+**배경.** 프로그램설계서 3.1절이 `refreshAccessToken()`을 "신규 Access Token만 발급한다(Refresh Token은
+재사용 — Rotation 미적용, NFR-4 참고)"로 명시하고 있었다 — 즉 탈취된 Refresh Token은 만료(14일)까지
+무제한 재사용이 가능했다. 이 절이 그 갭을 closed 상태로 옮긴다: Rotation(재발급마다 기존 토큰 폐기 +
+새 토큰 발급) + 재사용 탐지(이미 폐기된 토큰으로 재발급이 시도되면 탈취 신호로 보고 해당 사용자의
+Refresh Token을 전부 폐기)를 구현했다. **설계서 3.1절 문구 자체는 이 세션에서 고치지 않았다** —
+사용자 지시에 따라 문서 원본(claude.ai Project Knowledge) 반영은 별도 claude.ai 세션에서 진행하고,
+여기서는 코드와 이 결정 로그만 남긴다.
+
+**최종 구조 — 세 개의 새 클래스로 나뉜 이유가 단순한 리팩터링 취향이 아니라 세 가지 실제 버그를
+순서대로 잡아가며 굳어진 결과다(아래 "겪은 문제" 참고).**
+
+| 클래스 | 역할 | 트랜잭션 |
+| --- | --- | --- |
+| `RefreshTokenRotator`(신규, `auth.service`) | 검증(형식·만료·계정 상태) + 원자적 회전 시도. 결과를 `RefreshRotationResult`(sealed interface: `Rotated`/`ReuseDetected`)로 반환한다 | `@Transactional`(REQUIRED, 자기완결) |
+| `AuthService.refreshAccessToken()` | `RefreshTokenRotator`를 부르고 결과에 따라 분기하는 얇은 오케스트레이터. 실제 DB 작업을 전혀 하지 않는다 | `@Transactional(propagation = NOT_SUPPORTED)` — 의도적으로 트랜잭션을 열지 않는다 |
+| `RefreshTokenReuseHandler`(신규, `auth.service`) | 재사용 탐지 시 해당 사용자의 Refresh Token 전부 폐기(`RefreshTokenRepository.revokeAllByUserId()` 재사용) + `AuditLogger.logRefreshTokenReuseDetected()` | `@Transactional(propagation = REQUIRES_NEW)` |
+
+`RefreshTokenRepository.revokeIfUnrevoked(refreshTokenId)`(신규, 조건부 UPDATE `WHERE refresh_token_id=:id
+AND revoked_yn=false`, affected rows로 판정)가 "이미 폐기됨"의 판정과 폐기 자체를 원자적으로 묶는다 —
+`stored.isRevoked()`로 먼저 읽고 나서 revoke하는 TOCTOU 패턴을 쓰지 않는다(`UserRepository.
+reactivateIfWithinGrace`와 같은 "affected rows로 경합 판정" 패턴). `RefreshToken` 엔티티에 `isRevoked()`/
+`isExpired()`를 신설했다(기존 `isUsable()`은 `!isRevoked() && !isExpired()`로 재정의 — 하위 호환).
+`TokenResponse`에 `refreshToken` 필드를 추가해 `LoginResponse`와 필드 순서(`accessToken, refreshToken,
+expiresIn`)를 통일했다.
+
+**만료 vs 폐기를 서비스 레이어에서 명확히 분기한다(요구사항 3번).** `stored.isExpired()`는
+`revokeIfUnrevoked()`를 시도하지도 않고 곧바로 `InvalidRefreshTokenException`을 던진다(재사용 탐지
+미발동) — 평범한 재로그인 유도 상황이다. 반면 `revokeIfUnrevoked()`가 0을 반환하면(이미 `revoked_yn=
+true`) `ReuseDetected`로 이어진다. 두 경로 모두 응답은 같은 401(`InvalidRefreshTokenException`)로
+통일해 공격자에게 탐지 사실을 드러내지 않는다(요구사항 2번 "재로그인 유도, 문구 구분 안 함") — 실제
+구분은 `AuditLogger.logRefreshTokenReuseDetected(userId)`(신규, COM-LOG-01)에만 남는다.
+
+**겪은 문제 세 가지 — 전부 `AuthServiceRefreshRotationMariaDbIT`(신규, Testcontainers, 동시 두 요청이
+같은 토큰으로 경쟁)로만 발견됐다. Mockito 단위 테스트(`RefreshTokenRotatorTest`)는 이 중 어느 것도
+잡지 못했을 것이다 — 셋 다 "여러 트랜잭션이 실제로 겹칠 때"만 드러나는 종류다.**
+
+1. **JWT NumericDate 초 단위 절삭 — [정정, 2026-09-22 같은 날 P2 코드리뷰] 처음엔 "테스트 아티팩트,
+   프로덕션 버그 아님"으로 잘못 결론 냈다. 실제로는 진짜 프로덕션 버그였다.** IT가 시드한 "구" 토큰과
+   회전으로 발급되는 "신" 토큰이 `token_value` UNIQUE 제약을 위반했다 — 원인을 처음엔 밀리초 단위
+   시계 해상도로 추측해 10ms→100ms로 늘려봤지만 둘 다 불충분했다. 실제 원인은 JWT의 `iat`/`exp`
+   클레임(RFC 7519 NumericDate)이 **초 단위**로 잘린다는 사실 — 같은 사용자에 대해 같은 초 안에 두 번
+   서명하면 헤더+페이로드+서명까지 완전히 동일한 토큰 문자열이 나온다. 최초엔 IT에 1.1초 sleep을
+   넣어 이 창을 피해 가고 "실제 운영에서는 로그인과 재발급 사이에 최소 수 초~수 분이 지나 이 충돌이
+   발생하지 않는다"고 결론 냈는데, **이 결론이 틀렸다** — 클라이언트 재시도나 여러 탭에서 짧은 시간
+   안에 순차적으로 두 번 재발급을 요청하는 것은 실제로 충분히 일어날 수 있는 시나리오라, "IT가 만든
+   비현실적 타이밍"으로 좁혀서 본 것 자체가 근거 없는 가정이었다. `JwtTokenProvider`에 `jti`(무작위
+   UUID)를 추가해 구조적으로 제거했다 — 아래 "COM-SEC-02 JwtTokenProvider" 절 참고, IT의 sleep도
+   제거했다.
+2. **REPEATABLE READ phantom row — `REQUIRES_NEW`만으로는 승자(winner)의 새 토큰이 재사용 탐지의
+   전체 폐기를 피해 간다.** 패자(loser)의 트랜잭션은 winner가 커밋하기 훨씬 전에 이미 스냅샷을 열어
+   뒀다 — `revokeIfUnrevoked()`가 그 스냅샷을 우회해 "현재" 값을 보는 건 그 UPDATE가 winner가 잠근
+   바로 그 행에서 잠금 대기 후 재확인하기 때문이지, loser 트랜잭션 전체가 최신 상태를 보게 되는 게
+   아니다. `REQUIRES_NEW`(당시엔 `RefreshTokenReuseHandler` 하나만 있었고 `RefreshTokenRotator`는
+   아직 분리 전이었다)로 새 트랜잭션을 열면 이 phantom 문제는 해결됐다 — 그 새 트랜잭션은 winner의
+   커밋 이후 시작하는 새 스냅샷에서 출발하기 때문이다. IT의 "`revoked_yn=FALSE` 건수는 0이어야 한다"
+   단언이 이 버그를 잡았다(고치기 전엔 1이 나왔다 — winner의 새 토큰이 살아남았다는 뜻).
+3. **자기 교착(self-deadlock) — (2)의 수정만으로는 IT가 여전히 타임아웃으로 실패했다.**
+   `revokeIfUnrevoked()`가 0건을 갱신했더라도(조건절이 안 맞아서) InnoDB는 WHERE절을 평가하려 그 행을
+   조회하는 과정에서 이미 배타 락을 걸어 둔다 — 이 락은 loser의 바깥쪽 트랜잭션이 끝날 때까지 풀리지
+   않는다. 그 트랜잭션이 열려 있는 채로 `REQUIRES_NEW`로 `RefreshTokenReuseHandler`를 부르면, 새
+   트랜잭션의 `revokeAllByUserId()`가 정확히 그 같은 행을 다시 잠그려다 자기 자신(같은 애플리케이션
+   스레드, 다른 DB 커넥션)과 교착한다 — 두 트랜잭션 다 "락을 기다리는 중"이지 "다른 락을 요청하며
+   대기 중"이 아니라서 InnoDB의 데드락 탐지기가 이 사이클을 못 잡고, `innodb_lock_wait_timeout`(기본
+   50초)까지 그냥 멈춘다. `REQUIRES_NEW` 자체로는 풀 수 없는 문제였다 — 호출자가 이 메서드를 부르기
+   *전에* 자신의 트랜잭션을 완전히 끝내야 한다는 게 결론이었고, 이것이 위 표의 최종 3-클래스 구조(
+   `RefreshTokenRotator`를 별도 자기완결 트랜잭션으로 분리하고 `AuthService.refreshAccessToken()`은
+   `NOT_SUPPORTED`로 트랜잭션 자체를 열지 않는다)로 이어졌다.
+
+**이 프로젝트가 REQUIRES_NEW 게이트웨이 패턴(TradeInsertGateway 등)을 원자적 upsert로 교체한 선례와
+모순되지 않는다** — 그때는 "UNIQUE 위반을 피해 INSERT 하나만 격리"하려다 스냅샷 문제를 새로 만든 것이
+문제였다(재시도 로직이 필요 없어져야 했는데 남아 있었다). 여기는 재시도가 전혀 없고 "호출자가 이미
+트랜잭션을 끝낸 뒤, 최신 커밋을 보는 새 트랜잭션에서 한 번만 실행하고 독립적으로 커밋한다"는
+REQUIRES_NEW 본연의 용도다.
+
+**"동시 요청 시나리오는 Testcontainers IT가 필요한지만 판단해서 알려달라"는 원 요청에 대한 답 —
+필요했고, 실제로 작성해 위 세 문제를 전부 이걸로 잡았다.** 판단만 하고 미루지 않은 이유: 이 세션에
+Docker가 이미 가동 중이었고, `AuthServiceMariaDbIT`가 확립한 "메인 스레드는 조율만, 실제 DB 작업은
+워커 스레드 안에서"라는 기존 패턴을 그대로 재사용할 수 있어 작성 비용이 낮았다 — 다만 이번 레이스는
+InnoDB의 락 대기가 스레드를 자연히 직렬화해 주므로(먼저 도착한 쪽이 배타 락을 잡고, 늦은 쪽은 그 잠금이
+풀릴 때까지 블록됐다가 재평가한다) `CountDownLatch` 오케스트레이션 없이 두 스레드를 그냥 동시에
+제출하기만 하면 됐다(`AuthServiceMariaDbIT`의 신규 가입 경쟁 테스트보다 단순하다).
+
+검증: `RefreshTokenRotatorTest`(형식 오류/Access Token 제출/미존재/만료/계정 비활성/재사용 탐지 결과
+반환/성공 회전 — 전부 Mockito), `RefreshTokenReuseHandlerTest`(전체 폐기+로그 호출), `AuthServiceTest`
+(오케스트레이션만: Rotated 결과 그대로 반환, ReuseDetected 결과 시 핸들러 호출 후 예외, Rotator가 던진
+예외 그대로 전파), `AuthServiceRefreshRotationMariaDbIT`(신규 — 동시 경쟁 시 정확히 하나만 성공, 패자는
+재사용 탐지로 처리, 최종적으로 이 사용자의 모든 Refresh Token이 폐기됨을 커밋된 DB 상태로 확인).
+`./gradlew test`(532 테스트)와 `./gradlew integrationTest`(58 테스트, 이 IT 포함) 전부 그린.
+
+**완결 필요** — 프로그램설계서 3.1절의 "Rotation 미적용" 문구를 이 구현에 맞게 갱신하는 것은 문서
+원본 반영 세션(claude.ai)에서 처리한다. 이 세션은 PR 요약과 이 결정 로그만 남긴다.
+
+### SVC-AUTH-01 logout() 재사용 탐지 공백 (2026-09-22, 같은 날 P1 코드리뷰) — `rotated_yn` 컬럼 신설
+
+**위 Rotation 구현이 놓친 구멍 — 공격자가 탈취한 토큰으로 먼저 rotation하면, 정상 사용자의 `logout()`이
+그 후속 토큰(공격자 세션)을 전혀 건드리지 못한 채 조용히 성공했다.** 시나리오: 공격자가 탈취한
+Refresh Token(T1)으로 `refreshAccessToken()`을 먼저 호출해 rotation에 성공 — T1은 `revoked_yn=true`가
+되고 공격자는 새 토큰 T2를 쥔다. 그 사이 정상 사용자는 (아직 살아있는 Access Token으로) 자기 세션을
+끝내려고 원래 T1으로 `logout()`을 호출한다 — 기존 코드는 `findByTokenValue()`로 T1을 찾아 소유자
+검증을 통과시키고 `stored.revoke()`를 부르는데, T1은 이미 `revoked_yn=true`라 이 호출은 그냥 아무
+의미 없는 재확인일 뿐이었다 — **T2에 대해서는 아무 일도 일어나지 않고, `logout()`은 예외 없이
+정상 종료된다.** 즉 정상 사용자는 "로그아웃했다"고 믿지만 공격자의 세션(T2)은 살아남아, 계속
+회전시키며 사실상 무기한 접근을 유지할 수 있었다.
+
+**두 가지 수정 방향(코드리뷰가 제시)을 검토했다: (1) rotation family linkage(부모-자식 토큰 체인
+추적), (2) logout()이 이미 폐기된 제출 토큰을 재사용으로 취급.** (1)은 self-referencing FK나 family
+ID 같은 스키마 확장과 체인 순회 로직이 필요해 이 프로젝트 단계에 비해 과한 처방이라고 판단했다(YAGNI
+— 이 버그를 고치는 데 체인 전체를 추적할 필요는 없다, "이 토큰이 rotation으로 교체됐는가" 하나만
+알면 충분하다). **(2)를 그대로 적용하면 새로운 문제가 생긴다** — `revoked_yn=true`는 rotation
+때문일 수도, 단순 중복 로그아웃(더블클릭·네트워크 재시도로 흔히 발생) 때문일 수도, 이미 재사용 탐지로
+전체 폐기됐기 때문일 수도 있는데, DB에 이 셋을 구분할 정보가 없으면 (2)는 평범한 중복 로그아웃까지
+매번 "이 사용자의 다른 모든 세션을 강제 로그아웃"시키는 과잉 반응이 된다 — refresh(드문 경쟁)와
+달리 logout은 클라이언트가 자주 재시도하는 성격의 엔드포인트라 이 부작용이 실제로 자주 트리거될
+위험이 있다.
+
+**최종 결정: `refresh_token.rotated_yn`(BOOLEAN NOT NULL DEFAULT FALSE) 신설 — "이 토큰이 rotation으로
+교체됐는가"만 구분하는 최소 정보.** `RefreshTokenRepository.revokeIfUnrevoked()`가 `revoked_yn`과
+`rotated_yn`을 **같은 UPDATE 문에서 함께** true로 세팅한다(원자적 — 별도 쿼리로 나누면 그 사이
+"revoked=true인데 rotated=false"인 순간이 관측될 수 있다). 이 플래그를 세팅하는 지점은 오직 여기
+하나뿐이다 — `logout()`의 평범한 `stored.revoke()`도, 재사용 탐지의 `revokeAllByUserId()`도
+`rotated_yn`을 건드리지 않는다(둘 다 기본값 `false`로 남는다). 이렇게 하면:
+- 평범한 중복 로그아웃(`rotated_yn=false`인 채로 `revoked_yn=true`) → `logout()`은 조용히 재확인만
+  하고 넘어간다(기존 동작 그대로, 과잉 반응 없음).
+- 이미 재사용 탐지로 전체 폐기된 토큰(`rotated_yn=false`) → 마찬가지로 재트리거하지 않는다 — 그
+  가족은 첫 탐지 시점에 이미 다 죽었으므로 추가로 할 일이 없다.
+- **rotation으로 교체된 토큰(`rotated_yn=true`)** → `logout()`이 이 경우만 정확히 골라내
+  `RefreshTokenReuseHandler.handle(userId)`(기존 클래스 재사용, 새 클래스 없음)로 위임해 그 사용자의
+  Refresh Token을 전부 폐기한다. 호출자(정상 사용자)에게는 여전히 예외 없는 정상 종료로 보인다 —
+  "로그아웃"이 의도한 결과(내 세션이 끝난다)를 오히려 더 강하게 충족시키기 때문이다(공격자 세션까지
+  함께 끊긴다).
+
+**`RefreshTokenReuseHandler`를 `logout()`에서 부를 때는 `refreshAccessToken()`이 겪었던 자기 교착
+걱정이 없다 — 그 클래스의 안전 조건을 다시 확인한 결과다.** 실제 필요 조건은 "호출자에게 열린
+트랜잭션이 전혀 없어야 한다"가 아니라 "호출자가 이 사용자의 refresh_token 행 중 어느 것에도 아직
+락을 쥐고 있지 않아야 한다"는 것이다 — `logout()`은 이 호출 전까지 `findByTokenValue()`(비잠금
+SELECT)만 수행하고 `revokeIfUnrevoked()` 같은 조건부 UPDATE를 거치지 않으므로, 클래스 레벨
+`@Transactional`(REQUIRED)이 열려 있어도 안전하다(애초에 어떤 행도 잠근 적이 없다). 그래서 `logout()`은
+`refreshAccessToken()`처럼 `NOT_SUPPORTED`+별도 자기완결 트랜잭션으로 재구성할 필요가 없었다 — 이
+차이를 `RefreshTokenReuseHandler`의 javadoc에 명시해, 다음 호출부를 추가할 때 "트랜잭션이 아예
+없어야 한다"는 더 강한 요구로 오해해 불필요하게 패턴을 복제하지 않도록 해뒀다.
+
+**스키마 변경 3곳 동기화** — 프로덕션 배포가 아직 없어(로컬 전용) ALTER 마이그레이션 없이 DDL
+자체를 고쳤다: `schema_all.sql`(v2.2, 변경 이력 주석 추가), `testcontainers/user-withdraw-schema.sql`,
+`testcontainers/withdrawn-user-purge-schema.sql`. `WithdrawalTestSeed.refreshToken()`의 INSERT는
+컬럼을 명시적으로 나열하지 않는 컬럼에 DEFAULT가 적용되므로 수정 불필요.
+
+검증: `AuthServiceTest`(logout이 `rotated_yn=false`면 기존대로 `revoke()`만 하고 핸들러를 부르지
+않음, `rotated_yn=true`(ReflectionTestUtils로 세팅)면 핸들러를 부르고 예외 없이 종료), 신규
+`AuthServiceRefreshRotationMariaDbIT` 테스트 케이스(공격자 역할로 실제 rotation 호출 → 정상 사용자
+역할로 원래 토큰으로 logout() → 후속 토큰까지 포함해 이 사용자의 Refresh Token이 전부 폐기됨을 커밋된
+DB 상태로 확인, `AuditLogger.logRefreshTokenReuseDetected` 호출도 함께 확인). `./gradlew test`(533
+테스트)와 `./gradlew integrationTest`(59 테스트) 전부 그린.
+
+**완결 필요** — 이 컬럼도 프로그램설계서 3.1절 문서 원본 반영 시 함께 언급해야 한다(문서 반영은
+claude.ai 세션에서 별도 진행).
+
+### COM-SEC-02 JwtTokenProvider — jti(무작위 UUID) 클레임 신설 (2026-09-22, 같은 날 P2 코드리뷰)
+
+**위 Rotation IT가 이미 겪었던 `token_value` UNIQUE 충돌 — "테스트가 우연히 만든 비현실적 타이밍"이
+아니라 "실제로 재발급 로직 자체에 있던 결함"이었다.** 최초 구현 시점엔 이 충돌을 "IT가 시드와 회전을
+같은 메서드 안에서 곧바로 이어 붙여서 생긴 것 — 실제 운영에선 로그인과 재발급 사이에 최소 수 초~수 분이
+지나 성립하지 않는다"고 진단하고, IT 쪽에 `Thread.sleep(1100)`을 넣어 초 경계를 피해 가는 것으로
+마무리했었다(위 "SVC-AUTH-01 Refresh Token Rotation" 절의 "겪은 문제 세 가지" 항목 1번). **코드리뷰가
+이 진단 자체를 뒤집었다** — 클라이언트 재시도나 여러 탭에서 거의 동시에 재발급을 두 번 요청하는
+것은(이번 세션이 이미 별도로 다룬 동시 경쟁과는 다른, 그냥 짧은 시간 안에 순차적으로 두 번 호출되는
+경우) 실제로 충분히 일어날 수 있는 시나리오라, "IT의 타이밍 문제"로 좁혀서 본 것 자체가 틀렸다.
+
+**근본 원인**: `JwtTokenProvider.buildToken()`이 담는 클레임은 `sub`(userId)/`type`/`iat`/`exp`
+넷뿐이었다 — 무작위 요소가 전혀 없다. JWT의 `iat`/`exp`(NumericDate, RFC 7519 §2)는 초 단위로 잘리므로,
+같은 사용자에게 같은 초 안에 두 번 발급하면(`role`이 있는 Access Token이든 없는 Refresh Token이든)
+클레임이 완전히 같아져 서명까지 포함해 **바이트 단위로 동일한 토큰 문자열**이 나온다. Refresh Token은
+이 문자열의 해시를 `refresh_token.token_value`(UNIQUE)에 저장하므로, 그 순간 저장 시도가 제약 위반으로
+실패한다 — sleep은 이 창을 피해 가는 것이지 닫는 게 아니었다.
+
+**수정**: `buildToken()`에 `jti`(RFC 7519 §4.1.7, JWT ID 표준 클레임)로 `UUID.randomUUID().toString()`을
+담는다. Access/Refresh 두 토큰 타입을 분기하지 않고 공유 헬퍼 하나에 무조건 붙였다 — Access Token은
+DB에 저장하지 않아 이 문제 자체가 없었지만, 타입별로 분기하는 것보다 공유 코드 경로 하나에 넣는 쪽이
+더 단순하고(코드 두 갈래를 유지보수할 필요가 없다), 토큰 하나마다 몇 바이트 늘어나는 비용은 무시할
+수준이다. 이제 같은 사용자에게 같은 초 안에 몇 번을 발급해도 토큰 문자열은 항상 다르다 — 확률적
+완화가 아니라 구조적 제거다.
+
+**IT의 `Thread.sleep(1100)` 두 곳을 제거했다** — 남겨 뒀다면 "타이밍을 피해 가는 임시방편이 여전히
+필요하다"는 잘못된 인상을 남긴다. 제거 후에도 두 테스트가 그대로 통과해(동시 경쟁 테스트, logout()
+재사용 탐지 테스트) sleep 없이도 더 이상 충돌하지 않음을 직접 확인했다 — 이 두 IT가 이제 `jti` 수정의
+회귀 테스트도 겸한다.
+
+검증: `JwtTokenProviderTest`에 회귀 테스트 2건 추가(같은 사용자에게 연달아 발급한 Refresh Token 둘이
+다름, Access Token도 마찬가지). `AuthServiceRefreshRotationMariaDbIT`의 두 테스트에서 sleep 제거 후
+재확인. `./gradlew test`(535 테스트, +2)와 `./gradlew integrationTest`(59 테스트) 전부 그린.
 
 ### SVC-USER-01 구현 결정 사항
 

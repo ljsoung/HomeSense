@@ -39,6 +39,7 @@ CREATE TABLE refresh_token (
     token_value       VARCHAR(255)     NOT NULL,
     expires_at        DATETIME         NOT NULL,
     revoked_yn        BOOLEAN          NOT NULL,
+    rotated_yn        BOOLEAN          NOT NULL DEFAULT FALSE,
     created_at        DATETIME         NOT NULL,
     PRIMARY KEY (refresh_token_id),
     UNIQUE KEY uk_refresh_token_value (token_value),

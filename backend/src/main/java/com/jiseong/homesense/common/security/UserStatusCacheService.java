@@ -34,8 +34,26 @@ public class UserStatusCacheService {
         this.ttl = Duration.ofMillis(jwtProperties.accessTokenValidity());
     }
 
+    /**
+     * 무조건 덮어쓴다 — 호출자가 그 순간 DB의 최신 상태를 직접 확정한 경우에만 써야 한다
+     * ({@code UserService.withdraw()}처럼 같은 트랜잭션에서 방금 커밋한 상태를 그대로 반영하는
+     * 경우). 그렇지 않고 "예전에 읽어 둔 값을 뒤늦게 캐시에 채워 넣는" 경우라면 {@link #setIfAbsent}를
+     * 대신 쓰라 — {@link UserStatusResolver}가 이 구분을 정확히 그렇게 하고 있다.
+     */
     public void setStatus(Long userId, UserStatus status) {
         redisTemplate.opsForValue().set(key(userId), status.name(), ttl);
+    }
+
+    /**
+     * 이미 값이 있으면 아무것도 하지 않는다(SETNX) — {@link UserStatusResolver}의 캐시미스 복구
+     * 전용이다. 그 복구용 DB 읽기는 언제 일어났는지 알 수 없는 "지연된 읽기"일 수 있어(GC 정지·
+     * 스레드 스케줄링 등), 그 사이 더 최신 이벤트(예: 탈퇴)가 이미 무조건 쓰기로 캐시를 채워
+     * 놓았다면 그 값을 절대 덮어써서는 안 된다 — {@code setStatus}(무조건 덮어쓰기)를 여기 쓰면
+     * 방금 고친 것과 같은 종류의 race가 이 지점에서 재발한다(코드리뷰 지적).
+     */
+    public boolean setIfAbsent(Long userId, UserStatus status) {
+        Boolean result = redisTemplate.opsForValue().setIfAbsent(key(userId), status.name(), ttl);
+        return Boolean.TRUE.equals(result);
     }
 
     /**

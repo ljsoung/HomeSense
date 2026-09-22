@@ -3,6 +3,7 @@ package com.jiseong.homesense.common.security;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.UUID;
 
 import javax.crypto.SecretKey;
 
@@ -82,11 +83,23 @@ public class JwtTokenProvider {
         return parseClaims(token).get(CLAIM_ROLE, String.class);
     }
 
+    /**
+     * {@code jti}(RFC 7519 §4.1.7, 표준 클레임)에 무작위 UUID를 담는다 — 이게 없으면 같은 사용자에게
+     * 같은 초(NumericDate는 초 단위) 안에 두 번 발급된 토큰은 sub/type/iat/exp가 전부 같아 서명까지
+     * 포함해 바이트 단위로 동일한 문자열이 나온다. Refresh Token은 이 문자열의 해시를
+     * {@code refresh_token.token_value}(UNIQUE)에 저장하므로, 그 순간 두 번째 저장 시도가 제약
+     * 위반으로 실패한다 — Access Token은 DB에 저장하지 않아 이 문제 자체가 없었지만, 굳이 분기해
+     * Refresh Token에만 붙이는 대신 공유 헬퍼 하나에 넣어 항상 함께 붙인다(코드리뷰 P2 지적 —
+     * `refreshAccessToken()`이 즉시 연달아 호출되는 상황(클라이언트 재시도, 동시에 열린 여러 탭 등)이
+     * "로그인과 재발급 사이엔 보통 수 초~수 분이 있다"는 가정만으로는 막히지 않는 실제 시나리오라고
+     * 지적받았다 — 신규 IT의 1.1초 sleep은 이 문제를 피해 가는 것이지 고치는 게 아니었다).
+     */
     private String buildToken(Long userId, long validityMillis, String type, String role) {
         Instant now = Instant.now();
         var builder = Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim(CLAIM_TYPE, type)
+                .id(UUID.randomUUID().toString())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusMillis(validityMillis)))
                 .signWith(secretKey);

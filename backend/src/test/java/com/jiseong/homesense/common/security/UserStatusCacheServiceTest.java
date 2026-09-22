@@ -45,6 +45,26 @@ class UserStatusCacheServiceTest {
     }
 
     @Test
+    void setIfAbsent는_키가_없으면_저장하고_true를_반환한다() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent("user:status:1", "ACTIVE", Duration.ofMillis(1_800_000L))).thenReturn(true);
+
+        boolean written = service.setIfAbsent(1L, UserStatus.ACTIVE);
+
+        assertThat(written).isTrue();
+    }
+
+    @Test
+    void setIfAbsent는_키가_이미_있으면_덮어쓰지_않고_false를_반환한다() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent("user:status:1", "ACTIVE", Duration.ofMillis(1_800_000L))).thenReturn(false);
+
+        boolean written = service.setIfAbsent(1L, UserStatus.ACTIVE);
+
+        assertThat(written).isFalse();
+    }
+
+    @Test
     void getStatus는_캐시에_값이_있으면_UserStatus로_역직렬화해_반환한다() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("user:status:1")).thenReturn("WITHDRAWN");
