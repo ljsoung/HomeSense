@@ -18,7 +18,7 @@ import com.jiseong.homesense.auth.dto.LoginResponse;
 import com.jiseong.homesense.auth.service.AuthService;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
-import com.jiseong.homesense.common.security.UserStatusCacheService;
+import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.common.security.RestAuthenticationEntryPoint;
 import com.jiseong.homesense.common.security.SecurityConfig;
 
@@ -41,7 +41,7 @@ class AuthEndpointSecurityTest {
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
     @MockitoBean
-    private UserStatusCacheService userStatusCacheService;
+    private UserStatusResolver userStatusResolver;
     @MockitoBean
     private AuditLogger auditLogger;
 

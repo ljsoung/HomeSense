@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
-import com.jiseong.homesense.common.security.UserStatusCacheService;
+import com.jiseong.homesense.common.security.UserStatusResolver;
 
 @WebMvcTest(controllers = GlobalExceptionHandlerTest.TestController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -47,7 +47,7 @@ class GlobalExceptionHandlerTest {
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
     @MockitoBean
-    private UserStatusCacheService userStatusCacheService;
+    private UserStatusResolver userStatusResolver;
 
     /*
      * GlobalExceptionHandler는 @RestControllerAdvice라 @WebMvcTest의 controllers 필터와 무관하게

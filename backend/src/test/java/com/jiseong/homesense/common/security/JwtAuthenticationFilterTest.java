@@ -6,8 +6,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.util.Optional;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,15 +17,13 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import com.jiseong.homesense.user.entity.UserStatus;
-
 @ExtendWith(MockitoExtension.class)
 class JwtAuthenticationFilterTest {
 
     @Mock
     private JwtTokenProvider jwtTokenProvider;
     @Mock
-    private UserStatusCacheService userStatusCacheService;
+    private UserStatusResolver userStatusResolver;
 
     @InjectMocks
     private JwtAuthenticationFilter filter;
@@ -50,12 +46,12 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    void 유효한_Access_Token이고_캐시_상태가_ACTIVE이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
+    void 유효한_Access_Token이고_상태_확인_결과가_ACTIVE이면_사용자ID와_권한을_SecurityContext에_채운다() throws Exception {
         when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
         when(jwtTokenProvider.getRole("valid-token")).thenReturn("ADMIN");
-        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.of(UserStatus.ACTIVE));
+        when(userStatusResolver.isActive(1L)).thenReturn(true);
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer valid-token");
@@ -72,46 +68,17 @@ class JwtAuthenticationFilterTest {
                 .containsExactly("ROLE_ADMIN");
     }
 
+    /*
+     * ACTIVE/WITHDRAWN/SUSPENDED/캐시미스+DB폴백의 세부 분기는 UserStatusResolverTest가 담당한다 —
+     * 이 필터는 그 결과(boolean)만 보고 SecurityContext를 채울지 결정하므로, 여기서는 true/false
+     * 두 경우만 검증하면 된다.
+     */
     @Test
-    void 유효한_Access_Token이어도_캐시_상태가_WITHDRAWN이면_인증정보를_채우지_않는다() throws Exception {
+    void 유효한_Access_Token이어도_상태_확인_결과가_false이면_인증정보를_채우지_않는다() throws Exception {
         when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
-        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.of(UserStatus.WITHDRAWN));
-
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader("Authorization", "Bearer valid-token");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
-
-        filter.doFilter(request, response, chain);
-
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-    }
-
-    @Test
-    void 유효한_Access_Token이어도_캐시_상태가_SUSPENDED이면_인증정보를_채우지_않는다() throws Exception {
-        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
-        when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
-        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.of(UserStatus.SUSPENDED));
-
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader("Authorization", "Bearer valid-token");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
-
-        filter.doFilter(request, response, chain);
-
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-    }
-
-    @Test
-    void 유효한_Access_Token이어도_상태_캐시가_TTL_만료로_비어있으면_미인증_처리한다() throws Exception {
-        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
-        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
-        when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
-        when(userStatusCacheService.getStatus(1L)).thenReturn(Optional.empty());
+        when(userStatusResolver.isActive(1L)).thenReturn(false);
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer valid-token");
@@ -138,6 +105,7 @@ class JwtAuthenticationFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(userStatusResolver, never()).isActive(any());
     }
 
     @Test
