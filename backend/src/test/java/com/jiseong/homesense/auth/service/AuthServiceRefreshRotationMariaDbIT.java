@@ -99,15 +99,9 @@ class AuthServiceRefreshRotationMariaDbIT {
         // 한다 — 임의 문자열은 파싱 단계에서 곧바로 InvalidRefreshTokenException으로 막힌다.
         String rawToken = jwtTokenProvider.createRefreshToken(userId);
         seed.refreshToken(userId, refreshTokenHasher.hash(rawToken), false);
-        // JWT의 iat/exp 클레임(NumericDate, RFC 7519 §2)은 초 단위로 잘린다 — 밀리초가 아니다. 같은
-        // 사용자에 대해 같은 "초" 안에 두 번 서명하면(여기서 시드한 토큰과 잠시 뒤 승자가 회전으로
-        // 새로 발급하는 토큰) iat/exp가 초 단위로 완전히 같아져 헤더+페이로드+서명까지 토큰 문자열
-        // 자체가 바이트 단위로 동일해진다 — token_value UNIQUE 제약 위반으로 이어진다(실제로 재현됨,
-        // 처음엔 밀리초 단위 충돌로 오판해 10ms/100ms를 시도했으나 둘 다 불충분했다 — 원인은 시계
-        // 해상도가 아니라 JWT NumericDate의 초 단위 절삭이었다). 실제 운영 환경에서는 로그인과 재발급
-        // 사이에 최소 수 초~수 분이 지나 이 충돌이 성립하지 않지만, 이 테스트는 둘을 같은 메서드
-        // 안에서 곧바로 이어 붙이므로 최소 1초 경계를 넘도록 여유를 둔다.
-        Thread.sleep(1100);
+        // 시드 토큰과 승자가 회전으로 새로 발급하는 토큰이 같은 초 안에 서명될 수 있다 — JJWT의
+        // jti(무작위 UUID) 클레임(코드리뷰 P2 지적으로 추가, JwtTokenProviderTest 참고)이 이제 이 둘을
+        // 항상 구분해 주므로 별도 sleep으로 초 경계를 피할 필요가 없다(이전엔 여기서 1.1초를 잤다).
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
@@ -154,14 +148,13 @@ class AuthServiceRefreshRotationMariaDbIT {
      * 건드리지 않았다.
      */
     @Test
-    void 이미_rotation된_토큰으로_로그아웃하면_후속_토큰까지_포함해_전부_폐기된다() throws Exception {
+    void 이미_rotation된_토큰으로_로그아웃하면_후속_토큰까지_포함해_전부_폐기된다() {
         long userId = seed.user("victim@test.com", "unused-encoded-password", "ACTIVE", null);
         String originalToken = jwtTokenProvider.createRefreshToken(userId);
         seed.refreshToken(userId, refreshTokenHasher.hash(originalToken), false);
-        Thread.sleep(1100); // 위 첫 테스트와 같은 이유(JWT NumericDate 초 단위 절삭) — 시드 토큰과
-                             // rotation이 발급하는 후속 토큰이 같은 초에 서명되지 않게 한다.
 
-        // 공격자가 탈취한 originalToken으로 먼저 회전해 후속 토큰(공격자 세션)을 확보한다.
+        // 공격자가 탈취한 originalToken으로 먼저 회전해 후속 토큰(공격자 세션)을 확보한다 — jti
+        // 덕분에 시드 토큰과 같은 초에 발급돼도 충돌하지 않는다(위 첫 테스트 주석 참고).
         authService.refreshAccessToken(originalToken);
         assertThat(seed.count("SELECT COUNT(*) FROM refresh_token WHERE user_id = ?", userId)).isEqualTo(2);
 
