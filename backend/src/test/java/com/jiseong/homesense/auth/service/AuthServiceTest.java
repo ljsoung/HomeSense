@@ -541,6 +541,7 @@ class AuthServiceTest {
 
         verify(refreshTokenRepository, never()).revokeAllByUserId(any());
         verify(accessTokenEpochService, never()).invalidateTokensIssuedBefore(any(), any());
+        verify(loginAttemptService, never()).reset(anyString());
     }
 
     @Test
@@ -557,10 +558,11 @@ class AuthServiceTest {
         assertThat(withdrawnUser.getPassword()).isEqualTo("encoded");
         verify(refreshTokenRepository, never()).revokeAllByUserId(any());
         verify(accessTokenEpochService, never()).invalidateTokensIssuedBefore(any(), any());
+        verify(loginAttemptService, never()).reset(anyString());
     }
 
     @Test
-    void resetPassword_성공하면_비밀번호를_변경하고_모든_RefreshToken을_폐기하고_기존_AccessToken도_무효화한다() {
+    void resetPassword_성공하면_비밀번호를_변경하고_모든_RefreshToken을_폐기하고_기존_AccessToken도_무효화하고_로그인_잠금도_해제한다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         ReflectionTestUtils.setField(user, "userId", 1L);
         when(passwordResetTokenService.consumeToken("token")).thenReturn(Optional.of(1L));
@@ -577,5 +579,10 @@ class AuthServiceTest {
         ArgumentCaptor<Instant> cutoffCaptor = ArgumentCaptor.forClass(Instant.class);
         verify(accessTokenEpochService).invalidateTokensIssuedBefore(eq(1L), cutoffCaptor.capture());
         assertThat(cutoffCaptor.getValue()).isBetween(before, after);
+
+        // 재설정 전에 5회 실패로 잠겨 있었더라도, 토큰을 원자적으로 소비해 여기까지 도달한 것 자체가
+        // 메일함 소유를 증명하므로 login:fail 카운터도 함께 지워야 새 비밀번호로 곧바로 로그인할 수
+        // 있다(코드리뷰 P2 지적).
+        verify(loginAttemptService).reset("user@test.com");
     }
 }

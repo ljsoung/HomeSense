@@ -282,6 +282,13 @@ public class AuthService {
      * Access Token은 전부 무효"라는 컷오프를 남겨, 다음 요청부터는 그 필터가 이 컷오프와 토큰의
      * {@code iat}를 비교해 재설정 이전 토큰을 걸러낸다(예외 없이 SecurityContext 설정만 건너뜀 —
      * 만료·상태불일치 토큰과 같은 패턴).
+     *
+     * <p><b>{@link LoginAttemptService}의 로그인 실패 잠금도 함께 푼다(코드리뷰 P2 지적).</b> 비밀번호를
+     * 5회 틀려 {@code login:fail:{email}}이 잠금 임계치에 도달한 뒤 비밀번호 찾기로 전환한 사용자는,
+     * 이 메서드가 비밀번호를 정상적으로 바꿔도 그 Redis 카운터가 그대로 남아있어 새 비밀번호로 곧바로
+     * 로그인해도 TTL(5분)이 지날 때까지 {@link AccountLockedException}에 계속 막혔다 — 이메일 링크의
+     * 토큰을 원자적으로 소비(GETDEL)해 여기까지 도달했다는 것 자체가 이미 그 메일함(계정)의 소유를
+     * 증명하므로, 더 이상 잠가 둘 이유가 없다.
      */
     public void resetPassword(String rawToken, String newPassword) {
         Long userId = passwordResetTokenService.consumeToken(rawToken).orElseThrow(InvalidResetTokenException::new);
@@ -293,6 +300,7 @@ public class AuthService {
         user.changePassword(passwordEncoder.encode(newPassword));
         refreshTokenRepository.revokeAllByUserId(userId);
         accessTokenEpochService.invalidateTokensIssuedBefore(userId, Instant.now());
+        loginAttemptService.reset(user.getEmail());
 
         log.atInfo()
                 .addKeyValue("auditEvent", "PASSWORD_RESET_COMPLETED")

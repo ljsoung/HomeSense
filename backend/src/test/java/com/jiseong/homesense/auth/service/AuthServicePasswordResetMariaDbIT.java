@@ -89,6 +89,8 @@ class AuthServicePasswordResetMariaDbIT {
     private JwtTokenProvider jwtTokenProvider;
     @Autowired
     private AccessTokenEpochService accessTokenEpochService;
+    @Autowired
+    private LoginAttemptService loginAttemptService;
 
     @Test
     void 재설정하면_커밋_이후_재조회에서도_새_비밀번호와_토큰_전체_폐기가_모두_반영돼_있고_토큰은_1회성이다() {
@@ -220,5 +222,31 @@ class AuthServicePasswordResetMariaDbIT {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    /**
+     * 코드리뷰 P2 지적 — 비밀번호를 5회 틀려 {@code login:fail:{email}}이 잠금 임계치에 도달한 뒤
+     * 비밀번호 찾기로 전환한 사용자는, {@code resetPassword()}가 비밀번호를 정상적으로 바꿔도 그
+     * Redis 카운터가 그대로 남아있어 새 비밀번호로 곧바로 로그인해도 TTL(5분)이 지날 때까지 잠금에
+     * 계속 막혔다. 이 IT는 실제 Redis 위에서 잠금→재설정→잠금해제 전체 흐름을 재현한다 — Mockito로는
+     * "resetPassword()가 loginAttemptService.reset()을 호출했다"까지만 증명하고, 그 호출이 실제로
+     * isLocked()의 판정을 뒤집는지는(같은 키를 참조하는지, TTL이 아니라 값 자체가 지워지는지 등) 증명할
+     * 수 없다.
+     */
+    @Test
+    void 재설정_전에_로그인_잠금이_걸려있었어도_재설정에_성공하면_잠금이_풀린다() {
+        String email = "locked-reset-it@test.com";
+        User user = userRepository.saveAndFlush(
+                User.createUser(email, passwordEncoder.encode("OldAbcd1234!"), "닉네임"));
+        String rawToken = passwordResetTokenService.issueToken(user.getUserId());
+
+        for (int i = 0; i < 5; i++) {
+            loginAttemptService.recordFailure(email);
+        }
+        assertThat(loginAttemptService.isLocked(email)).isTrue();
+
+        authService.resetPassword(rawToken, "NewAbcd1234!");
+
+        assertThat(loginAttemptService.isLocked(email)).isFalse();
     }
 }

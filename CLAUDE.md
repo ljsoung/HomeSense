@@ -632,6 +632,34 @@ AUTH-03 절 참고)과 같은 원자적 read-then-write 패턴이다. `requestPa
 `./gradlew integrationTest`(15개 MariaDB IT 클래스, 63 테스트, 이 신규 케이스 포함) 둘 다 실행해
 그린 확인했다.**
 
+### AUTH-03 resetPassword() 성공 시 로그인 실패 잠금 해제 (2026-09-23, Codex P2 코드리뷰 지적)
+
+**재설정 성공 후에도 `login:fail:{email}` 잠금이 그대로 남아있었다.** 비밀번호를 5회 틀려
+`LoginAttemptService`가 계정을 잠근(`login:fail:{email}` 카운터가 임계치 도달, TTL 5분) 상태에서
+사용자가 비밀번호 찾기로 전환해 재설정에 성공해도, `resetPassword()`는 이 Redis 카운터를 전혀
+건드리지 않았다 — 새 비밀번호로 곧바로 로그인해도 그 카운터의 TTL이 자연 만료될 때까지(최대 5분)
+계속 `AccountLockedException`에 막혔다. 이메일 링크로 받은 재설정 토큰을 원자적으로 소비(GETDEL)해
+`resetPassword()`까지 도달했다는 것 자체가 이미 그 메일함(=계정)의 소유를 증명하므로, 더 이상 그
+잠금을 유지할 이유가 없다.
+
+**수정: `resetPassword()` 성공 경로 마지막에 `loginAttemptService.reset(user.getEmail())`을 추가했다.**
+`user.getEmail()`은 `User.createUser()`가 저장 시점에 이미 `User.normalizeEmail()`로 정규화해 둔 값이라
+(`UserRepository.findByEmail()`/`existsByEmail()`이 조회 시에도 같은 정규화를 적용하는 것과 같은 전제),
+`authenticate()`가 쓰는 `normalizedEmail`과 동일한 키를 가리킨다 — 별도 정규화 호출이 필요 없다.
+`LoginAttemptService.reset()`은 `login()`의 자격 검증 성공 경로가 이미 쓰던 기존 메서드를 그대로
+재사용했다(신규 메서드 없음).
+
+**검증**: `AuthServiceTest.resetPassword_성공하면_...`에 `verify(loginAttemptService).reset("user@test.com")`
+추가, 세 실패 경로(토큰 무효/사용자 없음/계정 비ACTIVE)에는 `verify(loginAttemptService, never()).reset(...)`
+추가. **`AuthServicePasswordResetMariaDbIT.재설정_전에_로그인_잠금이_걸려있었어도_재설정에_성공하면_잠금이_풀린다`
+(신규, Testcontainers+실 Redis)** — 실제 `LoginAttemptService.recordFailure()`를 5회 호출해 잠금을
+만든 뒤 `AuthService.resetPassword()`를 실행하고, `isLocked()`가 실제로 false로 뒤집히는지 실 Redis로
+확인한다(Mockito는 `reset()` 호출 여부까지만 증명하고, 그 호출이 실제로 `isLocked()`의 판정을
+뒤집는지는 증명하지 못한다 — 같은 키를 참조하는지, delete가 아니라 예컨대 TTL만 건드리는 식으로
+어긋나 있지는 않은지는 실제 Redis 라운드트립으로만 확인된다). **2026-09-23, Docker가 가동 중인
+세션에서 `./gradlew test`(575 테스트)와 `./gradlew integrationTest`(15개 MariaDB IT 클래스, 64 테스트,
+이 신규 케이스 포함) 둘 다 실행해 그린 확인했다.**
+
 ### SVC-USER-01 구현 결정 사항
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |
