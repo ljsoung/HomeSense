@@ -43,7 +43,6 @@ import com.jiseong.homesense.common.config.JwtProperties;
 import com.jiseong.homesense.common.config.WithdrawalProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
-import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
 import com.jiseong.homesense.user.repository.UserRepository;
@@ -64,8 +63,6 @@ class AuthServiceTest {
     private RefreshTokenHasher refreshTokenHasher;
     @Mock
     private LoginAttemptService loginAttemptService;
-    @Mock
-    private UserStatusCacheService userStatusCacheService;
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 12, 0, 0);
@@ -79,8 +76,7 @@ class AuthServiceTest {
         WithdrawalPolicy withdrawalPolicy = new WithdrawalPolicy(Clock.fixed(NOW.atZone(KST).toInstant(), KST),
                 new WithdrawalProperties(GRACE_DAYS, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
         authService = new AuthService(userRepository, refreshTokenRepository, passwordEncoder,
-                jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy,
-                userStatusCacheService);
+                jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy);
     }
 
     @Test
@@ -110,7 +106,6 @@ class AuthServiceTest {
         assertThat(response.nickname()).isEqualTo("닉네임");
         verify(userRepository).save(any(User.class));
         verify(refreshTokenRepository).save(any(RefreshToken.class));
-        verify(userStatusCacheService).setStatus(any(), eq(UserStatus.ACTIVE));
     }
 
     @Test
@@ -166,7 +161,6 @@ class AuthServiceTest {
                 });
 
         verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
-        verify(userStatusCacheService, never()).setStatus(any(), any());
     }
 
     @Test
@@ -226,7 +220,6 @@ class AuthServiceTest {
 
         assertThat(response.accessToken()).isEqualTo("access-token");
         verify(loginAttemptService).reset("user@test.com");
-        verify(userStatusCacheService).setStatus(any(), eq(UserStatus.ACTIVE));
     }
 
     @Test
@@ -303,7 +296,6 @@ class AuthServiceTest {
                         e -> assertThat(e.errorCode()).isEqualTo("ACCOUNT_WITHDRAWN"));
 
         verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
-        verify(userStatusCacheService, never()).setStatus(any(), any());
     }
 
     @Test
@@ -321,7 +313,6 @@ class AuthServiceTest {
         assertThat(response.accessToken()).isEqualTo("new-access-token");
         assertThat(response.expiresIn()).isEqualTo(1800L);
         verify(jwtTokenProvider, never()).createRefreshToken(anyLong());
-        verify(userStatusCacheService).setStatus(user.getUserId(), UserStatus.ACTIVE);
     }
 
     @Test
@@ -392,7 +383,6 @@ class AuthServiceTest {
         verify(refreshTokenRepository).save(any(RefreshToken.class)); // 새 토큰 발급
         // 탈퇴 시 폐기된 기존 refresh_token은 되살리지 않는다 — 기존 토큰을 건드리는 호출이 없다.
         verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
-        verify(userStatusCacheService).setStatus(1L, UserStatus.ACTIVE);
     }
 
     @Test
@@ -477,6 +467,5 @@ class AuthServiceTest {
 
         verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
         verify(refreshTokenRepository, never()).save(any());
-        verify(userStatusCacheService, never()).setStatus(any(), any());
     }
 }

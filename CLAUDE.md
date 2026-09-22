@@ -135,10 +135,10 @@ com.homesense
 | 신설 클래스 | `UserStatusCacheService`(`common.security`) — `StringRedisTemplate`만 사용(Repository 직접 의존 없음). `setStatus(userId, status)`/`getStatus(userId): Optional<UserStatus>`. **`UserStatusResolver`(`common.security`, 같은 날 P1 코드리뷰로 추가)** — `UserStatusCacheService`+`UserRepository`를 조합해 캐시미스 시 DB로 폴백한다(`isActive(userId): boolean`). `JwtAuthenticationFilter`는 이제 후자만 의존한다 — 상세는 아래 참고 |
 | Redis 키 | `user:status:{userId}` |
 | TTL | `JwtProperties.accessTokenValidity()`(기본 1,800,000ms=30분)를 그대로 참조 — Access Token 만료 시각과 정확히 동기화 |
-| 쓰기 지점 | `AuthService.loginInternal()`(login/signup/reactivate 세 성공 경로가 공유)과 `refreshAccessToken()` 성공 시 `ACTIVE`로 SETEX. `UserService.withdraw()` 성공 시 `WITHDRAWN`으로 SETEX |
+| 쓰기 지점 | **[2026-09-22, 같은 날 두 번째 P1 코드리뷰로 변경]** `UserService.withdraw()` 성공 시 `WITHDRAWN`으로 SETEX하는 것 **하나뿐**이다. `AuthService.loginInternal()`(login/signup/reactivate 공유)과 `refreshAccessToken()`은 더 이상 `ACTIVE`를 캐시에 쓰지 않는다 — 아래 "ACTIVE 쓰기 지점 제거" 단락 참고. `ACTIVE` 캐시는 이제 오직 `UserStatusResolver`의 캐시미스 복구 경로에서만 채워진다. |
 | 필터 동작 | `JwtAuthenticationFilter`가 `validateToken()`+`isAccessToken()` 통과 후 `UserStatusResolver.isActive(userId)`를 확인 — `false`면 SecurityContext 설정을 건너뛰고 필터 체인만 계속 진행한다(401을 직접 던지지 않음, 기존 만료 토큰 처리와 동일 패턴). |
 | **무효화 조건** | `JwtProperties.accessTokenValidity` 값 자체가 바뀌면 `UserStatusCacheService`의 TTL도 같은 값을 참조하는 생성자 로직이므로 자동으로 함께 바뀐다 — 다만 TTL을 이 값과 별도로 관리하도록 리팩터링하면 그 즉시 동기화가 깨지니 재검토하라. |
-| **완결 필요 — `SUSPENDED` 쓰기 지점 없음** | 이 캐시에 `SUSPENDED`를 실제로 쓰는 코드가 아직 없다 — ADM 도메인(5단계 선택 범위, `AdminService.updateUserStatus()`)이 구현되지 않았기 때문이다. ADM-01 구현 시 정지 처리 지점에서 `userStatusCacheService.setStatus(userId, SUSPENDED)`를 반드시 추가하라 — 이 항목이 빠지면 관리자가 계정을 정지시켜도 캐시가 TTL(최대 30분) 동안 옛 `ACTIVE` 값을 계속 반환해 정지가 즉시 반영되지 않는다. |
+| **완결 필요 — `SUSPENDED` 쓰기 지점 없음** | 이 캐시에 `SUSPENDED`를 실제로 쓰는 코드가 아직 없다 — ADM 도메인(5단계 선택 범위, `AdminService.updateUserStatus()`)이 구현되지 않았기 때문이다. ADM-01 구현 시 정지 처리 지점에서 `userStatusCacheService.setStatus(userId, SUSPENDED)`를 반드시 추가하라 — 이 항목이 빠지면 관리자가 계정을 정지시켜도 캐시가 TTL(최대 30분) 동안 옛 `ACTIVE` 값을 계속 반환해 정지가 즉시 반영되지 않는다. **이 쓰기는 아래 "ACTIVE 쓰기 지점 제거" 단락이 설명하는 레이스와 무관하게 안전하다** — WITHDRAWN과 같은 "더 제한적인 방향" 쓰기라, `AdminService`가 읽은 상태가 그 사이 낡아져도 최악의 경우 과잉 차단일 뿐이고 다음 요청에서 `UserStatusResolver`가 스스로 바로잡는다. |
 | BAT-USR-01 파기(purge)와의 관계 | `WithdrawnUserPurgeService.purgeOne()`(사용자 행 물리 삭제)은 캐시를 evict하지 않는다 — 파기는 탈퇴 후 유예기간(기본 7일)이 지나야 실행되는데, 그 시점엔 탈퇴 시점에 SETEX한 `WITHDRAWN` 캐시가 TTL(최대 30분)로 이미 자연 만료된 지 오래라 별도 evict가 실질적 의미를 갖지 않는다 — 위 "BAT-USR-01" 절 체크리스트의 "purge에서도 키를 갱신/삭제" 항목은 이 분석에 따라 처리 불필요로 재확인됐다. |
 
 **[처리완료 2026-09-22, 같은 날 코드리뷰 P1로 뒤집힘] "DB 폴백은 두지 않는다"는 최초 결정이 실제로는
@@ -165,16 +165,44 @@ com.homesense
 (UserStatusCacheService)`로 패키지 순환이 생겨(FAV/RGN 도메인이 이미 겪은 것과 같은 종류의 문제,
 CLAUDE.md SVC-FAV-01 절의 `getFavoriteRegions()` 항목 참고) 기각했다.
 
-**남은 과제(완결 필요, 우선순위 중간) — 프론트 401→refresh 인터셉터 자체는 여전히 없다.** 이번 수정은
-"백엔드가 캐시미스를 안전하게 복구한다"는 것만 보장한다 — 진짜 만료된 Access Token(캐시가 아니라 JWT
-자체의 exp 클레임 만료)에 대해서는 여전히 프론트가 401을 받고도 자동으로 `/api/auth/refresh`를 호출해
-재시도하지 않는다(SCR-HOME-01 절이 이미 이 갭을 "보호된 라우트가 실제로 생기는 시점에 추가"로 유예해
-뒀다). 이 갭은 이번 수정으로 닫히지 않았다 — 인터셉터를 실제로 붙일 때 이 항목부터 다시 확인하라.
+**[처리완료 2026-09-22, 같은 날 세 번째 P1 코드리뷰] `AuthService`의 ACTIVE 쓰기 자체를 제거 —
+"캐시미스 복구"와는 다른 종류의 버그였다.** 위 `UserStatusResolver` 도입으로 캐시미스 문제는
+해결됐지만, `AuthService.loginInternal()`/`refreshAccessToken()`이 성공 시 `userStatusCacheService.
+setStatus(userId, ACTIVE)`를 무조건 실행하는 코드는 그대로 남아 있었다 — 코드리뷰(Codex, P1)가
+정확히 이 지점을 지적했다: **`refreshAccessToken()`이 읽는 `user.getStatus()`는 그 메서드가 시작될
+때(정확히는 `findByTokenValue()`가 REPEATABLE READ 스냅샷을 여는 시점)의 값인데, 그 값이 ACTIVE라고
+확인한 뒤 실제로 Redis에 쓰기까지 실행되는 사이(GC 정지·스레드 스케줄링 지연 등으로 임의로 길어질 수
+있는 창)에 다른 트랜잭션이 같은 사용자를 탈퇴시켜 캐시에 WITHDRAWN을 먼저 써 놓았다면, 뒤늦게 재개된
+이 메서드가 그 위에 ACTIVE를 다시 덮어써 버린다.** 그 결과 새로 발급된 Access Token은 만료 전까지
+(최대 30분) 필터를 그대로 통과해, 이 기능 전체가 막으려던 "탈퇴 직후에도 기존 토큰이 통용되는" 바로
+그 문제를 재현한다 — `loginInternal()`(login/signup/reactivate 공유)도 같은 모양의 코드라 동일한
+결함을 안고 있었다.
+
+**수정: 두 메서드 모두에서 `ACTIVE` 캐시 쓰기를 완전히 제거했다** — 버전 관리나 Lua 스크립트 같은
+동시성 장치를 추가하는 대신,애초에 "읽은 뒤 나중에 쓰는" 이 패턴 자체를 없앴다. 새로 발급된 토큰으로
+오는 바로 다음 인증 요청은 캐시가 비어 있을 것이므로 `UserStatusResolver`가 그 시점에 DB를 다시 읽어
+캐시를 채운다 — 이 읽기는 `findById()` 한 번짜리 짧은 조회라 "읽고 나서 쓰기까지" 사이에 다른
+트랜잭션이 끼어들 창이 사실상 없다(수 마이크로초 수준). `UserService.withdraw()`의 `WITHDRAWN` 쓰기는
+그대로 두었다 — **"차단은 즉시, 해제는 다음 확인 때"라는 의도적 비대칭이 이 설계의 핵심이다.** 더
+제한적인 상태(WITHDRAWN)를 먼저 반영해도 최악의 경우 과잉 차단인데, 이는 다음 정상 요청에서
+`UserStatusResolver`가 최신 값을 다시 읽으며 스스로 바로잡힌다 — 반대로 더 허용적인 상태(ACTIVE)를
+먼저 반영하면 과소 차단(보안 구멍)이 되고, 그 구멍은 캐시 TTL(최대 30분) 동안 자연히 닫히지 않는다.
+이 비대칭 때문에 ADM 도메인이 나중에 `SUSPENDED`를 쓰게 되더라도(위 "완결 필요" 행) 그 쓰기는 안전하다
+— WITHDRAWN과 마찬가지로 "더 제한적인" 방향이기 때문이다.
+
+**남은 과제(완결 필요, 우선순위 중간) — 프론트 401→refresh 인터셉터 자체는 여전히 없다.** 이 절의
+두 수정 모두 백엔드가 스스로를 안전하게 지키도록 만든 것뿐이다 — 진짜 만료된 Access Token(캐시가
+아니라 JWT 자체의 exp 클레임 만료)에 대해서는 여전히 프론트가 401을 받고도 자동으로 `/api/auth/
+refresh`를 호출해 재시도하지 않는다(SCR-HOME-01 절이 이미 이 갭을 "보호된 라우트가 실제로 생기는
+시점에 추가"로 유예해 뒀다). 이 갭은 이번 두 수정으로도 닫히지 않았다 — 인터셉터를 실제로 붙일 때
+이 항목부터 다시 확인하라.
 
 검증: `UserStatusCacheServiceTest`(키·TTL·직렬화), `UserStatusResolverTest`(캐시 히트 시 DB 미조회,
 캐시미스+DB에 ACTIVE/비ACTIVE 각각의 캐시 재기록, 캐시미스+DB에도 없음), `JwtAuthenticationFilterTest`
-(리졸버가 반환하는 boolean만으로 SecurityContext 설정 여부 결정), `AuthServiceTest`/`UserServiceTest`
-(성공 경로에서 캐시 쓰기, 실패 경로에서 미호출 검증). Redis 연결은 `LoginAttemptService`가 이미
+(리졸버가 반환하는 boolean만으로 SecurityContext 설정 여부 결정), `UserServiceTest`(withdraw 성공
+경로에서 캐시 쓰기, 실패 경로에서 미호출 검증). `AuthServiceTest`는 이제 `UserStatusCacheService`를
+전혀 의존하지 않는다 — ACTIVE 쓰기가 존재하지 않는다는 사실 자체가 (그 의존성을 제거한) 생성자
+시그니처로 증명된다, 별도 `verify(..., never())`가 필요 없다. Redis 연결은 `LoginAttemptService`가 이미
 요구하던 인프라라 이 변경으로 새로 추가된 테스트 인프라 요구사항은 없다 — **2026-09-22, Docker가
 가동 중인 세션에서 `./gradlew integrationTest`로 실제 실행해 확인했다**(13개 MariaDB IT 클래스, 57
 테스트 전부 그린, `UserStatusResolver` 리팩터링 이후에도 그린 유지 재확인 — `AuthService`/
