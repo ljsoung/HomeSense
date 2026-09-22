@@ -222,9 +222,15 @@ public class AuthService {
      * 성공(예외 없음)만 보인다 — 실제로 토큰을 발급하고 메일을 보내는 것은 계정이 존재하고
      * {@code ACTIVE}일 때뿐이다(WITHDRAWN/SUSPENDED에는 보내지 않는다 — AUTH-01의 "탈퇴/정지 계정은
      * 로그인 자체를 차단" 원칙과 정합, CLAUDE.md AUTH-03 결정 기록 참고). 재전송 쿨다운(60초)만 429로
-     * 예외를 던지는데, 이 쿨다운은 계정 존재 여부와 무관하게 항상 세팅되므로({@link #passwordResetTokenService}
+     * 예외를 던지는데, 이 쿨다운은 계정 존재 여부와 무관하게 항상 시도되므로({@link #passwordResetTokenService}
      * 호출이 이 필터 앞에 있다) 오라클이 되지 않는다({@link PasswordResetCooldownException} javadoc
      * 참고).
+     *
+     * <p>쿨다운 획득은 {@link PasswordResetTokenService#tryStartCooldown}(SETNX) 한 번으로 원자적으로
+     * 처리한다 — 이전엔 조회(isCoolingDown)와 세팅(startCooldown)이 별개 호출이라, 같은 이메일로 거의
+     * 동시에 여러 요청이 들어오면 전부 "쿨다운 없음"을 관측해 60초 제한을 무시하고 나란히 통과할 수
+     * 있었다(P2 코드리뷰 지적) — 그 사이 각자 비동기 SES 발송+토큰 발급을 중복 실행해, 광고된 "60초에
+     * 한 번"과 달리 짧은 시간에 여러 통의 메일과 여러 개의 유효한 재설정 토큰이 발급될 수 있었다.
      *
      * <p>토큰 발급+메일 발송은 {@link PasswordResetNotifier#notifyAsync}로 위임해 비동기 실행한다 —
      * 이 메서드 자신은 findByEmail() 하나만 수행하는 읽기 전용 트랜잭션이라 readOnly로 열고, 느린
@@ -234,10 +240,9 @@ public class AuthService {
     @Transactional(readOnly = true)
     public void requestPasswordReset(String rawEmail) {
         String normalizedEmail = User.normalizeEmail(rawEmail);
-        if (passwordResetTokenService.isCoolingDown(normalizedEmail)) {
+        if (!passwordResetTokenService.tryStartCooldown(normalizedEmail)) {
             throw new PasswordResetCooldownException();
         }
-        passwordResetTokenService.startCooldown(normalizedEmail);
 
         userRepository.findByEmail(rawEmail)
                 .filter(user -> user.getStatus() == UserStatus.ACTIVE)

@@ -454,52 +454,49 @@ class AuthServiceTest {
     // --- requestPasswordReset (AUTH-03 1단계) ---
 
     @Test
-    void requestPasswordReset_쿨다운_중이면_계정을_조회하지_않고_PasswordResetCooldownException을_던진다() {
-        when(passwordResetTokenService.isCoolingDown("user@test.com")).thenReturn(true);
+    void requestPasswordReset_쿨다운_획득에_실패하면_계정을_조회하지_않고_PasswordResetCooldownException을_던진다() {
+        when(passwordResetTokenService.tryStartCooldown("user@test.com")).thenReturn(false);
 
         assertThatThrownBy(() -> authService.requestPasswordReset("user@test.com"))
                 .isInstanceOf(PasswordResetCooldownException.class);
 
         verify(userRepository, never()).findByEmail(anyString());
-        verify(passwordResetTokenService, never()).startCooldown(anyString());
     }
 
     @Test
-    void requestPasswordReset_존재하지_않는_이메일이어도_쿨다운을_세팅하고_예외_없이_종료한다() {
-        when(passwordResetTokenService.isCoolingDown("nouser@test.com")).thenReturn(false);
+    void requestPasswordReset_존재하지_않는_이메일이어도_쿨다운_획득을_시도하고_예외_없이_종료한다() {
+        when(passwordResetTokenService.tryStartCooldown("nouser@test.com")).thenReturn(true);
         when(userRepository.findByEmail("nouser@test.com")).thenReturn(Optional.empty());
 
         authService.requestPasswordReset("nouser@test.com");
 
-        // 계정 존재 여부와 무관하게 항상 쿨다운을 세팅해야 재전송 응답 차이가 계정 존재를 드러내는
+        // 계정 존재 여부와 무관하게 항상 쿨다운 획득을 시도해야 재전송 응답 차이가 계정 존재를 드러내는
         // 오라클이 되지 않는다(PasswordResetCooldownException javadoc 참고).
-        verify(passwordResetTokenService).startCooldown("nouser@test.com");
+        verify(passwordResetTokenService).tryStartCooldown("nouser@test.com");
         verify(passwordResetNotifier, never()).notifyAsync(any(), anyString());
     }
 
     @Test
-    void requestPasswordReset_탈퇴한_계정이면_쿨다운만_세팅하고_알림을_보내지_않는다() {
+    void requestPasswordReset_탈퇴한_계정이면_쿨다운_획득만_시도하고_알림을_보내지_않는다() {
         User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
         withdrawnUser.withdraw(NOW);
-        when(passwordResetTokenService.isCoolingDown("withdrawn@test.com")).thenReturn(false);
+        when(passwordResetTokenService.tryStartCooldown("withdrawn@test.com")).thenReturn(true);
         when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(withdrawnUser));
 
         authService.requestPasswordReset("withdrawn@test.com");
 
-        verify(passwordResetTokenService).startCooldown("withdrawn@test.com");
         verify(passwordResetNotifier, never()).notifyAsync(any(), anyString());
     }
 
     @Test
-    void requestPasswordReset_ACTIVE_계정이면_쿨다운을_세팅하고_비동기_알림을_호출한다() {
+    void requestPasswordReset_ACTIVE_계정이면_쿨다운을_획득하고_비동기_알림을_호출한다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         ReflectionTestUtils.setField(user, "userId", 1L);
-        when(passwordResetTokenService.isCoolingDown("user@test.com")).thenReturn(false);
+        when(passwordResetTokenService.tryStartCooldown("user@test.com")).thenReturn(true);
         when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
 
         authService.requestPasswordReset("user@test.com");
 
-        verify(passwordResetTokenService).startCooldown("user@test.com");
         verify(passwordResetNotifier).notifyAsync(1L, "user@test.com");
     }
 

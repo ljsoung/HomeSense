@@ -90,16 +90,22 @@ class PasswordResetTokenService {
         return userId;
     }
 
-    boolean isCoolingDown(String normalizedEmail) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey(cooldownKey(normalizedEmail)));
-    }
-
     /**
-     * 계정 존재 여부와 무관하게 항상 호출해야 한다 — {@link com.jiseong.homesense.auth.exception.PasswordResetCooldownException}
-     * javadoc 참고(존재하는 계정에만 쿨다운을 걸면 그 자체가 계정 존재를 드러내는 오라클이 된다).
+     * 쿨다운 확인(GET)과 세팅(SET)을 하나의 SETNX로 원자적으로 묶는다(P2 코드리뷰 지적) — 이전에는
+     * {@code isCoolingDown()}으로 먼저 조회하고 통과하면 별도 호출로 {@code startCooldown()}을 실행하는
+     * TOCTOU 패턴이었다. 같은 이메일로 동시에 여러 요청이 들어오면 그 조회~세팅 사이의 창에서 전부
+     * "쿨다운 없음"을 관측할 수 있어, 60초 제한이 무력화된 채 여러 건이 동시에 통과해 각자
+     * {@link PasswordResetNotifier#notifyAsync}(비동기 SES 발송+토큰 발급)를 중복 실행할 수 있었다 —
+     * SETNX는 Redis 단일 커맨드라 이 창 자체가 성립하지 않는다({@link #consumeToken}의 GETDEL과 같은
+     * 이유). 계정 존재 여부와 무관하게 항상 호출해야 한다 —
+     * {@link com.jiseong.homesense.auth.exception.PasswordResetCooldownException} javadoc 참고(존재하는
+     * 계정에만 쿨다운을 걸면 그 자체가 계정 존재를 드러내는 오라클이 된다).
+     *
+     * @return 쿨다운을 획득했으면(=이전에 쿨다운이 없었으면) true, 이미 쿨다운 중이었으면 false
      */
-    void startCooldown(String normalizedEmail) {
-        redisTemplate.opsForValue().set(cooldownKey(normalizedEmail), "1", COOLDOWN_TTL);
+    boolean tryStartCooldown(String normalizedEmail) {
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(cooldownKey(normalizedEmail), "1", COOLDOWN_TTL);
+        return Boolean.TRUE.equals(acquired);
     }
 
     private Optional<Long> parse(String value) {

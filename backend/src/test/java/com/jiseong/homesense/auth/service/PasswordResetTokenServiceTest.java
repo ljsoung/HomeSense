@@ -119,28 +119,25 @@ class PasswordResetTokenServiceTest {
     }
 
     @Test
-    void isCoolingDown_키가_있으면_true를_반환한다() {
-        service = new PasswordResetTokenService(redisTemplate, hasher);
-        when(redisTemplate.hasKey("password-reset:cooldown:user@test.com")).thenReturn(true);
-
-        assertThat(service.isCoolingDown("user@test.com")).isTrue();
-    }
-
-    @Test
-    void isCoolingDown_키가_없으면_false를_반환한다() {
-        service = new PasswordResetTokenService(redisTemplate, hasher);
-        when(redisTemplate.hasKey("password-reset:cooldown:user@test.com")).thenReturn(false);
-
-        assertThat(service.isCoolingDown("user@test.com")).isFalse();
-    }
-
-    @Test
-    void startCooldown은_60초_TTL로_쿨다운_키를_세팅한다() {
+    void tryStartCooldown은_SETNX로_60초_TTL_쿨다운_키_획득을_시도하고_성공하면_true를_반환한다() {
         service = new PasswordResetTokenService(redisTemplate, hasher);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent("password-reset:cooldown:user@test.com", "1", Duration.ofSeconds(60)))
+                .thenReturn(true);
 
-        service.startCooldown("user@test.com");
+        assertThat(service.tryStartCooldown("user@test.com")).isTrue();
+    }
 
-        verify(valueOperations).set("password-reset:cooldown:user@test.com", "1", Duration.ofSeconds(60));
+    @Test
+    void tryStartCooldown은_이미_쿨다운_중이면_false를_반환한다() {
+        // isCoolingDown(GET)과 startCooldown(SET)을 분리하지 않고 SETNX 하나로 묶은 이유(P2 코드리뷰
+        // 지적) — 별개 호출이면 그 사이 창에서 동시 요청이 전부 "쿨다운 없음"을 관측해 60초 제한을
+        // 우회할 수 있었다.
+        service = new PasswordResetTokenService(redisTemplate, hasher);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent("password-reset:cooldown:user@test.com", "1", Duration.ofSeconds(60)))
+                .thenReturn(false);
+
+        assertThat(service.tryStartCooldown("user@test.com")).isFalse();
     }
 }

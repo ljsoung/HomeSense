@@ -602,6 +602,36 @@ ID로 등록돼 있지 않다(코드리뷰 지적, 2026-09-23).** COM-SEC-01(`Jw
 (위 "프로그램 인벤토리" 절의 COM 8개 목록도 함께 9개로 갱신), 프로그램설계서에도 클래스·메서드
 시그니처를 반영하라 — 지금 당장 막을 일은 아니다.
 
+### AUTH-03 requestPasswordReset() 쿨다운 획득 경쟁 (2026-09-23, Codex P2 코드리뷰 지적) — SETNX로 원자화
+
+**쿨다운 확인(GET)과 세팅(SET)이 분리된 두 호출이라 TOCTOU였다.** `requestPasswordReset()`은
+`passwordResetTokenService.isCoolingDown(email)`으로 조회한 뒤 통과하면 별도로
+`startCooldown(email)`을 호출했다 — 같은 이메일로 거의 동시에 여러 요청이 들어오면 그 조회~세팅
+사이의 창에서 전부 "쿨다운 없음"을 관측할 수 있어, 광고된 "60초에 한 번" 제한이 무력화된 채 여러
+요청이 나란히 통과했다. 각 요청이 `PasswordResetNotifier.notifyAsync()`(비동기 SES 발송+새 토큰
+발급)를 중복 실행해, 짧은 시간에 여러 통의 메일과 여러 개의 동시 유효한 재설정 토큰이 발급될 수
+있었다(위 "재발급 시 이전 활성 토큰 무효화" 항목이 순차 재발급만 다뤘지, 이 동시 발급 경쟁은 별개
+문제였다).
+
+**수정: `isCoolingDown()`+`startCooldown()`을 `PasswordResetTokenService.tryStartCooldown()`
+(SETNX, `StringRedisTemplate.opsForValue().setIfAbsent()`) 하나로 합쳤다.** Redis 단일 커맨드가
+직렬화를 보장하므로 조회~세팅 사이의 창 자체가 성립하지 않는다 — `consumeToken()`의 GETDEL(위
+AUTH-03 절 참고)과 같은 원자적 read-then-write 패턴이다. `requestPasswordReset()`은 이제
+`tryStartCooldown()`의 반환값(획득 성공 여부)만 보고 실패하면 즉시 `PasswordResetCooldownException`을
+던진다 — 계정 존재 여부와 무관하게 항상 획득을 시도한다는 오라클 방지 원칙(위 AUTH-03 절 참고)은
+그대로 유지된다.
+
+**검증**: `PasswordResetTokenServiceTest`(SETNX 성공/실패 각 1건, 기존 `isCoolingDown`×2+`startCooldown`×1
+3건을 `tryStartCooldown`×2 2건으로 교체), `AuthServiceTest`(4건 모두 `tryStartCooldown` 목킹으로 갱신).
+**`AuthServicePasswordResetMariaDbIT.같은_이메일로_동시에_여러_재설정_요청이_와도_쿨다운_획득은_정확히_하나만_성공한다`
+(신규, Testcontainers+실 Redis)** — `CyclicBarrier`로 8개 스레드를 동시에 출발시켜 실제
+`AuthService.requestPasswordReset()`을 실 Redis에 대고 경쟁시키고, 정확히 1건만 성공(예외 없음)하고
+나머지 7건은 전부 `PasswordResetCooldownException`인지 확인한다 — `AuthServiceMariaDbIT`의 가입 경쟁
+테스트와 달리 순서를 인위적으로 강제할 필요가 없었다(SETNX 자체가 원자적이라 순서와 무관하게 정확히
+하나만 이긴다). **2026-09-23, Docker가 가동 중인 세션에서 `./gradlew test`(575 테스트)와
+`./gradlew integrationTest`(15개 MariaDB IT 클래스, 63 테스트, 이 신규 케이스 포함) 둘 다 실행해
+그린 확인했다.**
+
 ### SVC-USER-01 구현 결정 사항
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |

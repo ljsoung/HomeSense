@@ -4,6 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -17,6 +25,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jiseong.homesense.auth.entity.RefreshToken;
+import com.jiseong.homesense.auth.exception.PasswordResetCooldownException;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtAuthenticationFilter;
@@ -162,5 +171,54 @@ class AuthServicePasswordResetMariaDbIT {
 
         assertThat(accessTokenEpochService.isIssuedAfterCutoff(userId, staleIssuedAt)).isFalse();
         assertThat(accessTokenEpochService.isIssuedAfterCutoff(userId, freshIssuedAt)).isTrue();
+    }
+
+    /**
+     * 코드리뷰 P2 지적 — 원래 {@code requestPasswordReset()}은 쿨다운을 "조회(isCoolingDown, GET) →
+     * 통과하면 세팅(startCooldown, SET)"으로 분리된 두 호출로 확인했다. 같은 이메일로 거의 동시에
+     * 여러 요청이 들어오면 그 조회~세팅 사이 창에서 전부 "쿨다운 없음"을 관측할 수 있어, 60초 제한이
+     * 무력화된 채 여러 건이 동시에 통과해 비동기 SES 발송·토큰 발급이 중복 실행될 수 있었다 —
+     * {@link PasswordResetTokenService#tryStartCooldown}(SETNX)로 원자화한 뒤에도 "실제 Redis 위에서
+     * 진짜 동시 요청이 왔을 때 정확히 하나만 통과하는지"는 Mockito로는 증명할 수 없다(양쪽 다 원하는
+     * 반환값을 자유롭게 목킹할 수 있어 이 race 자체가 성립하지 않는다).
+     *
+     * <p>{@link CyclicBarrier}로 스레드 전부가 동시에 {@code requestPasswordReset()}을 호출하도록
+     * 정렬한다 — DB 락을 강제로 재현해야 했던 {@code AuthServiceMariaDbIT}의 가입 경쟁 테스트와 달리,
+     * 여기는 순서를 인위적으로 강제할 필요가 없다(SETNX 자체가 원자적이라 순서와 무관하게 정확히
+     * 하나만 이긴다) — 그래서 실제로 동시에 도착하게만 만들면 충분하다.
+     */
+    @Test
+    void 같은_이메일로_동시에_여러_재설정_요청이_와도_쿨다운_획득은_정확히_하나만_성공한다() throws Exception {
+        String email = "cooldown-race@test.com";
+        int concurrency = 8;
+        ExecutorService executor = Executors.newFixedThreadPool(concurrency);
+        CyclicBarrier barrier = new CyclicBarrier(concurrency);
+        try {
+            List<Callable<Boolean>> tasks = IntStream.range(0, concurrency)
+                    .<Callable<Boolean>>mapToObj(i -> () -> {
+                        barrier.await();
+                        try {
+                            authService.requestPasswordReset(email);
+                            return true;
+                        } catch (PasswordResetCooldownException e) {
+                            return false;
+                        }
+                    })
+                    .toList();
+
+            List<Future<Boolean>> futures = tasks.stream().map(executor::submit).toList();
+            long succeeded = 0;
+            for (Future<Boolean> future : futures) {
+                if (future.get(10, TimeUnit.SECONDS)) {
+                    succeeded++;
+                }
+            }
+
+            // 존재하지 않는 이메일이라 쿨다운 획득 성공 여부만 순수하게 관찰할 수 있다(계정 조회 이후
+            // 로직은 어차피 아무 것도 실행하지 않는다) — 8개 동시 요청 중 정확히 1개만 통과해야 한다.
+            assertThat(succeeded).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 }
