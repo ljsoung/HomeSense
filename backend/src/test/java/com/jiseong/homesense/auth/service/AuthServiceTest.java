@@ -37,6 +37,8 @@ import com.jiseong.homesense.auth.exception.AccountNotActiveException;
 import com.jiseong.homesense.auth.exception.AccountNotWithdrawnException;
 import com.jiseong.homesense.auth.exception.DuplicateEmailException;
 import com.jiseong.homesense.auth.exception.InvalidRefreshTokenException;
+import com.jiseong.homesense.auth.exception.InvalidResetTokenException;
+import com.jiseong.homesense.auth.exception.PasswordResetCooldownException;
 import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
@@ -67,6 +69,10 @@ class AuthServiceTest {
     private RefreshTokenRotator refreshTokenRotator;
     @Mock
     private RefreshTokenReuseHandler refreshTokenReuseHandler;
+    @Mock
+    private PasswordResetTokenService passwordResetTokenService;
+    @Mock
+    private PasswordResetNotifier passwordResetNotifier;
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 12, 0, 0);
@@ -81,7 +87,7 @@ class AuthServiceTest {
                 new WithdrawalProperties(GRACE_DAYS, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
         authService = new AuthService(userRepository, refreshTokenRepository, passwordEncoder,
                 jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy,
-                refreshTokenRotator, refreshTokenReuseHandler);
+                refreshTokenRotator, refreshTokenReuseHandler, passwordResetTokenService, passwordResetNotifier);
     }
 
     @Test
@@ -437,5 +443,128 @@ class AuthServiceTest {
 
         verify(jwtTokenProvider, never()).createAccessToken(any(), anyString());
         verify(refreshTokenRepository, never()).save(any());
+    }
+
+    // --- requestPasswordReset (AUTH-03 1단계) ---
+
+    @Test
+    void requestPasswordReset_쿨다운_중이면_계정을_조회하지_않고_PasswordResetCooldownException을_던진다() {
+        when(passwordResetTokenService.isCoolingDown("user@test.com")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.requestPasswordReset("user@test.com"))
+                .isInstanceOf(PasswordResetCooldownException.class);
+
+        verify(userRepository, never()).findByEmail(anyString());
+        verify(passwordResetTokenService, never()).startCooldown(anyString());
+    }
+
+    @Test
+    void requestPasswordReset_존재하지_않는_이메일이어도_쿨다운을_세팅하고_예외_없이_종료한다() {
+        when(passwordResetTokenService.isCoolingDown("nouser@test.com")).thenReturn(false);
+        when(userRepository.findByEmail("nouser@test.com")).thenReturn(Optional.empty());
+
+        authService.requestPasswordReset("nouser@test.com");
+
+        // 계정 존재 여부와 무관하게 항상 쿨다운을 세팅해야 재전송 응답 차이가 계정 존재를 드러내는
+        // 오라클이 되지 않는다(PasswordResetCooldownException javadoc 참고).
+        verify(passwordResetTokenService).startCooldown("nouser@test.com");
+        verify(passwordResetNotifier, never()).notifyAsync(any(), anyString());
+    }
+
+    @Test
+    void requestPasswordReset_탈퇴한_계정이면_쿨다운만_세팅하고_알림을_보내지_않는다() {
+        User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
+        withdrawnUser.withdraw(NOW);
+        when(passwordResetTokenService.isCoolingDown("withdrawn@test.com")).thenReturn(false);
+        when(userRepository.findByEmail("withdrawn@test.com")).thenReturn(Optional.of(withdrawnUser));
+
+        authService.requestPasswordReset("withdrawn@test.com");
+
+        verify(passwordResetTokenService).startCooldown("withdrawn@test.com");
+        verify(passwordResetNotifier, never()).notifyAsync(any(), anyString());
+    }
+
+    @Test
+    void requestPasswordReset_ACTIVE_계정이면_쿨다운을_세팅하고_비동기_알림을_호출한다() {
+        User user = User.createUser("user@test.com", "encoded", "닉네임");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        when(passwordResetTokenService.isCoolingDown("user@test.com")).thenReturn(false);
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(user));
+
+        authService.requestPasswordReset("user@test.com");
+
+        verify(passwordResetTokenService).startCooldown("user@test.com");
+        verify(passwordResetNotifier).notifyAsync(1L, "user@test.com");
+    }
+
+    // --- validatePasswordResetToken (AUTH-03 2단계 사전 검증) ---
+
+    @Test
+    void validatePasswordResetToken_유효한_토큰이면_예외_없이_종료한다() {
+        when(passwordResetTokenService.peekToken("valid-token")).thenReturn(Optional.of(1L));
+
+        authService.validatePasswordResetToken("valid-token");
+
+        verify(passwordResetTokenService, never()).consumeToken(anyString());
+    }
+
+    @Test
+    void validatePasswordResetToken_존재하지_않으면_InvalidResetTokenException을_던진다() {
+        when(passwordResetTokenService.peekToken("bad-token")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.validatePasswordResetToken("bad-token"))
+                .isInstanceOf(InvalidResetTokenException.class);
+    }
+
+    // --- resetPassword (AUTH-03 2단계) ---
+
+    @Test
+    void resetPassword_토큰이_유효하지_않으면_사용자를_조회하지_않고_InvalidResetTokenException을_던진다() {
+        when(passwordResetTokenService.consumeToken("bad-token")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.resetPassword("bad-token", "NewAbcd1234!"))
+                .isInstanceOf(InvalidResetTokenException.class);
+
+        verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    void resetPassword_토큰이_가리키는_사용자가_없으면_InvalidResetTokenException을_던진다() {
+        when(passwordResetTokenService.consumeToken("token")).thenReturn(Optional.of(999L));
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.resetPassword("token", "NewAbcd1234!"))
+                .isInstanceOf(InvalidResetTokenException.class);
+
+        verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+    }
+
+    @Test
+    void resetPassword_계정이_ACTIVE가_아니면_비밀번호를_바꾸지_않고_InvalidResetTokenException을_던진다() {
+        User withdrawnUser = User.createUser("withdrawn@test.com", "encoded", "닉네임");
+        ReflectionTestUtils.setField(withdrawnUser, "userId", 1L);
+        withdrawnUser.withdraw(NOW);
+        when(passwordResetTokenService.consumeToken("token")).thenReturn(Optional.of(1L));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(withdrawnUser));
+
+        assertThatThrownBy(() -> authService.resetPassword("token", "NewAbcd1234!"))
+                .isInstanceOf(InvalidResetTokenException.class);
+
+        assertThat(withdrawnUser.getPassword()).isEqualTo("encoded");
+        verify(refreshTokenRepository, never()).revokeAllByUserId(any());
+    }
+
+    @Test
+    void resetPassword_성공하면_비밀번호를_변경하고_모든_RefreshToken을_폐기한다() {
+        User user = User.createUser("user@test.com", "encoded", "닉네임");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        when(passwordResetTokenService.consumeToken("token")).thenReturn(Optional.of(1L));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordEncoder.encode("NewAbcd1234!")).thenReturn("new-encoded");
+
+        authService.resetPassword("token", "NewAbcd1234!");
+
+        assertThat(user.getPassword()).isEqualTo("new-encoded");
+        verify(refreshTokenRepository).revokeAllByUserId(1L);
     }
 }

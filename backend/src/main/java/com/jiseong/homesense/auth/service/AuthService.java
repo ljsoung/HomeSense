@@ -21,6 +21,8 @@ import com.jiseong.homesense.auth.exception.AccountNotActiveException;
 import com.jiseong.homesense.auth.exception.AccountNotWithdrawnException;
 import com.jiseong.homesense.auth.exception.DuplicateEmailException;
 import com.jiseong.homesense.auth.exception.InvalidRefreshTokenException;
+import com.jiseong.homesense.auth.exception.InvalidResetTokenException;
+import com.jiseong.homesense.auth.exception.PasswordResetCooldownException;
 import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
@@ -55,6 +57,8 @@ public class AuthService {
     private final WithdrawalPolicy withdrawalPolicy;
     private final RefreshTokenRotator refreshTokenRotator;
     private final RefreshTokenReuseHandler refreshTokenReuseHandler;
+    private final PasswordResetTokenService passwordResetTokenService;
+    private final PasswordResetNotifier passwordResetNotifier;
 
     public SignupResponse signup(SignupCommand cmd) {
         if (userRepository.existsByEmail(cmd.email())) {
@@ -208,6 +212,72 @@ public class AuthService {
     @Transactional(readOnly = true)
     public boolean isEmailDuplicate(String email) {
         return userRepository.existsByEmail(email);
+    }
+
+    /**
+     * AUTH-03 1단계 — 재설정 링크 발송 요청. 계정 존재 여부·상태와 무관하게 호출자에게는 항상 동일한
+     * 성공(예외 없음)만 보인다 — 실제로 토큰을 발급하고 메일을 보내는 것은 계정이 존재하고
+     * {@code ACTIVE}일 때뿐이다(WITHDRAWN/SUSPENDED에는 보내지 않는다 — AUTH-01의 "탈퇴/정지 계정은
+     * 로그인 자체를 차단" 원칙과 정합, CLAUDE.md AUTH-03 결정 기록 참고). 재전송 쿨다운(60초)만 429로
+     * 예외를 던지는데, 이 쿨다운은 계정 존재 여부와 무관하게 항상 세팅되므로({@link #passwordResetTokenService}
+     * 호출이 이 필터 앞에 있다) 오라클이 되지 않는다({@link PasswordResetCooldownException} javadoc
+     * 참고).
+     *
+     * <p>토큰 발급+메일 발송은 {@link PasswordResetNotifier#notifyAsync}로 위임해 비동기 실행한다 —
+     * 이 메서드 자신은 findByEmail() 하나만 수행하는 읽기 전용 트랜잭션이라 readOnly로 열고, 느린
+     * SES 호출이 이 트랜잭션이나 응답 경로를 블로킹하지 않게 한다(그 이유는 PasswordResetNotifier
+     * javadoc 참고 — NFR + 타이밍 사이드채널 방지 두 가지 모두 비동기 분리를 요구한다).
+     */
+    @Transactional(readOnly = true)
+    public void requestPasswordReset(String rawEmail) {
+        String normalizedEmail = User.normalizeEmail(rawEmail);
+        if (passwordResetTokenService.isCoolingDown(normalizedEmail)) {
+            throw new PasswordResetCooldownException();
+        }
+        passwordResetTokenService.startCooldown(normalizedEmail);
+
+        userRepository.findByEmail(rawEmail)
+                .filter(user -> user.getStatus() == UserStatus.ACTIVE)
+                .ifPresent(user -> passwordResetNotifier.notifyAsync(user.getUserId(), user.getEmail()));
+    }
+
+    /**
+     * AUTH-03 2단계 진입 전 사전 검증(선택 API — {@code GET /api/auth/password-reset/validate-token}).
+     * 만료된 토큰으로 곧바로 입력 폼을 보여주지 않기 위한 것이라 토큰을 소비하지 않는다(peek) — 실제
+     * 소비(1회용 삭제)는 {@link #resetPassword}만 한다.
+     */
+    @Transactional(readOnly = true)
+    public void validatePasswordResetToken(String rawToken) {
+        if (passwordResetTokenService.peekToken(rawToken).isEmpty()) {
+            throw new InvalidResetTokenException();
+        }
+    }
+
+    /**
+     * AUTH-03 2단계 — 토큰을 원자적으로 소비(GETDEL, 1회용)하고 비밀번호를 변경한 뒤 기존
+     * Refresh Token을 전부 폐기한다(탈퇴 시 전체 폐기와 동일한 패턴 — 비밀번호가 탈취됐을 가능성에
+     * 대비해 재설정 이후에는 모든 기존 세션을 끝낸다, CLAUDE.md AUTH-03 결정 기록 참고).
+     *
+     * <p>토큰 발급 이후(최대 30분 창) 계정이 탈퇴·정지됐다면 여기서도 {@link InvalidResetTokenException}으로
+     * 거부한다 — 그렇지 않으면 WITHDRAWN 계정이 {@link #reactivate}의 비밀번호 확인(authenticate())을
+     * 거치지 않고 비밀번호를 바꿀 수 있는 구멍이 된다. 비밀번호 변경(user 엔티티 dirty) 다음에
+     * revokeAllByUserId()(벌크 UPDATE)를 호출하는 순서는 {@link RefreshTokenRepository#revokeAllByUserId}의
+     * {@code flushAutomatically=true}가 안전하게 처리한다(UserService.withdraw()와 동일한 순서·근거).
+     */
+    public void resetPassword(String rawToken, String newPassword) {
+        Long userId = passwordResetTokenService.consumeToken(rawToken).orElseThrow(InvalidResetTokenException::new);
+        User user = userRepository.findById(userId).orElseThrow(InvalidResetTokenException::new);
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new InvalidResetTokenException();
+        }
+
+        user.changePassword(passwordEncoder.encode(newPassword));
+        refreshTokenRepository.revokeAllByUserId(userId);
+
+        log.atInfo()
+                .addKeyValue("auditEvent", "PASSWORD_RESET_COMPLETED")
+                .addKeyValue("userId", userId)
+                .log("PASSWORD_RESET_COMPLETED userId={}", userId);
     }
 
     /**

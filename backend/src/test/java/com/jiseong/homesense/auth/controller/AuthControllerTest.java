@@ -3,6 +3,7 @@ package com.jiseong.homesense.auth.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -35,6 +36,8 @@ import com.jiseong.homesense.auth.dto.SignupResponse;
 import com.jiseong.homesense.auth.dto.TokenResponse;
 import com.jiseong.homesense.auth.exception.AccountNotActiveException;
 import com.jiseong.homesense.auth.exception.AccountNotWithdrawnException;
+import com.jiseong.homesense.auth.exception.InvalidResetTokenException;
+import com.jiseong.homesense.auth.exception.PasswordResetCooldownException;
 import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.service.AuthService;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
@@ -349,5 +352,97 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/auth/check-email").param("email", "dup@test.com"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.duplicate").value(true));
+    }
+
+    // --- POST /api/auth/password-reset-request (AUTH-03 1단계) ---
+
+    @Test
+    void 비밀번호_재설정_요청이_성공하면_200을_반환한다() throws Exception {
+        mockMvc.perform(post("/api/auth/password-reset-request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(authService).requestPasswordReset("user@test.com");
+    }
+
+    @Test
+    void 비밀번호_재설정_요청_이메일_형식이_잘못되면_400이고_서비스를_호출하지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/password-reset-request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"not-an-email\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("email"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void 비밀번호_재설정_요청_쿨다운_중이면_429로_변환된다() throws Exception {
+        doThrow(new PasswordResetCooldownException()).when(authService).requestPasswordReset("user@test.com");
+
+        mockMvc.perform(post("/api/auth/password-reset-request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("PASSWORD_RESET_COOLDOWN"));
+    }
+
+    // --- GET /api/auth/password-reset/validate-token (AUTH-03 2단계 사전 검증) ---
+
+    @Test
+    void 재설정_토큰_사전검증이_유효하면_200을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/auth/password-reset/validate-token").param("token", "valid-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(authService).validatePasswordResetToken("valid-token");
+    }
+
+    @Test
+    void 재설정_토큰_사전검증이_무효하면_400으로_변환된다() throws Exception {
+        doThrow(new InvalidResetTokenException()).when(authService).validatePasswordResetToken("bad-token");
+
+        mockMvc.perform(get("/api/auth/password-reset/validate-token").param("token", "bad-token"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_RESET_TOKEN"));
+    }
+
+    // --- POST /api/auth/password-reset (AUTH-03 2단계) ---
+
+    @Test
+    void 비밀번호_재설정이_성공하면_200을_반환한다() throws Exception {
+        mockMvc.perform(post("/api/auth/password-reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"valid-token\",\"newPassword\":\"NewAbcd1234!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(authService).resetPassword("valid-token", "NewAbcd1234!");
+    }
+
+    @Test
+    void 비밀번호_재설정_새_비밀번호가_정책을_위반하면_400이고_서비스를_호출하지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/password-reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"valid-token\",\"newPassword\":\"short\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("newPassword"));
+
+        verifyNoInteractions(authService);
+    }
+
+    @Test
+    void 비밀번호_재설정_토큰이_무효하면_400으로_변환된다() throws Exception {
+        doThrow(new InvalidResetTokenException()).when(authService).resetPassword("bad-token", "NewAbcd1234!");
+
+        mockMvc.perform(post("/api/auth/password-reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"bad-token\",\"newPassword\":\"NewAbcd1234!\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_RESET_TOKEN"));
     }
 }

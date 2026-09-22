@@ -74,4 +74,17 @@ public class AuditLogger {
                 .addKeyValue("userId", userId)
                 .log("REFRESH_TOKEN_REUSE_DETECTED userId={}", userId);
     }
+
+    /**
+     * AUTH-03 비밀번호 재설정 메일 발송 실패(SES 예외 포함) — {@link com.jiseong.homesense.auth.service.PasswordResetNotifier}가
+     * 비동기로 삼키는 예외를 여기 남긴다. API 응답은 계정 존재·발송 성패와 무관하게 항상 동일한 성공을
+     * 반환하므로(오라클 방지), 실제 발송 여부를 확인할 수 있는 유일한 관측 지점이다.
+     */
+    public void logPasswordResetMailFailure(Long userId, Throwable e) {
+        log.atWarn()
+                .addKeyValue("auditEvent", "PASSWORD_RESET_MAIL_FAILURE")
+                .addKeyValue("userId", userId)
+                .setCause(e)
+                .log("PASSWORD_RESET_MAIL_FAILURE userId={}", userId);
+    }
 }

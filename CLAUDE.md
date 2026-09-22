@@ -472,6 +472,69 @@ DB에 저장하지 않아 이 문제 자체가 없었지만, 타입별로 분기
 다름, Access Token도 마찬가지). `AuthServiceRefreshRotationMariaDbIT`의 두 테스트에서 sleep 제거 후
 재확인. `./gradlew test`(535 테스트, +2)와 `./gradlew integrationTest`(59 테스트) 전부 그린.
 
+### AUTH-03 비밀번호 찾기(재설정) — 신규 서브도메인 (2026-09-22)
+
+**요구사항정의서·엔티티정의서·테이블정의서·프로그램설계서·프로그램목록서 어디에도 이 기능이
+정의돼 있지 않다.** UI정의서 8.1절 화면-API 매핑표만 `POST /api/auth/password-reset-request`/
+`POST /api/auth/password-reset`을 언급하고, 8.2절 FR 추적표는 AUTH-03을 "FR-1.2의 연계 화면"으로
+잠정 분류하며 "요구사항정의서 갱신 시 별도 FR ID 부여를 권장"한다는 각주를 달아 뒀다 — **완결
+필요**: 다음 요구사항정의서 갱신 시 FR-1.5 등으로 별도 ID를 부여하고, 프로그램목록서 3장 총괄표
+(61→64종, AUTH-03 관련 API-AUTH-01 확장 + SVC-AUTH-01 확장으로 기록)·프로그램설계서 3.1절
+Controller/Service 표에도 아래 세 엔드포인트를 반영해야 한다.
+
+**premise 정정 — "AWS SES 발송(BAT-MAIL-01, 알림 이메일용으로 이미 구축됨)"은 틀린 전제였다.**
+작업 지시 문서가 이렇게 전제했지만, 실제로는 `software.amazon.awssdk:ses` Gradle 의존성과
+`AWS_SES_ACCESS_KEY`/`AWS_SES_SECRET_KEY` 환경변수 플레이스홀더만 "BAT-MAIL-01" 주석과 함께
+선언돼 있었을 뿐, 이 값을 바인딩하는 `@ConfigurationProperties` 클래스도 `SesClient` 빈도, 이메일을
+실제로 보내는 코드도 전혀 없었다(`batch.notifier` 패키지 자체가 존재하지 않음, 전수 확인). 이번
+작업이 이 프로젝트 최초의 실제 SES 소비자다 — `common.config.AwsSesProperties`/`SesClientConfig`와
+`common.mail.MailSender`/`SesMailSender`를 새로 만들었다. `MailSender`를 인터페이스로 분리해 둔
+이유는 향후 BAT-MAIL-01(3단계 이후 로드맵)이 SES 클라이언트 조립을 새로 하지 않고 이 인터페이스만
+주입받아 재사용할 수 있게 하기 위함이다.
+
+| 항목 | 검토안(작업 지시 원문) | 최종 결정 | 근거 |
+| --- | --- | --- | --- |
+| 토큰 저장소 | DB 테이블(ENT-AUTH-02 신설) vs Redis TTL 키 | **Redis TTL 키** — `password-reset:token:{tokenHash}`(30분), `password-reset:cooldown:{email}`(60초) | `login:fail:{email}`(LoginAttemptService)과 같은 선례. 재설정 토큰은 단발성·단기 유효라 refresh_token처럼 재사용 탐지·감사 목적의 장기 보관이 필요 없다. 새 테이블/DDL 없이 끝나 문서 동기화 비용도 없다. |
+| 토큰 원문 형식 | — | `SecureRandom` 32바이트 → hex 64자(opaque, **JWT 아님** — COM-SEC-02와 혼동 금지) | Redis 키는 원문이 아니라 `RefreshTokenHasher`(같은 패키지, 이미 있는 SHA-256 해셔 재사용)로 해시해 저장한다 — DB가 아니라 Redis에 저장하지만 "원문을 그대로 저장하지 않는다"는 같은 원칙을 적용했다. |
+| 토큰 소비 방식 | — | `StringRedisTemplate.opsForValue().getAndDelete()`(GETDEL) — 조회+삭제 원자적 | Refresh Token Rotation의 조건부 UPDATE(affected rows)와 목적은 같지만, Redis 단일 커맨드 자체가 원자적이라 DB의 REPEATABLE READ 스냅샷 문제(RefreshTokenReuseHandler가 두 단계에 걸쳐 발견한 것과 같은 종류)가 애초에 성립하지 않는다. |
+| 사전 검증 API 신설 여부 | 신설 검토(`GET /password-reset/validate-token`) | **신설함** — `AuthService.validatePasswordResetToken()`이 토큰을 소비하지 않고(peek) 존재 여부만 확인, 무효면 `InvalidResetTokenException`(400) | UI정의서 예외표의 "2단계 입력 폼 대신 안내 표시"를 만족하려면 폼 렌더링 전에 토큰 유효성을 알아야 한다. 이 API는 공식 매핑표에 없는 확장이라 프로그램설계서 API 매핑표 갱신이 필요하다(위 "완결 필요" 참고). |
+| 비활성 계정(WITHDRAWN/SUSPENDED) 처리 | 검토 필요 | **발송하지 않음** — `requestPasswordReset()`이 `user.getStatus() == ACTIVE`일 때만 토큰 발급+메일 발송 | AUTH-01의 "탈퇴/정지 계정은 로그인 자체를 차단" 원칙과 정합. `resetPassword()`도 토큰 소비 직후 다시 한 번 ACTIVE를 확인한다 — 토큰 발급 이후(최대 30분 창) 탈퇴됐다면 `InvalidResetTokenException`으로 거부해, WITHDRAWN 계정이 `reactivate()`의 `authenticate()`(비밀번호 확인)를 우회해 비밀번호를 바꾸는 구멍을 막는다. |
+| 계정 존재 여부 비노출 — 응답 통일 | "동일한 성공 응답"(원칙만 명시) | `requestPasswordReset()`은 **항상 같은 `ApiResponse<Void>` 성공**만 반환(계정 존재·ACTIVE 여부와 무관), 예외는 쿨다운(429)뿐 | 계정 조회·발송 성패로 분기하는 메시지 필드를 만들지 않았다 — `ApiResponse<Void>`가 이미 "성공/실패"만 표현하는데 성공 응답 안에 "계정이 있으면 이렇게, 없으면 저렇게"를 담으면 그 문구 차이 자체가 오라클이 된다. |
+| **재전송 쿨다운의 오라클 방지 — 작업 지시가 명시하지 않은 채 남겨둔 보안 설계 공백을 이번에 직접 메웠다** | "계정 존재 여부와 무관하게 동일 성공"만 요구, 쿨다운을 언제 세팅할지는 미명시 | **쿨다운 키는 계정 존재 여부와 무관하게 항상 세팅한다** — `isCoolingDown()` 확인 후 `startCooldown()`을 조회보다 먼저 실행 | 만약 쿨다운을 "계정이 실제로 존재해 메일을 보낸 경우"에만 세팅했다면, 같은 이메일을 빠르게 두 번 제출했을 때 존재하는 계정은 2번째 요청에서 429(쿨다운)를, 존재하지 않는 계정은 2번째 요청도 그대로 200을 받아 — 이 응답 차이 자체가 계정 존재를 확인하는 오라클이 됐을 것이다. 쿨다운을 이메일 존재 여부와 완전히 분리해 항상 세팅하면 이 오라클이 원천적으로 성립하지 않는다(검증: `AuthServiceTest.requestPasswordReset_존재하지_않는_이메일이어도_쿨다운을_세팅하고_예외_없이_종료한다`). |
+| 토큰 발급+메일 발송의 동기/비동기 | 미명시 | **`@Async`**(`PasswordResetNotifier.notifyAsync()`, self-invocation을 피해 별도 빈으로 분리) | 이유가 두 가지다. (1) NFR — SES 네트워크 호출(샌드박스 상태라 재시도·지연 가능)이 응답 경로를 블로킹하면 안 된다(SVC-RCV-01.record()/SVC-SEARCH-01.record()와 같은 이유). (2) **여기서만 추가로 성립하는 이유** — 동기 호출이었다면 "이메일이 존재해 SES 호출이 실제로 일어나 응답이 느려짐"과 "존재하지 않아 호출 자체가 없어 즉시 응답"이 타이밍 사이드채널이 됐을 것이다. 비동기로 분리하면 API 응답은 계정 존재 여부와 무관하게 항상 즉시 반환된다 — 위 오라클 방지 설계를 완성하는 마지막 조각. |
+| 비밀번호 변경 성공 시 기존 세션 전체 폐기 | 권장(검토 필요) | **채택** — `resetPassword()`가 `refreshTokenRepository.revokeAllByUserId(userId)`를 호출(회원탈퇴와 동일 패턴) | 탈취된 비밀번호로 이미 로그인해 둔 세션이 있을 가능성에 대비한다. `user.changePassword()`(dirty) 직후 이 벌크 UPDATE를 호출하는 순서는 `RefreshTokenRepository#revokeAllByUserId`의 `flushAutomatically=true`가 안전하게 처리한다(UserService.withdraw()가 이미 겪은 flush 순서 문제와 같은 함정, 이번엔 재사용). 실 DB로 검증(아래 IT). |
+| 재설정 링크 URL 형식 | 예시 `https://hmss.site/password-reset?token=...` | **`{FrontendProperties.baseUrl}/password-reset?token={rawToken}`** — 새 프로퍼티 `homesense.frontend.base-url`(local: `http://localhost:5173`, prod: `${FRONTEND_URL}`) 신설 | 기존 `homesense.cors.allowed-origins`(FRONTEND_URL)을 재사용하지 않았다 — 그 값은 아직 어떤 `CorsConfigurationSource`도 소비하지 않는 죽은 설정(위 "로컬 개발 환경의 CORS 우회" 절 참고)이라, 새 기능을 그 미완결 상태에 얹으면 서로 영향을 주게 된다. 독립 프로퍼티로 분리했다. **프론트 라우트 `/password-reset`을 그대로 이 이름으로 만들어야 한다** — 다르게 만들면 이미 발송된 메일의 링크가 깨진다. |
+| SES 자격 증명 해석 | — | accessKey/secretKey가 둘 다 채워져 있으면 `StaticCredentialsProvider`, 비어 있으면 AWS SDK 기본 자격 증명 체인(환경변수→프로파일→인스턴스 역할)에 위임 | `KakaoProperties`처럼 이 두 필드는 `@NotBlank`를 걸지 않았다(EC2/ECS 인스턴스 역할 기반 배포로 옮겨가도 이 클래스를 고칠 필요가 없게). `region`/`senderAddress`는 없으면 이메일을 아예 못 보내 `@NotBlank`로 기동 시 fail-fast한다. |
+
+**신규 예외 2종**(`auth.exception`): `InvalidResetTokenException`(400, 토큰 만료·미존재·이미 사용됨·계정
+비활성 전부 동일 메시지로 통일 — `InvalidRefreshTokenException`과 같은 사상), `PasswordResetCooldownException`
+(429, `AccountLockedException`과 같은 패턴).
+
+**검증**: `PasswordResetTokenServiceTest`(Mockito+실제 `RefreshTokenHasher` — 무작위 토큰 발급/조회/소비/쿨다운
+9건), `PasswordResetNotifierTest`(토큰 발급→메일 발송, SES 실패 시 예외 흡수+감사 로그 2건),
+`SesMailSenderTest`(요청 필드 매핑, SES 예외 그대로 전파 2건), `AuthServiceTest`(쿨다운/비활성 계정/ACTIVE
+분기/사전검증/토큰 무효·계정 없음·계정 비활성·성공 10건 추가), `AuthControllerTest`(3개 엔드포인트의
+성공·검증 실패·예외 변환 8건 추가), `AuthEndpointSecurityTest`(비밀번호 재설정 요청이 login/signup처럼
+인증 전 permitAll인지 1건 추가). **`AuthServicePasswordResetMariaDbIT`(신규, Testcontainers)** —
+`UserServiceMariaDbIT`와 정확히 같은 이유(Mockito는 "비밀번호 변경 dirty 상태가 뒤이은 벌크 UPDATE
+이전에 실제로 flush되는지"를 증명할 수 없다)로, 실제 MariaDB 위에서 `resetPassword()` 커밋 이후 재조회한
+DB 상태(새 비밀번호로 `matches()` 성공, RefreshToken 전체 폐기, 토큰 1회성 소비 확인)를 검증한다. Docker가
+가동 중인 세션에서 `./gradlew integrationTest`로 실행해 통과 확인(15개 MariaDB IT 클래스, 이 신규 IT 포함).
+`./gradlew test`도 전부 그린.
+
+**프론트엔드 작업 시 참고할 최종 계약**(AUTH-03 프론트 프롬프트에 그대로 전달):
+
+| 항목 | 값 |
+| --- | --- |
+| 1단계 요청 | `POST /api/auth/password-reset-request`, body `{"email": string}`, 성공 시 `ApiResponse<null>`(200) — 계정 존재 여부와 무관하게 항상 같은 성공 |
+| 1단계 재전송 제한 | 같은 이메일 60초 이내 재요청 시 `429` + `error.code = "PASSWORD_RESET_COOLDOWN"`, `error.message = "잠시 후 다시 시도해주세요"` |
+| 사전 검증(2단계 진입 시) | `GET /api/auth/password-reset/validate-token?token={token}` — 유효하면 `200`, 무효/만료/이미사용/계정비활성이면 전부 `400` + `error.code = "INVALID_RESET_TOKEN"`, `error.message = "유효하지 않거나 만료된 재설정 링크입니다. 다시 요청해주세요"`(토큰을 소비하지 않음 — 이 호출로는 링크가 무효화되지 않는다) |
+| 2단계 제출 | `POST /api/auth/password-reset`, body `{"token": string, "newPassword": string}` — `newPassword`는 AUTH-02와 동일한 정책(8자 이상 72바이트 이하, 영문·숫자·특수문자 조합), 위반 시 `400` + `VALIDATION_FAILED` + `fieldErrors[0].field = "newPassword"` |
+| 2단계 실패 | 토큰이 이미 위 사전검증/제출로 소비됐거나 만료·계정비활성이면 `400` + `INVALID_RESET_TOKEN`(사전검증과 동일 코드·문구) |
+| 토큰 만료 | 30분(발급 시점부터) |
+| 재설정 링크 형식 | `{프론트엔드 오리진}/password-reset?token={토큰}` — 프론트 라우트를 정확히 `/password-reset`으로 만들어야 한다(쿼리 파라미터명 `token`) |
+| 재설정 성공 후 | 서버가 그 사용자의 모든 Refresh Token을 폐기한다 — 다른 기기/탭에 로그인돼 있었다면 전부 로그아웃된다(이 사실을 안내 문구에 반영할지는 프론트 판단) |
+
 ### SVC-USER-01 구현 결정 사항
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |
