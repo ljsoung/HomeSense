@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.UserStatusResolver;
 
 import jakarta.validation.Valid;
@@ -49,6 +50,8 @@ class SignupPolicyValidationIntegrationTest {
     private JwtTokenProvider jwtTokenProvider;
     @MockitoBean
     private UserStatusResolver userStatusResolver;
+    @MockitoBean
+    private AccessTokenEpochService accessTokenEpochService;
 
     @MockitoBean
     private AuditLogger auditLogger;

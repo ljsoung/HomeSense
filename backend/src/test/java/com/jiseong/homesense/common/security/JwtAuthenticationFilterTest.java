@@ -6,6 +6,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +26,8 @@ class JwtAuthenticationFilterTest {
     private JwtTokenProvider jwtTokenProvider;
     @Mock
     private UserStatusResolver userStatusResolver;
+    @Mock
+    private AccessTokenEpochService accessTokenEpochService;
 
     @InjectMocks
     private JwtAuthenticationFilter filter;
@@ -52,6 +56,9 @@ class JwtAuthenticationFilterTest {
         when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
         when(jwtTokenProvider.getRole("valid-token")).thenReturn("ADMIN");
         when(userStatusResolver.isActive(1L)).thenReturn(true);
+        Instant issuedAt = Instant.now();
+        when(jwtTokenProvider.getIssuedAt("valid-token")).thenReturn(issuedAt);
+        when(accessTokenEpochService.isIssuedAfterCutoff(1L, issuedAt)).thenReturn(true);
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Authorization", "Bearer valid-token");
@@ -66,6 +73,28 @@ class JwtAuthenticationFilterTest {
         assertThat(authentication.getAuthorities())
                 .extracting(Object::toString)
                 .containsExactly("ROLE_ADMIN");
+    }
+
+    @Test
+    void 상태는_ACTIVE여도_컷오프_이전에_발급된_토큰이면_인증정보를_채우지_않는다() throws Exception {
+        // 비밀번호 재설정처럼 계정 status는 그대로 ACTIVE인 채 기존 Access Token만 무효화해야
+        // 하는 경우(AccessTokenEpochService) — 코드리뷰 P1 지적.
+        when(jwtTokenProvider.validateToken("stale-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("stale-token")).thenReturn(true);
+        when(jwtTokenProvider.getUserId("stale-token")).thenReturn(1L);
+        when(userStatusResolver.isActive(1L)).thenReturn(true);
+        Instant issuedAt = Instant.now();
+        when(jwtTokenProvider.getIssuedAt("stale-token")).thenReturn(issuedAt);
+        when(accessTokenEpochService.isIssuedAfterCutoff(1L, issuedAt)).thenReturn(false);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer stale-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     /*

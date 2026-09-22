@@ -472,6 +472,194 @@ DB에 저장하지 않아 이 문제 자체가 없었지만, 타입별로 분기
 다름, Access Token도 마찬가지). `AuthServiceRefreshRotationMariaDbIT`의 두 테스트에서 sleep 제거 후
 재확인. `./gradlew test`(535 테스트, +2)와 `./gradlew integrationTest`(59 테스트) 전부 그린.
 
+### AUTH-03 비밀번호 찾기(재설정) — 신규 서브도메인 (2026-09-22)
+
+**요구사항정의서·엔티티정의서·테이블정의서·프로그램설계서·프로그램목록서 어디에도 이 기능이
+정의돼 있지 않다.** UI정의서 8.1절 화면-API 매핑표만 `POST /api/auth/password-reset-request`/
+`POST /api/auth/password-reset`을 언급하고, 8.2절 FR 추적표는 AUTH-03을 "FR-1.2의 연계 화면"으로
+잠정 분류하며 "요구사항정의서 갱신 시 별도 FR ID 부여를 권장"한다는 각주를 달아 뒀다 — **완결
+필요**: 다음 요구사항정의서 갱신 시 FR-1.5 등으로 별도 ID를 부여하고, 프로그램목록서 3장 총괄표
+(61→64종, AUTH-03 관련 API-AUTH-01 확장 + SVC-AUTH-01 확장으로 기록)·프로그램설계서 3.1절
+Controller/Service 표에도 아래 세 엔드포인트를 반영해야 한다.
+
+**premise 정정 — "AWS SES 발송(BAT-MAIL-01, 알림 이메일용으로 이미 구축됨)"은 틀린 전제였다.**
+작업 지시 문서가 이렇게 전제했지만, 실제로는 `software.amazon.awssdk:ses` Gradle 의존성과
+`AWS_SES_ACCESS_KEY`/`AWS_SES_SECRET_KEY` 환경변수 플레이스홀더만 "BAT-MAIL-01" 주석과 함께
+선언돼 있었을 뿐, 이 값을 바인딩하는 `@ConfigurationProperties` 클래스도 `SesClient` 빈도, 이메일을
+실제로 보내는 코드도 전혀 없었다(`batch.notifier` 패키지 자체가 존재하지 않음, 전수 확인). 이번
+작업이 이 프로젝트 최초의 실제 SES 소비자다 — `common.config.AwsSesProperties`/`SesClientConfig`와
+`common.mail.MailSender`/`SesMailSender`를 새로 만들었다. `MailSender`를 인터페이스로 분리해 둔
+이유는 향후 BAT-MAIL-01(3단계 이후 로드맵)이 SES 클라이언트 조립을 새로 하지 않고 이 인터페이스만
+주입받아 재사용할 수 있게 하기 위함이다.
+
+| 항목 | 검토안(작업 지시 원문) | 최종 결정 | 근거 |
+| --- | --- | --- | --- |
+| 토큰 저장소 | DB 테이블(ENT-AUTH-02 신설) vs Redis TTL 키 | **Redis TTL 키** — `password-reset:token:{tokenHash}`(30분), `password-reset:cooldown:{email}`(60초) | `login:fail:{email}`(LoginAttemptService)과 같은 선례. 재설정 토큰은 단발성·단기 유효라 refresh_token처럼 재사용 탐지·감사 목적의 장기 보관이 필요 없다. 새 테이블/DDL 없이 끝나 문서 동기화 비용도 없다. |
+| 토큰 원문 형식 | — | `SecureRandom` 32바이트 → hex 64자(opaque, **JWT 아님** — COM-SEC-02와 혼동 금지) | Redis 키는 원문이 아니라 `RefreshTokenHasher`(같은 패키지, 이미 있는 SHA-256 해셔 재사용)로 해시해 저장한다 — DB가 아니라 Redis에 저장하지만 "원문을 그대로 저장하지 않는다"는 같은 원칙을 적용했다. |
+| 토큰 소비 방식 | — | `StringRedisTemplate.opsForValue().getAndDelete()`(GETDEL) — 조회+삭제 원자적 | Refresh Token Rotation의 조건부 UPDATE(affected rows)와 목적은 같지만, Redis 단일 커맨드 자체가 원자적이라 DB의 REPEATABLE READ 스냅샷 문제(RefreshTokenReuseHandler가 두 단계에 걸쳐 발견한 것과 같은 종류)가 애초에 성립하지 않는다. |
+| **재발급 시 이전 활성 토큰 무효화(2026-09-23, Codex P1 코드리뷰 지적) — 원 작업 지시엔 없던 새 판단** | 미명시(단일 활성 토큰 모델 여부는 원 작업 지시에 없었다) | **채택** — `password-reset:active-token:{userId}` 포인터로 사용자당 항상 최신 토큰 하나만 유효하게 강제한다. `issueToken()`이 새 토큰을 발급하기 전 이 포인터로 이전 토큰의 해시를 찾아 그 토큰 키를 삭제하고, `consumeToken()`이 성공하면 포인터 자체도 함께 지운다(`PasswordResetTokenService.invalidatePreviousToken()`) | **근거**: 쿨다운(60초) 경과 후 같은 사용자가 재설정을 다시 요청하면, 수정 전에는 각 요청이 독립적인 Redis 키로 저장돼 이전 토큰이 30분 TTL이 끝날 때까지 그대로 살아 있었다 — 오래된 이메일(공유 메일함, 열람 지연 등으로 나중에 읽힐 수 있다)로도 그 사이 계정을 재탈취할 수 있는 구멍이었다. 쿨다운이 사실상 동시 재발급을 막아 `invalidatePreviousToken()`의 GET→새 토큰 SET 사이 레이스는 무시할 수준이고, 그 레이스가 실제로 발생해도 실패 방향은 fail-safe(무효화가 씹혀도 최악의 경우 "구 토큰이 잠깐 더 살아있다"이지 "신 토큰이 깨진다"가 아니다). **무효화 조건**: 여러 기기에서 동시에 유효한 재설정 링크가 필요해지는 요구사항이 생기면(예: PC/모바일 양쪽에서 각자 받은 링크를 나중에 열어야 하는 경우) 이 "사용자당 토큰 1개" 모델 자체를 재검토해야 한다 — 지금은 그런 요구가 없어 가장 단순한 모델을 택했다. 검증: `PasswordResetTokenServiceTest`(재발급 시 이전 토큰 delete 호출/이전 토큰 없으면 미호출/consume 성공 시 포인터 delete), `AuthServicePasswordResetMariaDbIT.같은_사용자가_재설정을_다시_요청하면_이전_토큰은_새_토큰_발급과_동시에_무효화된다`(실 Redis로 2회 발급 후 구 토큰 peek 실패·신 토큰 동작·reset 성공까지 end-to-end 확인). |
+| 사전 검증 API 신설 여부 | 신설 검토(`GET /password-reset/validate-token`) | **신설함** — `AuthService.validatePasswordResetToken()`이 토큰을 소비하지 않고(peek) 존재 여부만 확인, 무효면 `InvalidResetTokenException`(400) | UI정의서 예외표의 "2단계 입력 폼 대신 안내 표시"를 만족하려면 폼 렌더링 전에 토큰 유효성을 알아야 한다. 이 API는 공식 매핑표에 없는 확장이라 프로그램설계서 API 매핑표 갱신이 필요하다(위 "완결 필요" 참고). |
+| 비활성 계정(WITHDRAWN/SUSPENDED) 처리 | 검토 필요 | **발송하지 않음** — `requestPasswordReset()`이 `user.getStatus() == ACTIVE`일 때만 토큰 발급+메일 발송 | AUTH-01의 "탈퇴/정지 계정은 로그인 자체를 차단" 원칙과 정합. `resetPassword()`도 토큰 소비 직후 다시 한 번 ACTIVE를 확인한다 — 토큰 발급 이후(최대 30분 창) 탈퇴됐다면 `InvalidResetTokenException`으로 거부해, WITHDRAWN 계정이 `reactivate()`의 `authenticate()`(비밀번호 확인)를 우회해 비밀번호를 바꾸는 구멍을 막는다. |
+| 계정 존재 여부 비노출 — 응답 통일 | "동일한 성공 응답"(원칙만 명시) | `requestPasswordReset()`은 **항상 같은 `ApiResponse<Void>` 성공**만 반환(계정 존재·ACTIVE 여부와 무관), 예외는 쿨다운(429)뿐 | 계정 조회·발송 성패로 분기하는 메시지 필드를 만들지 않았다 — `ApiResponse<Void>`가 이미 "성공/실패"만 표현하는데 성공 응답 안에 "계정이 있으면 이렇게, 없으면 저렇게"를 담으면 그 문구 차이 자체가 오라클이 된다. |
+| **재전송 쿨다운의 오라클 방지 — 작업 지시가 명시하지 않은 채 남겨둔 보안 설계 공백을 이번에 직접 메웠다** | "계정 존재 여부와 무관하게 동일 성공"만 요구, 쿨다운을 언제 세팅할지는 미명시 | **쿨다운 키는 계정 존재 여부와 무관하게 항상 세팅한다** — `isCoolingDown()` 확인 후 `startCooldown()`을 조회보다 먼저 실행 | 만약 쿨다운을 "계정이 실제로 존재해 메일을 보낸 경우"에만 세팅했다면, 같은 이메일을 빠르게 두 번 제출했을 때 존재하는 계정은 2번째 요청에서 429(쿨다운)를, 존재하지 않는 계정은 2번째 요청도 그대로 200을 받아 — 이 응답 차이 자체가 계정 존재를 확인하는 오라클이 됐을 것이다. 쿨다운을 이메일 존재 여부와 완전히 분리해 항상 세팅하면 이 오라클이 원천적으로 성립하지 않는다(검증: `AuthServiceTest.requestPasswordReset_존재하지_않는_이메일이어도_쿨다운을_세팅하고_예외_없이_종료한다`). |
+| 토큰 발급+메일 발송의 동기/비동기 | 미명시 | **`@Async`**(`PasswordResetNotifier.notifyAsync()`, self-invocation을 피해 별도 빈으로 분리) | 이유가 두 가지다. (1) NFR — SES 네트워크 호출(샌드박스 상태라 재시도·지연 가능)이 응답 경로를 블로킹하면 안 된다(SVC-RCV-01.record()/SVC-SEARCH-01.record()와 같은 이유). (2) **여기서만 추가로 성립하는 이유** — 동기 호출이었다면 "이메일이 존재해 SES 호출이 실제로 일어나 응답이 느려짐"과 "존재하지 않아 호출 자체가 없어 즉시 응답"이 타이밍 사이드채널이 됐을 것이다. 비동기로 분리하면 API 응답은 계정 존재 여부와 무관하게 항상 즉시 반환된다 — 위 오라클 방지 설계를 완성하는 마지막 조각. |
+| 비밀번호 변경 성공 시 기존 세션 전체 폐기 | 권장(검토 필요) | **채택** — `resetPassword()`가 `refreshTokenRepository.revokeAllByUserId(userId)`를 호출(회원탈퇴와 동일 패턴) | 탈취된 비밀번호로 이미 로그인해 둔 세션이 있을 가능성에 대비한다. `user.changePassword()`(dirty) 직후 이 벌크 UPDATE를 호출하는 순서는 `RefreshTokenRepository#revokeAllByUserId`의 `flushAutomatically=true`가 안전하게 처리한다(UserService.withdraw()가 이미 겪은 flush 순서 문제와 같은 함정, 이번엔 재사용). 실 DB로 검증(아래 IT). |
+| 재설정 링크 URL 형식 | 예시 `https://hmss.site/password-reset?token=...` | **`{FrontendProperties.baseUrl}/password-reset?token={rawToken}`** — 새 프로퍼티 `homesense.frontend.base-url`(local: `http://localhost:5173`, prod: `${FRONTEND_URL}`) 신설 | 기존 `homesense.cors.allowed-origins`(FRONTEND_URL)을 재사용하지 않았다 — 그 값은 아직 어떤 `CorsConfigurationSource`도 소비하지 않는 죽은 설정(위 "로컬 개발 환경의 CORS 우회" 절 참고)이라, 새 기능을 그 미완결 상태에 얹으면 서로 영향을 주게 된다. 독립 프로퍼티로 분리했다. **프론트 라우트 `/password-reset`을 그대로 이 이름으로 만들어야 한다** — 다르게 만들면 이미 발송된 메일의 링크가 깨진다. |
+| SES 자격 증명 해석 | — | accessKey/secretKey가 둘 다 채워져 있으면 `StaticCredentialsProvider`, 비어 있으면 AWS SDK 기본 자격 증명 체인(환경변수→프로파일→인스턴스 역할)에 위임 | `KakaoProperties`처럼 이 두 필드는 `@NotBlank`를 걸지 않았다(EC2/ECS 인스턴스 역할 기반 배포로 옮겨가도 이 클래스를 고칠 필요가 없게). `region`/`senderAddress`는 없으면 이메일을 아예 못 보내 `@NotBlank`로 기동 시 fail-fast한다. |
+
+**신규 예외 2종**(`auth.exception`): `InvalidResetTokenException`(400, 토큰 만료·미존재·이미 사용됨·계정
+비활성 전부 동일 메시지로 통일 — `InvalidRefreshTokenException`과 같은 사상), `PasswordResetCooldownException`
+(429, `AccountLockedException`과 같은 패턴).
+
+**검증**: `PasswordResetTokenServiceTest`(Mockito+실제 `RefreshTokenHasher` — 무작위 토큰 발급/조회/소비/쿨다운
+9건), `PasswordResetNotifierTest`(토큰 발급→메일 발송, SES 실패 시 예외 흡수+감사 로그 2건),
+`SesMailSenderTest`(요청 필드 매핑, SES 예외 그대로 전파 2건), `AuthServiceTest`(쿨다운/비활성 계정/ACTIVE
+분기/사전검증/토큰 무효·계정 없음·계정 비활성·성공 10건 추가), `AuthControllerTest`(3개 엔드포인트의
+성공·검증 실패·예외 변환 8건 추가), `AuthEndpointSecurityTest`(비밀번호 재설정 요청이 login/signup처럼
+인증 전 permitAll인지 1건 추가). **`AuthServicePasswordResetMariaDbIT`(신규, Testcontainers)** —
+`UserServiceMariaDbIT`와 정확히 같은 이유(Mockito는 "비밀번호 변경 dirty 상태가 뒤이은 벌크 UPDATE
+이전에 실제로 flush되는지"를 증명할 수 없다)로, 실제 MariaDB 위에서 `resetPassword()` 커밋 이후 재조회한
+DB 상태(새 비밀번호로 `matches()` 성공, RefreshToken 전체 폐기, 토큰 1회성 소비 확인)를 검증한다. Docker가
+가동 중인 세션에서 `./gradlew integrationTest`로 실행해 통과 확인(15개 MariaDB IT 클래스, 이 신규 IT 포함).
+`./gradlew test`도 전부 그린.
+
+**프론트엔드 작업 시 참고할 최종 계약**(AUTH-03 프론트 프롬프트에 그대로 전달):
+
+| 항목 | 값 |
+| --- | --- |
+| 1단계 요청 | `POST /api/auth/password-reset-request`, body `{"email": string}`, 성공 시 `ApiResponse<null>`(200) — 계정 존재 여부와 무관하게 항상 같은 성공 |
+| 1단계 재전송 제한 | 같은 이메일 60초 이내 재요청 시 `429` + `error.code = "PASSWORD_RESET_COOLDOWN"`, `error.message = "잠시 후 다시 시도해주세요"` |
+| 사전 검증(2단계 진입 시) | `GET /api/auth/password-reset/validate-token?token={token}` — 유효하면 `200`, 무효/만료/이미사용/계정비활성이면 전부 `400` + `error.code = "INVALID_RESET_TOKEN"`, `error.message = "유효하지 않거나 만료된 재설정 링크입니다. 다시 요청해주세요"`(토큰을 소비하지 않음 — 이 호출로는 링크가 무효화되지 않는다) |
+| 2단계 제출 | `POST /api/auth/password-reset`, body `{"token": string, "newPassword": string}` — `newPassword`는 AUTH-02와 동일한 정책(8자 이상 72바이트 이하, 영문·숫자·특수문자 조합), 위반 시 `400` + `VALIDATION_FAILED` + `fieldErrors[0].field = "newPassword"` |
+| 2단계 실패 | 토큰이 이미 위 사전검증/제출로 소비됐거나 만료·계정비활성이면 `400` + `INVALID_RESET_TOKEN`(사전검증과 동일 코드·문구) |
+| 토큰 만료 | 30분(발급 시점부터) |
+| 재설정 링크 형식 | `{프론트엔드 오리진}/password-reset?token={토큰}` — 프론트 라우트를 정확히 `/password-reset`으로 만들어야 한다(쿼리 파라미터명 `token`) |
+| 재설정 성공 후 | 서버가 그 사용자의 모든 Refresh Token을 폐기하고, 이미 발급됐던 Access Token도 다음 요청부터 거부한다(아래 "AUTH-03 resetPassword() Access Token 즉시 무효화" 절 참고) — 다른 기기/탭에 로그인돼 있었다면 전부 로그아웃된다(이 사실을 안내 문구에 반영할지는 프론트 판단) |
+
+### AUTH-03 resetPassword() — Access Token 즉시 무효화 (2026-09-23, Codex P1 코드리뷰 지적) — `AccessTokenEpochService` 신설
+
+**Refresh Token 전체 폐기만으로는 비밀번호 재설정이 막으려는 "계정 탈취" 시나리오를 완전히 방어하지
+못했다.** `JwtAuthenticationFilter`는 계정 상태가 ACTIVE이고 서명·만료가 유효하면 이미 발급된 Access
+Token을 그대로 인증에 쓴다 — 비밀번호 재설정은 계정 상태(status)를 바꾸지 않으므로(재설정 후에도
+여전히 ACTIVE), 공격자가 재설정 이전에 이미 Access Token을 쥐고 있었다면 그 토큰이 자연 만료될
+때까지(최대 `accessTokenValidity`, 기본 30분) 재설정 이후에도 계속 인증된 요청을 보낼 수 있었다.
+
+**해결: `password-reset:token:...`와 별개로, "이 사용자에게 이 시각 이전 발급된 Access Token은 전부
+무효"라는 컷오프(epoch)를 Redis에 남긴다.** 신규 `AccessTokenEpochService`(`common.security`,
+`UserStatusCacheService`와 같은 형태 — `user:tokenEpoch:{userId}` 키, TTL=`accessTokenValidity`)가
+컷오프를 저장하고, `JwtTokenProvider.getIssuedAt(token)`(신규, JWT `iat` 클레임 추출)으로 얻은 토큰
+발급 시각과 비교한다. `JwtAuthenticationFilter`는 기존 `userStatusResolver.isActive(userId)`에
+`accessTokenEpochService.isIssuedAfterCutoff(userId, issuedAt)`을 AND로 추가해, 컷오프 이전에 발급된
+토큰이면 예외 없이 SecurityContext 설정만 건너뛴다(만료·상태불일치 토큰과 같은 패턴 — 토큰 상태를
+따로 두지 않는 stateless JWT 모델을 유지하면서, 이 필터가 매 요청 이미 하던 Redis 조회 하나를 더
+추가하는 것으로 끝난다). `AuthService.resetPassword()`가 `refreshTokenRepository.revokeAllByUserId()`
+직후 `accessTokenEpochService.invalidateTokensIssuedBefore(userId, Instant.now())`를 호출한다.
+
+**컷오프를 쓰는 지점은 지금 `resetPassword()` 하나뿐이다 — `RefreshTokenReuseHandler.handle()`
+(재사용 탐지로 Refresh Token을 전부 폐기하는 지점)도 구조적으로 같은 갭을 안고 있다는 것을 발견했지만,
+이번 P1이 지목한 지점(비밀번호 재설정)만 우선 닫았다.** 공격자가 탈취한 Refresh Token으로 이미
+Access Token을 발급받아 둔 상태에서 재사용이 탐지되면, Refresh Token은 전부 죽지만 그 Access Token은
+마찬가지로 만료 전까지 계속 통용된다 — 범위가 넓어지는 걸 피하려 이번 P1이 명시한 지점만 고쳤다.
+**완결 필요 — `RefreshTokenReuseHandler.handle()`에도 같은 `accessTokenEpochService.
+invalidateTokensIssuedBefore(userId, Instant.now())` 호출을 추가하는 것을 다음에 검토하라.**
+
+**정밀도 불일치 버그 — 실 Redis로 작성한 IT가 잡아냈다(Mockito로는 드러나지 않았을 결함).** JWT의
+`iat`(NumericDate, RFC 7519)는 라이브러리가 직렬화 시점에 초 단위로 자른다(COM-SEC-02의 `jti` 도입
+배경과 같은 특성). 최초 구현은 컷오프를 밀리초 정밀도(`Instant.now().toEpochMilli()`)로 저장하고
+초 단위로 잘린 `iat`과 그대로 비교했는데, 재설정 직후 같은 초 안에 정당하게 재로그인해 발급된 새
+Access Token의 `iat`이 컷오프보다 초 단위로는 같아도 밀리초로는 여전히 "이전"으로 비교돼 즉시
+걸러지는 오탐이 있었다 — 그 토큰은 컷오프 TTL(최대 30분) 동안 계속 거부되는, 실사용자 로그인이
+막히는 심각한 회귀였다. `AuthServicePasswordResetMariaDbIT`에 추가한 실 Redis 테스트가 정확히 이
+실패를 재현했다(양쪽을 자유롭게 밀리초로 넣을 수 있는 Mockito 목으로는 이 정밀도 불일치 자체가
+드러나지 않았을 것이다). **수정: 컷오프·비교 모두 초 단위(`Instant.getEpochSecond()`)로 통일했다** —
+이러면 컷오프 발생 직전 같은 초 안에 발급된 진짜 stale 토큰이 최대 1초간 걸러지지 않을 수 있는 반대
+방향의 작은 여지가 생기지만, "정당한 로그인을 최대 30분 차단"과 "탈취된 토큰을 최대 1초 늦게 차단"
+중 후자가 명백히 더 안전한 트레이드오프라 그대로 받아들였다(`AccessTokenEpochService` javadoc에 근거
+기록).
+
+**검증**: `AccessTokenEpochServiceTest`(Mockito — 초 단위 저장·컷오프 없음/이전/이후/같은 초 4분기),
+`JwtTokenProviderTest.getIssuedAt은_토큰_발급_시각을_추출한다`(신규),
+`JwtAuthenticationFilterTest.상태는_ACTIVE여도_컷오프_이전에_발급된_토큰이면_인증정보를_채우지_않는다`(신규),
+`AuthServiceTest.resetPassword_성공하면_...`(컷오프 호출 검증 추가). **`AuthServicePasswordResetMariaDbIT.
+재설정_이전에_발급된_AccessToken은_재설정_이후_컷오프에_걸리고_이후에_발급된_토큰은_통과한다`(신규,
+Testcontainers+실 Redis)** — stale 토큰 발급 → `Thread.sleep(1100)`(초 경계를 실제로 건너기 위한
+필수 전제조건이지 타이밍 회피가 아니다, iat 자체가 초 단위라 이보다 짧은 간격으로는 이 테스트가
+검증하려는 것 자체가 성립하지 않는다) → `resetPassword()` → 새 토큰 발급 → stale은 컷오프에 걸리고
+fresh는 통과함을 실 Redis로 확인. `@WebMvcTest` 슬라이스 12개 전부 `JwtAuthenticationFilter`가 항상
+컨텍스트에 오르는 기존 패턴(트러블슈팅 노트 참고)대로 `@MockitoBean AccessTokenEpochService`를
+추가했다. **2026-09-23, Docker가 가동 중인 세션에서 `./gradlew test`(576 테스트)와
+`./gradlew integrationTest`(15개 MariaDB IT 클래스, 62 테스트, 이 신규 케이스 포함) 둘 다 실행해
+그린 확인했다.**
+
+**완결 필요**: 프로그램설계서 3.1절(AUTH-03 처리 로직)에 이 컷오프 메커니즘을 반영해야 한다(문서
+반영은 claude.ai 세션에서 별도 진행). 위 `RefreshTokenReuseHandler` 확장 항목도 함께.
+
+**완결 필요(문서 추적성) — `AccessTokenEpochService`가 프로그램목록서·프로그램설계서 어디에도 프로그램
+ID로 등록돼 있지 않다(코드리뷰 지적, 2026-09-23).** COM-SEC-01(`JwtAuthenticationFilter`/
+`UserStatusCacheService`/`UserStatusResolver`)·COM-SEC-02(`JwtTokenProvider`)와 같은 급의 공통 보안
+컴포넌트인데, 이번 신설이 신규 프로그램 목록 갱신 없이 기존 COM-SEC-01/02 절 아래 코드로만 들어갔다.
+다음 문서 동기화 시점에 **COM-SEC-03**(가칭)으로 프로그램목록서 3장 총괄표·8.2절 FR 추적표에 등록하고
+(위 "프로그램 인벤토리" 절의 COM 8개 목록도 함께 9개로 갱신), 프로그램설계서에도 클래스·메서드
+시그니처를 반영하라 — 지금 당장 막을 일은 아니다.
+
+### AUTH-03 requestPasswordReset() 쿨다운 획득 경쟁 (2026-09-23, Codex P2 코드리뷰 지적) — SETNX로 원자화
+
+**쿨다운 확인(GET)과 세팅(SET)이 분리된 두 호출이라 TOCTOU였다.** `requestPasswordReset()`은
+`passwordResetTokenService.isCoolingDown(email)`으로 조회한 뒤 통과하면 별도로
+`startCooldown(email)`을 호출했다 — 같은 이메일로 거의 동시에 여러 요청이 들어오면 그 조회~세팅
+사이의 창에서 전부 "쿨다운 없음"을 관측할 수 있어, 광고된 "60초에 한 번" 제한이 무력화된 채 여러
+요청이 나란히 통과했다. 각 요청이 `PasswordResetNotifier.notifyAsync()`(비동기 SES 발송+새 토큰
+발급)를 중복 실행해, 짧은 시간에 여러 통의 메일과 여러 개의 동시 유효한 재설정 토큰이 발급될 수
+있었다(위 "재발급 시 이전 활성 토큰 무효화" 항목이 순차 재발급만 다뤘지, 이 동시 발급 경쟁은 별개
+문제였다).
+
+**수정: `isCoolingDown()`+`startCooldown()`을 `PasswordResetTokenService.tryStartCooldown()`
+(SETNX, `StringRedisTemplate.opsForValue().setIfAbsent()`) 하나로 합쳤다.** Redis 단일 커맨드가
+직렬화를 보장하므로 조회~세팅 사이의 창 자체가 성립하지 않는다 — `consumeToken()`의 GETDEL(위
+AUTH-03 절 참고)과 같은 원자적 read-then-write 패턴이다. `requestPasswordReset()`은 이제
+`tryStartCooldown()`의 반환값(획득 성공 여부)만 보고 실패하면 즉시 `PasswordResetCooldownException`을
+던진다 — 계정 존재 여부와 무관하게 항상 획득을 시도한다는 오라클 방지 원칙(위 AUTH-03 절 참고)은
+그대로 유지된다.
+
+**검증**: `PasswordResetTokenServiceTest`(SETNX 성공/실패 각 1건, 기존 `isCoolingDown`×2+`startCooldown`×1
+3건을 `tryStartCooldown`×2 2건으로 교체), `AuthServiceTest`(4건 모두 `tryStartCooldown` 목킹으로 갱신).
+**`AuthServicePasswordResetMariaDbIT.같은_이메일로_동시에_여러_재설정_요청이_와도_쿨다운_획득은_정확히_하나만_성공한다`
+(신규, Testcontainers+실 Redis)** — `CyclicBarrier`로 8개 스레드를 동시에 출발시켜 실제
+`AuthService.requestPasswordReset()`을 실 Redis에 대고 경쟁시키고, 정확히 1건만 성공(예외 없음)하고
+나머지 7건은 전부 `PasswordResetCooldownException`인지 확인한다 — `AuthServiceMariaDbIT`의 가입 경쟁
+테스트와 달리 순서를 인위적으로 강제할 필요가 없었다(SETNX 자체가 원자적이라 순서와 무관하게 정확히
+하나만 이긴다). **2026-09-23, Docker가 가동 중인 세션에서 `./gradlew test`(575 테스트)와
+`./gradlew integrationTest`(15개 MariaDB IT 클래스, 63 테스트, 이 신규 케이스 포함) 둘 다 실행해
+그린 확인했다.**
+
+### AUTH-03 resetPassword() 성공 시 로그인 실패 잠금 해제 (2026-09-23, Codex P2 코드리뷰 지적)
+
+**재설정 성공 후에도 `login:fail:{email}` 잠금이 그대로 남아있었다.** 비밀번호를 5회 틀려
+`LoginAttemptService`가 계정을 잠근(`login:fail:{email}` 카운터가 임계치 도달, TTL 5분) 상태에서
+사용자가 비밀번호 찾기로 전환해 재설정에 성공해도, `resetPassword()`는 이 Redis 카운터를 전혀
+건드리지 않았다 — 새 비밀번호로 곧바로 로그인해도 그 카운터의 TTL이 자연 만료될 때까지(최대 5분)
+계속 `AccountLockedException`에 막혔다. 이메일 링크로 받은 재설정 토큰을 원자적으로 소비(GETDEL)해
+`resetPassword()`까지 도달했다는 것 자체가 이미 그 메일함(=계정)의 소유를 증명하므로, 더 이상 그
+잠금을 유지할 이유가 없다.
+
+**수정: `resetPassword()` 성공 경로 마지막에 `loginAttemptService.reset(user.getEmail())`을 추가했다.**
+`user.getEmail()`은 `User.createUser()`가 저장 시점에 이미 `User.normalizeEmail()`로 정규화해 둔 값이라
+(`UserRepository.findByEmail()`/`existsByEmail()`이 조회 시에도 같은 정규화를 적용하는 것과 같은 전제),
+`authenticate()`가 쓰는 `normalizedEmail`과 동일한 키를 가리킨다 — 별도 정규화 호출이 필요 없다.
+`LoginAttemptService.reset()`은 `login()`의 자격 검증 성공 경로가 이미 쓰던 기존 메서드를 그대로
+재사용했다(신규 메서드 없음).
+
+**검증**: `AuthServiceTest.resetPassword_성공하면_...`에 `verify(loginAttemptService).reset("user@test.com")`
+추가, 세 실패 경로(토큰 무효/사용자 없음/계정 비ACTIVE)에는 `verify(loginAttemptService, never()).reset(...)`
+추가. **`AuthServicePasswordResetMariaDbIT.재설정_전에_로그인_잠금이_걸려있었어도_재설정에_성공하면_잠금이_풀린다`
+(신규, Testcontainers+실 Redis)** — 실제 `LoginAttemptService.recordFailure()`를 5회 호출해 잠금을
+만든 뒤 `AuthService.resetPassword()`를 실행하고, `isLocked()`가 실제로 false로 뒤집히는지 실 Redis로
+확인한다(Mockito는 `reset()` 호출 여부까지만 증명하고, 그 호출이 실제로 `isLocked()`의 판정을
+뒤집는지는 증명하지 못한다 — 같은 키를 참조하는지, delete가 아니라 예컨대 TTL만 건드리는 식으로
+어긋나 있지는 않은지는 실제 Redis 라운드트립으로만 확인된다). **2026-09-23, Docker가 가동 중인
+세션에서 `./gradlew test`(575 테스트)와 `./gradlew integrationTest`(15개 MariaDB IT 클래스, 64 테스트,
+이 신규 케이스 포함) 둘 다 실행해 그린 확인했다.**
+
 ### SVC-USER-01 구현 결정 사항
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |

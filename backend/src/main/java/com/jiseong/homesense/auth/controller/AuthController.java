@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.jiseong.homesense.auth.dto.EmailCheckResponse;
 import com.jiseong.homesense.auth.dto.LoginRequest;
 import com.jiseong.homesense.auth.dto.LoginResponse;
+import com.jiseong.homesense.auth.dto.PasswordResetConfirmRequest;
+import com.jiseong.homesense.auth.dto.PasswordResetRequest;
 import com.jiseong.homesense.auth.dto.ReactivateRequest;
 import com.jiseong.homesense.auth.dto.RefreshRequest;
 import com.jiseong.homesense.auth.dto.SignupRequest;
@@ -62,5 +64,26 @@ public class AuthController {
     @GetMapping("/check-email")
     public ApiResponse<EmailCheckResponse> checkEmail(@RequestParam String email) {
         return ApiResponse.success(new EmailCheckResponse(authService.isEmailDuplicate(email)));
+    }
+
+    /** AUTH-03 1단계 — 계정 존재 여부와 무관하게 항상 동일한 성공 응답(예외는 쿨다운뿐, 429). */
+    @PostMapping("/password-reset-request")
+    public ApiResponse<Void> requestPasswordReset(@Valid @RequestBody PasswordResetRequest request) {
+        authService.requestPasswordReset(request.email());
+        return ApiResponse.success((Void) null);
+    }
+
+    /** AUTH-03 2단계 사전 검증(선택 API) — 만료·미존재 토큰이면 400, 소비하지 않는다(peek). */
+    @GetMapping("/password-reset/validate-token")
+    public ApiResponse<Void> validatePasswordResetToken(@RequestParam String token) {
+        authService.validatePasswordResetToken(token);
+        return ApiResponse.success((Void) null);
+    }
+
+    /** AUTH-03 2단계 — 토큰 소비(1회용) + 비밀번호 변경 + 기존 세션 전체 폐기. */
+    @PostMapping("/password-reset")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody PasswordResetConfirmRequest request) {
+        authService.resetPassword(request.token(), request.newPassword());
+        return ApiResponse.success((Void) null);
     }
 }

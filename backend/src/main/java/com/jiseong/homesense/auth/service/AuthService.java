@@ -1,6 +1,7 @@
 package com.jiseong.homesense.auth.service;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -21,10 +22,13 @@ import com.jiseong.homesense.auth.exception.AccountNotActiveException;
 import com.jiseong.homesense.auth.exception.AccountNotWithdrawnException;
 import com.jiseong.homesense.auth.exception.DuplicateEmailException;
 import com.jiseong.homesense.auth.exception.InvalidRefreshTokenException;
+import com.jiseong.homesense.auth.exception.InvalidResetTokenException;
+import com.jiseong.homesense.auth.exception.PasswordResetCooldownException;
 import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.config.JwtProperties;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
@@ -55,6 +59,9 @@ public class AuthService {
     private final WithdrawalPolicy withdrawalPolicy;
     private final RefreshTokenRotator refreshTokenRotator;
     private final RefreshTokenReuseHandler refreshTokenReuseHandler;
+    private final PasswordResetTokenService passwordResetTokenService;
+    private final PasswordResetNotifier passwordResetNotifier;
+    private final AccessTokenEpochService accessTokenEpochService;
 
     public SignupResponse signup(SignupCommand cmd) {
         if (userRepository.existsByEmail(cmd.email())) {
@@ -208,6 +215,97 @@ public class AuthService {
     @Transactional(readOnly = true)
     public boolean isEmailDuplicate(String email) {
         return userRepository.existsByEmail(email);
+    }
+
+    /**
+     * AUTH-03 1단계 — 재설정 링크 발송 요청. 계정 존재 여부·상태와 무관하게 호출자에게는 항상 동일한
+     * 성공(예외 없음)만 보인다 — 실제로 토큰을 발급하고 메일을 보내는 것은 계정이 존재하고
+     * {@code ACTIVE}일 때뿐이다(WITHDRAWN/SUSPENDED에는 보내지 않는다 — AUTH-01의 "탈퇴/정지 계정은
+     * 로그인 자체를 차단" 원칙과 정합, CLAUDE.md AUTH-03 결정 기록 참고). 재전송 쿨다운(60초)만 429로
+     * 예외를 던지는데, 이 쿨다운은 계정 존재 여부와 무관하게 항상 시도되므로({@link #passwordResetTokenService}
+     * 호출이 이 필터 앞에 있다) 오라클이 되지 않는다({@link PasswordResetCooldownException} javadoc
+     * 참고).
+     *
+     * <p>쿨다운 획득은 {@link PasswordResetTokenService#tryStartCooldown}(SETNX) 한 번으로 원자적으로
+     * 처리한다 — 이전엔 조회(isCoolingDown)와 세팅(startCooldown)이 별개 호출이라, 같은 이메일로 거의
+     * 동시에 여러 요청이 들어오면 전부 "쿨다운 없음"을 관측해 60초 제한을 무시하고 나란히 통과할 수
+     * 있었다(P2 코드리뷰 지적) — 그 사이 각자 비동기 SES 발송+토큰 발급을 중복 실행해, 광고된 "60초에
+     * 한 번"과 달리 짧은 시간에 여러 통의 메일과 여러 개의 유효한 재설정 토큰이 발급될 수 있었다.
+     *
+     * <p>토큰 발급+메일 발송은 {@link PasswordResetNotifier#notifyAsync}로 위임해 비동기 실행한다 —
+     * 이 메서드 자신은 findByEmail() 하나만 수행하는 읽기 전용 트랜잭션이라 readOnly로 열고, 느린
+     * SES 호출이 이 트랜잭션이나 응답 경로를 블로킹하지 않게 한다(그 이유는 PasswordResetNotifier
+     * javadoc 참고 — NFR + 타이밍 사이드채널 방지 두 가지 모두 비동기 분리를 요구한다).
+     */
+    @Transactional(readOnly = true)
+    public void requestPasswordReset(String rawEmail) {
+        String normalizedEmail = User.normalizeEmail(rawEmail);
+        if (!passwordResetTokenService.tryStartCooldown(normalizedEmail)) {
+            throw new PasswordResetCooldownException();
+        }
+
+        userRepository.findByEmail(rawEmail)
+                .filter(user -> user.getStatus() == UserStatus.ACTIVE)
+                .ifPresent(user -> passwordResetNotifier.notifyAsync(user.getUserId(), user.getEmail()));
+    }
+
+    /**
+     * AUTH-03 2단계 진입 전 사전 검증(선택 API — {@code GET /api/auth/password-reset/validate-token}).
+     * 만료된 토큰으로 곧바로 입력 폼을 보여주지 않기 위한 것이라 토큰을 소비하지 않는다(peek) — 실제
+     * 소비(1회용 삭제)는 {@link #resetPassword}만 한다.
+     */
+    @Transactional(readOnly = true)
+    public void validatePasswordResetToken(String rawToken) {
+        if (passwordResetTokenService.peekToken(rawToken).isEmpty()) {
+            throw new InvalidResetTokenException();
+        }
+    }
+
+    /**
+     * AUTH-03 2단계 — 토큰을 원자적으로 소비(GETDEL, 1회용)하고 비밀번호를 변경한 뒤 기존
+     * Refresh Token을 전부 폐기한다(탈퇴 시 전체 폐기와 동일한 패턴 — 비밀번호가 탈취됐을 가능성에
+     * 대비해 재설정 이후에는 모든 기존 세션을 끝낸다, CLAUDE.md AUTH-03 결정 기록 참고).
+     *
+     * <p>토큰 발급 이후(최대 30분 창) 계정이 탈퇴·정지됐다면 여기서도 {@link InvalidResetTokenException}으로
+     * 거부한다 — 그렇지 않으면 WITHDRAWN 계정이 {@link #reactivate}의 비밀번호 확인(authenticate())을
+     * 거치지 않고 비밀번호를 바꿀 수 있는 구멍이 된다. 비밀번호 변경(user 엔티티 dirty) 다음에
+     * revokeAllByUserId()(벌크 UPDATE)를 호출하는 순서는 {@link RefreshTokenRepository#revokeAllByUserId}의
+     * {@code flushAutomatically=true}가 안전하게 처리한다(UserService.withdraw()와 동일한 순서·근거).
+     *
+     * <p><b>Refresh Token 폐기만으로는 계정 탈취 시나리오를 완전히 막지 못한다(코드리뷰 P1 지적).</b>
+     * {@code JwtAuthenticationFilter}는 계정 상태가 ACTIVE이고 서명·만료가 유효하면 이미 발급된
+     * Access Token을 그대로 인증에 쓴다 — 비밀번호 재설정은 계정 상태(status)를 바꾸지 않으므로
+     * (재설정 후에도 여전히 ACTIVE), 공격자가 재설정 이전에 이미 Access Token을 쥐고 있었다면 그
+     * 토큰이 자연 만료될 때까지(최대 {@code accessTokenValidity}, 기본 30분) 재설정 이후에도 계속
+     * 인증된 요청을 보낼 수 있었다 — 정확히 비밀번호 재설정이 복구하려는 "계정 탈취" 시나리오에서
+     * 방어가 뚫려 있었다는 뜻이다. {@link AccessTokenEpochService}에 "지금 이 순간 이전에 발급된
+     * Access Token은 전부 무효"라는 컷오프를 남겨, 다음 요청부터는 그 필터가 이 컷오프와 토큰의
+     * {@code iat}를 비교해 재설정 이전 토큰을 걸러낸다(예외 없이 SecurityContext 설정만 건너뜀 —
+     * 만료·상태불일치 토큰과 같은 패턴).
+     *
+     * <p><b>{@link LoginAttemptService}의 로그인 실패 잠금도 함께 푼다(코드리뷰 P2 지적).</b> 비밀번호를
+     * 5회 틀려 {@code login:fail:{email}}이 잠금 임계치에 도달한 뒤 비밀번호 찾기로 전환한 사용자는,
+     * 이 메서드가 비밀번호를 정상적으로 바꿔도 그 Redis 카운터가 그대로 남아있어 새 비밀번호로 곧바로
+     * 로그인해도 TTL(5분)이 지날 때까지 {@link AccountLockedException}에 계속 막혔다 — 이메일 링크의
+     * 토큰을 원자적으로 소비(GETDEL)해 여기까지 도달했다는 것 자체가 이미 그 메일함(계정)의 소유를
+     * 증명하므로, 더 이상 잠가 둘 이유가 없다.
+     */
+    public void resetPassword(String rawToken, String newPassword) {
+        Long userId = passwordResetTokenService.consumeToken(rawToken).orElseThrow(InvalidResetTokenException::new);
+        User user = userRepository.findById(userId).orElseThrow(InvalidResetTokenException::new);
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new InvalidResetTokenException();
+        }
+
+        user.changePassword(passwordEncoder.encode(newPassword));
+        refreshTokenRepository.revokeAllByUserId(userId);
+        accessTokenEpochService.invalidateTokensIssuedBefore(userId, Instant.now());
+        loginAttemptService.reset(user.getEmail());
+
+        log.atInfo()
+                .addKeyValue("auditEvent", "PASSWORD_RESET_COMPLETED")
+                .addKeyValue("userId", userId)
+                .log("PASSWORD_RESET_COMPLETED userId={}", userId);
     }
 
     /**

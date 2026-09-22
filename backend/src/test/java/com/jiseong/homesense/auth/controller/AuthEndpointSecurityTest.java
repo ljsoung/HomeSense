@@ -18,6 +18,7 @@ import com.jiseong.homesense.auth.dto.LoginResponse;
 import com.jiseong.homesense.auth.service.AuthService;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.common.security.RestAuthenticationEntryPoint;
 import com.jiseong.homesense.common.security.SecurityConfig;
@@ -43,6 +44,8 @@ class AuthEndpointSecurityTest {
     @MockitoBean
     private UserStatusResolver userStatusResolver;
     @MockitoBean
+    private AccessTokenEpochService accessTokenEpochService;
+    @MockitoBean
     private AuditLogger auditLogger;
 
     @Test
@@ -62,5 +65,17 @@ class AuthEndpointSecurityTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"refreshToken\":\"refresh-token\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * AUTH-03 — 비밀번호 재설정 요청도 login/signup/reactivate와 같은 인증 전 요청이다. 실수로 인증
+     * 필수 목록에 들어가면 비밀번호를 잊은(=로그인할 수 없는) 사용자가 이 기능 자체를 쓸 수 없게 된다.
+     */
+    @Test
+    void 비밀번호_재설정_요청은_토큰_없이도_접근할_수_있다() throws Exception {
+        mockMvc.perform(post("/api/auth/password-reset-request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"user@test.com\"}"))
+                .andExpect(status().isOk());
     }
 }
