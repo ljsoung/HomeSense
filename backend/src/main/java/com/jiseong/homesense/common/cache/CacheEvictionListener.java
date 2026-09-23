@@ -30,8 +30,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ul>
  *   <li>TradeCacheEvictionEvent(BAT-LOD-01, 일 1회 이상) — complexDetailV2::{complexId}를 건별로
- *       evict하고, complexId가 하나라도 있으면 popularComplexesV2(인기 단지 순위) 전체를 evict한다.
- *       complexId 하나만으로 "어떤 limit으로 캐시된 popularComplexesV2 항목이 영향받는지"를 역산할 수
+ *       evict하고, complexId가 하나라도 있으면 popularComplexesV3(인기 단지 순위) 전체를 evict한다.
+ *       complexId 하나만으로 "어떤 limit으로 캐시된 popularComplexesV3 항목이 영향받는지"를 역산할 수
  *       없어 전체 clear()로 처리한다.</li>
  *   <li>LegalDistrictCodeReloadedEvent(BAT-MAT-01, 비정기) — regionAutocomplete(지역 자동완성) 전체를
  *       evict한다. 이 캐시를 TradeCacheEvictionEvent에 묶으면 정적 데이터를 매일 무효화하게 돼
@@ -40,9 +40,9 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>{@code COMPLEX_DETAIL_CACHE}가 {@code complexDetail}이 아니라 {@code complexDetailV2}인 이유는
  * {@link com.jiseong.homesense.complex.service.ComplexDetailCache} 참고 — housingType 필드 추가로
- * 캐시 이름을 버전업했다. {@code POPULAR_COMPLEXES_CACHE}가 {@code popularComplexesV2}인 이유도 같다 —
- * {@code ComplexSummaryResponse}에 matchMethod/floor 필드가 추가되며 버전업했다(CPX-RCV-RGN 카드
- * 표시 필드 보강 작업).
+ * 캐시 이름을 버전업했다. {@code POPULAR_COMPLEXES_CACHE}가 {@code popularComplexesV3}인 이유도 같다 —
+ * {@code ComplexSummaryResponse}에 matchMethod/floor(V2, CPX-RCV-RGN 카드 표시 필드 보강 작업),
+ * rentType/monthlyRentAmount(V3, 2026-09-23 단지 검색 거래유형 구분) 필드가 추가되며 버전업했다.
  */
 @Slf4j
 @Component

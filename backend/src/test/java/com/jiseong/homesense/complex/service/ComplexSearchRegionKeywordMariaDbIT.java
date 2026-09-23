@@ -149,11 +149,16 @@ class ComplexSearchRegionKeywordMariaDbIT {
 
     private Trade trade(Complex c, DealCategory category, RentType rentType, LocalDate date, Long dealAmount,
             Long deposit) {
+        return trade(c, category, rentType, date, dealAmount, deposit, rentType == RentType.JEONSE ? 0L : null);
+    }
+
+    private Trade trade(Complex c, DealCategory category, RentType rentType, LocalDate date, Long dealAmount,
+            Long deposit, Long monthlyRent) {
         return Trade.builder()
                 .housingType(HousingType.APT).dealCategory(category).rentType(rentType)
                 .datasetId("15126468").sggCd("41111").complex(c)
                 .excluUseArea(new BigDecimal("84.00")).dealDate(date)
-                .dealAmount(dealAmount).depositAmount(deposit).cancelYn(false)
+                .dealAmount(dealAmount).depositAmount(deposit).monthlyRentAmount(monthlyRent).cancelYn(false)
                 .dedupHash("h-" + c.getComplexId() + "-" + date + "-" + category + "-" + rentType + "-" + dealAmount
                         + "-" + deposit)
                 .build();
@@ -254,7 +259,7 @@ class ComplexSearchRegionKeywordMariaDbIT {
         tradeRepository.saveAndFlush(trade(paJang, DealCategory.RENT, RentType.JEONSE,
                 LocalDate.of(2026, 8, 10), null, 40000L));
         tradeRepository.saveAndFlush(trade(paJang, DealCategory.RENT, RentType.WOLSE,
-                LocalDate.of(2026, 8, 25), null, 5000L));
+                LocalDate.of(2026, 8, 25), null, 5000L, 60L));
 
         ComplexSearchCondition base = ComplexSearchCondition.builder().regionCode("4111112900")
                 .sort(SortCondition.LATEST).build();
@@ -267,10 +272,20 @@ class ComplexSearchRegionKeywordMariaDbIT {
 
         assertThat(sale.representativeDealCategory()).isEqualTo(DealCategory.SALE);
         assertThat(sale.representativeAmount()).isEqualTo(50000L);
+        assertThat(sale.rentType()).isNull();
+        assertThat(sale.monthlyRentAmount()).isNull();
+
+        assertThat(jeonse.representativeDealCategory()).isEqualTo(DealCategory.RENT);
         assertThat(jeonse.representativeDealDate()).isEqualTo(LocalDate.of(2026, 8, 10));
         assertThat(jeonse.representativeAmount()).isEqualTo(40000L);
+        assertThat(jeonse.rentType()).isEqualTo(RentType.JEONSE);
+        assertThat(jeonse.monthlyRentAmount()).isZero();
+
+        assertThat(wolse.representativeDealCategory()).isEqualTo(DealCategory.RENT);
         assertThat(wolse.representativeDealDate()).isEqualTo(LocalDate.of(2026, 8, 25));
         assertThat(wolse.representativeAmount()).isEqualTo(5000L);
+        assertThat(wolse.rentType()).isEqualTo(RentType.WOLSE);
+        assertThat(wolse.monthlyRentAmount()).isEqualTo(60L);
         // 전월세 전체(dealCategory=RENT)면 가장 최근인 월세가 대표거래다.
         ComplexSummaryResponse rent = complexService.search(base.toBuilder().dealCategory(DealCategory.RENT).build(),
                 PageRequest.of(0, 10)).getContent().get(0);
@@ -284,9 +299,10 @@ class ComplexSearchRegionKeywordMariaDbIT {
         tradeRepository.saveAndFlush(trade(anseongRi, DealCategory.RENT, RentType.JEONSE,
                 LocalDate.of(2026, 8, 20), null, 90000L));
 
-        List<Long> inRange = search(ComplexSearchCondition.builder().rentType(RentType.JEONSE)
+        List<Long> inRange = search(ComplexSearchCondition.builder().regionCode("4100000000").rentType(RentType.JEONSE)
                 .amountMin(25000L).amountMax(35000L).sort(SortCondition.LATEST).build());
-        List<Long> saleInRange = search(ComplexSearchCondition.builder().dealCategory(DealCategory.SALE)
+        List<Long> saleInRange = search(ComplexSearchCondition.builder().regionCode("4100000000")
+                .dealCategory(DealCategory.SALE)
                 .amountMin(25000L).amountMax(35000L).sort(SortCondition.LATEST).build());
 
         assertThat(inRange).containsExactly(anseongDong.getComplexId());
@@ -299,7 +315,9 @@ class ComplexSearchRegionKeywordMariaDbIT {
 
         mockMvc.perform(get("/api/complexes/search").param("keyword", "안성시").param("regionCode", "4155000000"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2));
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].rentType").doesNotExist())
+                .andExpect(jsonPath("$.data[0].monthlyRentAmount").doesNotExist());
 
         assertThat(searchLogRepository.count()).isEqualTo(before);
     }
@@ -323,5 +341,8 @@ class ComplexSearchRegionKeywordMariaDbIT {
         mockMvc.perform(get("/api/complexes/search").param("keyword", "가".repeat(51)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("INVALID_SEARCH_KEYWORD"));
+        mockMvc.perform(get("/api/complexes/search").param("dealCategory", "SALE"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_SEARCH_CONDITION"));
     }
 }

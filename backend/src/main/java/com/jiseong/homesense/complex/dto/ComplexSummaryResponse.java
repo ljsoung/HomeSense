@@ -7,6 +7,7 @@ import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.MatchMethod;
+import com.jiseong.homesense.trade.entity.RentType;
 import com.jiseong.homesense.trade.entity.Trade;
 
 /**
@@ -20,6 +21,12 @@ import com.jiseong.homesense.trade.entity.Trade;
  * 이미 조회해 두므로, 새 서브쿼리나 별도 조회 없이 같은 Trade 인스턴스에서 두 필드만 추가로 읽으면
  * 된다 — "서로 다른 거래에서 따로 조회"할 위험 자체가 없다. 둘 다 nullable이라(match_method는 매칭
  * 실패 시 NULL, floor는 원본 미기재 시 NULL) 값이 없으면 NULL을 그대로 응답한다.
+ *
+ * <p>rentType/monthlyRentAmount도 같은 대표 거래에서 가져온다(2026-09-23 추가, FR-3.3 — 월세는 보증금과
+ * 월세를 함께 보여야 한다). 매매면 둘 다 NULL, 전세면 rentType=JEONSE·monthlyRentAmount는 원본값(보통
+ * 0 또는 NULL), 월세면 rentType=WOLSE와 월세금액이다. 검색에 거래유형 필터를 걸면 대표 거래가 그 유형의
+ * 최신 거래라 카드도 그 유형을 표시한다. 이 DTO는 popularComplexes 캐시에 담기므로 필드를 추가하면서
+ * 캐시 이름을 V3로 올렸다(CLAUDE.md "캐싱" 절 원칙).
  */
 public record ComplexSummaryResponse(
         Long complexId,
@@ -36,7 +43,9 @@ public record ComplexSummaryResponse(
         Long representativeAmount,
         BigDecimal representativeArea,
         MatchMethod matchMethod,
-        Short floor) {
+        Short floor,
+        RentType rentType,
+        Long monthlyRentAmount) {
 
     public static ComplexSummaryResponse of(Complex complex, Trade representativeTrade) {
         Long amount = representativeTrade.getDealCategory() == DealCategory.SALE
@@ -58,6 +67,8 @@ public record ComplexSummaryResponse(
                 amount,
                 representativeTrade.getExcluUseArea(),
                 representativeTrade.getMatchMethod(),
-                representativeTrade.getFloor());
+                representativeTrade.getFloor(),
+                representativeTrade.getRentType(),
+                representativeTrade.getMonthlyRentAmount());
     }
 }

@@ -8,8 +8,11 @@ public final class CacheNames {
 
     /** SVC-CPX-01.getDetail() — ComplexDetailResponse(matchPending, 주소 포함). */
     public static final String COMPLEX_DETAIL = "complexDetailV2";
-    /** SVC-CPX-01.getPopular() — ComplexSummaryResponse(sido/sigungu/dongRi 포함). */
-    public static final String POPULAR_COMPLEXES = "popularComplexesV2";
+    /**
+     * SVC-CPX-01.getPopular() — ComplexSummaryResponse(sido/sigungu/dongRi 포함). V3: rentType·monthlyRentAmount
+     * 추가(2026-09-23) — 옛 V2 엔트리를 읽으면 두 필드가 조용히 null이 되므로 이름을 올렸다.
+     */
+    public static final String POPULAR_COMPLEXES = "popularComplexesV3";
     /** SVC-RGN-01.autocomplete() — RegionAutocompleteResponse(legalDongCd, fullPath). */
     public static final String REGION_AUTOCOMPLETE = "regionAutocomplete";
 

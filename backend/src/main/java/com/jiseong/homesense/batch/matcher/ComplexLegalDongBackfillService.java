@@ -43,7 +43,7 @@ public class ComplexLegalDongBackfillService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /**
-     * 백필 후 비우는 캐시. complexDetailV2는 matchPending이 legal_dong_cd로 계산되고, popularComplexesV2와
+     * 백필 후 비우는 캐시. complexDetailV2는 matchPending이 legal_dong_cd로 계산되고, popularComplexesV3와
      * regionAutocomplete는 지역 정보를 담는 DTO라 함께 비운다(regionAutocomplete는 이 백필로 값이 바뀌지
      * 않지만 "지역 정보를 담는 캐시 전부"라는 운영 절차를 단순하게 유지하려고 포함했다).
      */

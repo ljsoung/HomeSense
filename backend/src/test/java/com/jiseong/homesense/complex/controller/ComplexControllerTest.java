@@ -81,7 +81,8 @@ class ComplexControllerTest {
     private static ComplexSummaryResponse summary(Long id) {
         return new ComplexSummaryResponse(id, "테스트단지", "서울특별시", "강남구", "역삼동", 500, (short) 5,
                 LocalDate.of(2010, 1, 1), HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 1, 10), 120000L,
-                new java.math.BigDecimal("84.99"), com.jiseong.homesense.trade.entity.MatchMethod.EXACT, (short) 12);
+                new java.math.BigDecimal("84.99"), com.jiseong.homesense.trade.entity.MatchMethod.EXACT, (short) 12,
+                null, null);
     }
 
     @Test
@@ -89,7 +90,8 @@ class ComplexControllerTest {
         when(complexService.search(any(), any()))
                 .thenReturn(new PageImpl<>(List.of(summary(1L)), PageRequest.of(0, 10), 1));
 
-        mockMvc.perform(get("/api/complexes/search").param("page", "0").param("size", "10"))
+        mockMvc.perform(get("/api/complexes/search").param("regionCode", "4111100000")
+                        .param("page", "0").param("size", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data[0].complexId").value(1))
@@ -128,11 +130,30 @@ class ComplexControllerTest {
     void 공백뿐인_keyword는_조건_없음으로_처리한다() throws Exception {
         when(complexService.search(any(), any())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
 
-        mockMvc.perform(get("/api/complexes/search").param("keyword", "   ")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/complexes/search").param("regionCode", "4111100000").param("keyword", "   "))
+                .andExpect(status().isOk());
 
         ArgumentCaptor<ComplexSearchCondition> captor = ArgumentCaptor.forClass(ComplexSearchCondition.class);
         verify(complexService).search(captor.capture(), any());
         assertThat(captor.getValue().keyword()).isNull();
+    }
+
+    @Test
+    void regionCode와_keyword가_둘_다_없으면_400을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/complexes/search").param("rentType", "JEONSE"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_SEARCH_CONDITION"));
+        mockMvc.perform(get("/api/complexes/search").param("keyword", "   ").param("regionCode", " "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_SEARCH_CONDITION"));
+        verify(complexService, never()).search(any(), any());
+    }
+
+    @Test
+    void keyword만_있어도_검색한다() throws Exception {
+        when(complexService.search(any(), any())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
+
+        mockMvc.perform(get("/api/complexes/search").param("keyword", "래미안")).andExpect(status().isOk());
     }
 
     @ParameterizedTest
