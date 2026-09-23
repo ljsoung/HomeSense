@@ -258,7 +258,7 @@ interface ConfirmFormValues {
   newPasswordConfirm: string;
 }
 
-type TokenStatus = 'validating' | 'valid' | 'invalid';
+type TokenStatus = 'validating' | 'valid' | 'invalid' | 'error';
 
 /** AUTH-03 2단계 — 토큰을 먼저 소비 없이 검증(peek)한 뒤에만 새 비밀번호 폼을 보여준다. */
 function ConfirmStep({ token }: { token: string }) {
@@ -269,9 +269,12 @@ function ConfirmStep({ token }: { token: string }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [success, setSuccess] = useState(false);
+  // 재시도 트리거 — 값이 바뀔 때마다 아래 useEffect가 토큰 검증을 다시 시도한다("다시 시도" 버튼용).
+  const [validationAttempt, setValidationAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setTokenStatus('validating');
     validatePasswordResetToken(token)
       .then(() => {
         if (!cancelled) {
@@ -282,15 +285,21 @@ function ConfirmStep({ token }: { token: string }) {
         if (cancelled) {
           return;
         }
+        // 문서화된 무효 토큰 응답(400 INVALID_RESET_TOKEN)만 "링크 만료"로 취급한다 — 오프라인이거나
+        // 서버가 5xx를 반환한 경우(네트워크/서버 일시 장애)까지 여기서 함께 "만료"로 단정하면, 실제로는
+        // 유효한 링크를 들고 있는 사용자에게 "다시 요청하라"고 잘못 안내하게 된다. 그런 전송 계층
+        // 실패는 별도의 재시도 가능한 상태로 분리한다.
         if (axios.isAxiosError<ApiErrorResponse>(error) && error.response?.status === 400) {
           setInvalidMessage(error.response.data?.error?.message ?? DEFAULT_INVALID_TOKEN_MESSAGE);
+          setTokenStatus('invalid');
+          return;
         }
-        setTokenStatus('invalid');
+        setTokenStatus('error');
       });
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, validationAttempt]);
 
   const {
     register,
@@ -335,6 +344,26 @@ function ConfirmStep({ token }: { token: string }) {
         <div className="flex w-full items-center justify-center py-16">
           <Spinner />
         </div>
+      </>
+    );
+  }
+
+  if (tokenStatus === 'error') {
+    return (
+      <>
+        <LogoLockup />
+        <CardIntro
+          tone="error"
+          icon={<AlertTriangleIcon className="size-7 text-[#fb2c36]" />}
+          title="링크를 확인할 수 없습니다"
+          description={GENERIC_ERROR_MESSAGE}
+        />
+        <div className="w-full pt-6">
+          <Button type="button" onClick={() => setValidationAttempt((prev) => prev + 1)}>
+            다시 시도
+          </Button>
+        </div>
+        <BackToLogin />
       </>
     );
   }
