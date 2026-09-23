@@ -984,10 +984,32 @@ SRCH-01 프론트 착수 전 백엔드 선행 작업이다(브랜치 `feature/ba
 | **검색 로그 엔드포인트 분리** | 신규 제안(API-SEARCH-01): 기록은 `ComplexService.search()` 안에서 `@Async`로 | `ComplexService.search()`에서 기록을 제거했다(목록 조회는 부수효과 없는 순수 조회). **`POST /api/search/logs`**(바디 `{keyword}`, 인증 불필요, `SearchKeywordPolicy.normalizeRequired`로 검증하고 비어 있으면 400)를 신설했다. `SearchService.record()`는 동기 `@Transactional`이고 실패도 전파한다. `GET /api/search/popular` 집계는 이 행을 그대로 쓴다(IT로 확인) | 같은 API가 필터 변경·페이지 이동에도 불려 기록이 부풀려질 수 있었다. "검색을 실행한 순간" 1회 기록은 프론트만 알 수 있는 사건이다. 예전 `@Async`는 readOnly 트랜잭션 합류를 피하려던 것이었는데, 이제 이 메서드 자체가 요청의 목적이라 동기로 바꿨다 | 기록 남용(봇 등)이 문제가 되면 rate limit을 검토한다 — 지금은 없다 |
 | **거래유형 전세/월세 구분** | UI정의서 4.4절 거래유형은 매매/전세/월세 3가지인데, search는 `dealCategory(SALE/RENT)`만 있었다 | `rentType`(JEONSE/WOLSE) 파라미터를 추가했다. **trade 값 체계(`deal_category` + `rent_type`)와 `TradeSearchRequest`의 기존 형태를 그대로 따랐다**(단일 SALE/JEONSE/WOLSE 파라미터를 새로 만들지 않음). 매매는 `dealCategory=SALE`, 전세는 `rentType=JEONSE`, 월세는 `rentType=WOLSE`로 보낸다. rentType만 보내도 전월세로 취급해 금액 범위는 `depositAmount`(보증금) 기준이다(`ComplexSearchCondition.isRent()`, TRD가 겪은 버그와 같은 규칙). 대표거래(카드의 "최근 거래가")는 거래 필터가 걸린 상관 서브쿼리로 고르므로 **선택한 유형의 최신 거래**다(IT로 확인). `dealCategory=SALE`과 `rentType`을 함께 보내면 0건이다(TRD와 같은 동작, 400 아님) | 프론트가 이미 알고 있는 trade 값 체계를 새 이름으로 감싸면 두 도메인의 파라미터가 갈라진다 | 카드 표시 필드는 아래 행에서 해소했다 |
 | **카드 응답에 rentType·monthlyRentAmount 추가** | 없음(FR-3.3은 월세의 보증금과 월세를 함께 요구) | `ComplexSummaryResponse`에 `rentType`, `monthlyRentAmount`를 **대표거래에서** 채운다. 매매면 둘 다 null(`non_null` 설정이라 JSON에서 키가 빠진다), 전세면 `JEONSE`와 원본 월세값(보통 0), 월세면 `WOLSE`와 월세금액이다. 거래유형 필터를 걸면 대표거래가 그 유형의 최신 거래이므로 카드도 그 유형을 보인다. 이 DTO를 담는 인기 단지 캐시는 `popularComplexesV3`로 올렸다(`CacheNames`) | 이전에는 월세 단지가 보증금만 표시돼("5,000만") 로컬 응답 샘플에서 실제로 오해의 여지가 확인됐다(수원한일타운아파트). 캐시 이름을 올려야 배포 전 V2 엔트리가 두 필드 null로 읽히지 않는다 | 이 DTO에 필드를 또 추가하면 V4로 올린다 |
-| **검색 조건 필수화 — regionCode 또는 keyword** | 3.3절 search는 모든 조건이 선택 | 둘 다 없으면 400 `MISSING_SEARCH_CONDITION`(`MissingSearchConditionException`, `BusinessException` 상속, 전역 핸들러). 형식 오류(`INVALID_REGION_CODE`/`INVALID_SEARCH_KEYWORD`/`INVALID_SORT_CONDITION`)를 먼저 검사하고 필수 여부는 마지막에 본다. 공백뿐인 keyword는 조건 없음이다. 검사 위치는 `ComplexSearchRequest.toCondition()`(API 경계)이다 — Service/Repository는 조건 없는 호출을 막지 않는다(IT·내부 호출용) | SRCH-01은 검색 실행으로만 진입하고, 전국 목록 탐색은 명세에 없다. 조건 없는 전국 조회는 1.6~2.2s라 NFR-1(평균 200ms)을 넘는다 | **전국 단위 목록 조회가 요구되면** 이 제약을 풀기 전에 complex 최근거래 비정규화(아래 성능 측정의 개선안 1)를 먼저 검토한다 |
+| **검색 조건 필수화 — regionCode 또는 keyword** | 3.3절 search는 모든 조건이 선택 | 둘 다 없으면 400 `MISSING_SEARCH_CONDITION`(`MissingSearchConditionException`, `BusinessException` 상속, 전역 핸들러). 형식 오류(`INVALID_REGION_CODE`/`INVALID_SEARCH_KEYWORD`/`INVALID_SORT_CONDITION`)를 먼저 검사하고 필수 여부는 마지막에 본다. 공백뿐인 keyword는 조건 없음이다. 검사 위치는 `ComplexSearchRequest.toCondition()`(API 경계)이다 — Service/Repository는 조건 없는 호출을 막지 않는다(IT·내부 호출용) | SRCH-01은 검색 실행으로만 진입하고, 전국 목록 탐색은 명세에 없다. 조건 없는 전국 조회는 1.6~2.2s라 NFR-1(평균 200ms)을 넘는다 | **전국 단위 목록 조회가 요구되면** 이 제약을 풀기 전에 complex 최근거래 비정규화(아래 성능 결정표의 개선안 3)를 먼저 검토한다 |
 
-**넓은 지역 성능 측정(2026-09-23, 로컬, trade 204,520행) — 서울은 경계, 경기도는 200ms를 크게 넘는다.
-구현은 하지 않았다(지시대로 원인과 개선안만 기록).** DB 쿼리 시간(warm, ms):
+**넓은 지역 성능 — 개선안 1(count를 EXISTS로) 적용, 2·3은 보류(2026-09-23, 로컬, trade 204,520행).**
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| **개선안 1 — count를 EXISTS로** | **적용.** `ComplexRepositoryCustomImpl.search()`의 전체 건수를 `count(complex) WHERE (complex 조건) AND EXISTS(조건 맞는 trade)`로 센다. 목록 쿼리는 그대로다. 주의: 목록용 `complexFilters` BooleanBuilder는 `and()`가 제자리에서 바꿔 놓으므로 count용은 새로 만든다 | 대표거래는 "조건을 만족하는 거래가 있는 단지마다 정확히 1건"이므로 건수가 같다. `ComplexRepositoryMariaDbIT.전체_건수는_목록_쿼리가_실제로_돌려주는_단지_수와_같다`가 동률·취소 거래·매매/전세 혼재·범위 필터·keyword 7개 조건에서 "total == 전부 받은 목록 행 수, 중복 없음, 페이지 크기와 무관"을 검증한다. 로컬 실데이터 total도 개선 전후가 같다(아래 표). 생성된 count SQL 단독 실행은 54~58ms다(개선 전 113~360ms) | 대표거래 선정 규칙이 "조건 맞는 거래가 있는 단지당 1건"에서 바뀌면(예: 단지당 여러 카드) count도 다시 목록과 같은 방식으로 세야 한다 |
+| **개선안 2 — 목록을 윈도 함수로** | **보류.** 다음 단계로도 거치지 않는다 | (1) 네이티브 쿼리가 필요해 동적 필터 로직이 QueryDSL(count)과 네이티브 SQL(목록)에 중복된다 — 유지보수 부담과 두 쿼리의 결과 불일치 위험이 생긴다. (2) 느린 구간은 시도 단위 검색에 한정되고, 시군구 이하는 이미 기준(200ms) 이내다(수원시 장안구 19ms) | — (개선안 3으로 바로 간다) |
+| **개선안 3 — 최근거래 비정규화** | **보류** | 개선안 2와 같은 근거(시도 단위에서만 느림). 스키마 변경과 BAT-LOD-01 적재 경로 수정이 따른다 | **운영에서 시도 단위 검색 비중이 유의미하게 확인되거나 전국 조회가 요구되면** 이것을 검토한다(개선안 2는 중간 단계로 거치지 않는다) |
+
+**API 응답 시간(end-to-end) 개선 전후 — 같은 로컬 DB에 개선 전(HEAD `1b47700`)과 개선 후 JAR을 두 포트로
+동시에 띄워 요청을 번갈아 보냈다.** 조합마다 5회전 × 정렬 3종 = 15회, 첫 회전은 워밍업으로 제외하고 중앙값을 냈다.
+
+| 지역 | 거래유형 | 개선 전 중앙값(p90) | 개선 후 중앙값(p90) | total(전·후 동일) |
+| --- | --- | --- | --- | --- |
+| 서울(1100000000) | 매매 | 226ms (250) | **190ms** (209) | 1,381 |
+| 서울 | 전세 | 287ms (314) | **215ms** (234) | 1,943 |
+| 경기도(4100000000) | 매매 | 719ms (724) | **451ms** (459) | 3,597 |
+| 경기도 | 전세 | 780ms (802) | **472ms** (477) | 3,469 |
+| 수원시 장안구(4111100000) | 매매 | 22ms (30) | **19ms** (30) | 61 |
+| 수원시 장안구 | 전세 | 22ms (24) | **19ms** (19) | 62 |
+
+남은 시간은 대표거래를 고르는 목록 쿼리다(경기도 매매 기준 DB 단독 약 360ms). 서울은 기준선 근처, 경기도는
+여전히 기준의 2배 이상이다 — 위 보류 결정은 이 수치를 알고 내린 것이다.
+
+아래는 개선안을 정할 때 쓴 **개선 전** DB 쿼리 시간(warm, ms)과 분석이다:
 
 | 지역 | 거래유형 | count | 목록 최신순 | 목록 금액순 | 목록 면적순 | API 응답(3회) |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1000,7 +1022,7 @@ SRCH-01 프론트 착수 전 백엔드 선행 작업이다(브랜치 `feature/ba
 - **개선안 1 — count를 EXISTS로(가장 싼 수정).** 대표거래는 "조건을 만족하는 거래가 하나라도 있는 단지당 정확히 1건"이다. 그래서 total은 `count(complex) WHERE legal_dong_cd LIKE ? AND EXISTS(조건 맞는 trade)`와 같다. 경기도 매매 **322ms → 45ms**이고, 결과가 같다(매매 3,597/3,597, 전세 3,469/3,469로 확인). 그러면 API 시간이 약 40% 줄지만 목록 쿼리만으로 여전히 360ms대다.
 - **개선안 2 — 목록을 윈도 함수로.** `ROW_NUMBER() OVER (PARTITION BY complex_id ORDER BY deal_date DESC, trade_id DESC)`로 대표거래를 한 번에 고른다. 경기도 매매 최신순 **366ms → 80ms**이고, 상위 20건 순서가 현재와 같다(매매·전세 모두 확인). QueryDSL-JPA는 FROM절 서브쿼리·윈도 함수를 지원하지 않아 네이티브 쿼리가 필요하다.
 - **개선안 3 — 최근거래 비정규화.** BAT-LOD-01 적재 시 (complex, 거래유형)별 최신 거래 id를 별도 테이블이나 컬럼으로 유지한다. 서브쿼리 자체가 없어져 전국 조회까지 감당할 수 있는 유일한 방향이다. 다만 "사용하지 않는 컬럼 추가 금지" 원칙과 스키마 변경 절차를 거쳐야 한다.
-- 권장 순서: 1 → (필요 시) 2. 전국 조회 요구가 생기면 3.
+- (당시 권장 순서는 1 → 필요 시 2였으나, 위 결정표대로 1만 적용하고 2는 거치지 않기로 했다.)
 
 **FK 인덱스 흡수(인덱스 13건 적용 시 부수효과).** InnoDB는 FK용 자동 인덱스를, 그 FK를 대신할 인덱스가 생기면
 조용히 제거한다. 로컬에서 다음 4쌍이 확인됐다(앞이 사라진 인덱스, 뒤가 FK를 떠맡은 인덱스).
@@ -1065,7 +1087,7 @@ keyword 필터, rentType 추가)와 처리 로직(검색 기록 제거). 3.11절
 단지명·주소·법정동명 일치, `%%`·`__`·`!%`·`0%행` 이스케이프, regionCode+keyword+전세+보증금 범위 결합,
 매매/전세/월세 분리와 유형별 대표거래, 전세 보증금 범위, 검색 시 search_log 불변, `POST /logs` 기록과 집계
 반영, 형식 오류 400, 매매/전세/월세 카드의 rentType·monthlyRentAmount, 조건 없음 400). `./gradlew test` 608건,
-`./gradlew integrationTest` 78건 전부 통과(2026-09-23 후속 작업 반영 후). 로컬에서 실제 코드로
+`./gradlew integrationTest` 79건 전부 통과(2026-09-23 count EXISTS 적용 후). 로컬에서 실제 코드로
 호출한 결과: 수원시 장안구(4111100000) 82건, 수원시(4111000000) 392건, 안성시(4155000000) 80건, 경기도
 4,781건, 세종 172건, 리(4155025021) 3건, 영동군 5건, 폐지 코드(2811000000) 0건.
 
