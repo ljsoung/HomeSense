@@ -3,6 +3,7 @@ package com.jiseong.homesense.complex.service;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 
+import com.jiseong.homesense.common.cache.CacheNames;
 import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.entity.Complex;
@@ -33,7 +34,7 @@ public class ComplexDetailCache {
 
     private final ComplexRepository complexRepository;
 
-    @Cacheable(cacheNames = "complexDetailV2", key = "#complexId")
+    @Cacheable(cacheNames = CacheNames.COMPLEX_DETAIL, key = "#complexId")
     public ComplexDetailResponse get(Long complexId) {
         Complex complex = complexRepository.findById(complexId).orElseThrow(ComplexNotFoundException::new);
         return ComplexDetailResponse.from(complex);

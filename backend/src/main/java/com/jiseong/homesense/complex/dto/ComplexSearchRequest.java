@@ -2,45 +2,81 @@ package com.jiseong.homesense.complex.dto;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.regex.Pattern;
 
+import com.jiseong.homesense.common.validation.SearchKeywordPolicy;
+import com.jiseong.homesense.complex.exception.InvalidRegionCodeException;
+import com.jiseong.homesense.complex.exception.MissingSearchConditionException;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.RentType;
 
 /**
- * SRCH-01 검색 요청. 주택유형(다중), 거래유형, 전용면적/거래금액/건축년도 범위, 지역(시도/시군구/동리)
- * 조건 — 전부 선택적이며 생략하면 해당 조건은 걸지 않는다.
+ * SRCH-01 검색 요청. regionCode·keyword 중 하나를 제외하면 전부 선택적이며, 생략하면 해당 조건은 걸지 않는다.
  *
- * <p>amountMin/amountMax는 dealCategory에 따라 대상 컬럼이 갈린다 — SALE(또는 미지정)이면
- * trade.dealAmount, RENT면 trade.depositAmount(보증금)를 기준으로 삼는다. 월세(monthlyRentAmount)는
- * 별도 필터로 다루지 않는다(매매 금액과 전월세 보증금·월세를 하나의 "금액"으로 합산할 기준이
- * 스펙에 없어 범위를 넘지 않는 선에서 보증금만 대표값으로 삼았다).
+ * <p>거래유형은 trade 값 체계를 그대로 따른다: 매매 {@code dealCategory=SALE}, 전세
+ * {@code rentType=JEONSE}, 월세 {@code rentType=WOLSE}(dealCategory=RENT는 생략해도 된다 — rentType만으로
+ * 전월세로 취급). amountMin/amountMax는 매매면 trade.dealAmount, 전월세면 trade.depositAmount(보증금)
+ * 기준이다. 월세금액은 필터 대상이 아니다.
  *
- * <p>buildYearMin/buildYearMax는 다른 범위 필터(전용면적·거래금액)와 달리 trade가 아니라
- * complex.approval_date(사용승인일)를 기준으로 삼는다(UI정의서 4.4절 원문) — 단지 1건당 값이
- * 고정인 approval_date와 달리 trade.build_year는 거래 건별 API 원본값이라 데이터 품질에 따라
- * 실제 사용승인일과 어긋날 수 있다.
+ * <p>buildYearMin/buildYearMax는 trade가 아니라 complex.approval_date(사용승인일) 기준이다(UI정의서 4.4절).
  *
- * <p>keyword(신규 제안, CLAUDE.md API-SEARCH-01 절 참고)는 HOME-01 히어로 검색바/GNB 재검색이 보내는
- * 원문 검색어다 — 이번 범위에서는 검색 결과 필터링에 관여하지 않고 SVC-SEARCH-01.record()의
- * 인기검색어 집계 로깅에만 쓰인다(지성 확인: 로깅 전용).
+ * <p><b>regionCode와 keyword 중 하나는 필수다</b> — 둘 다 없으면 400 MISSING_SEARCH_CONDITION.
+ *
+ * <p>regionCode는 지역 자동완성(GET /api/regions)의 legalDongCd를 그대로 받는다 — 10자리 숫자가 아니면
+ * 400, 존재하지 않거나 폐지된 코드는 빈 결과다. keyword는 단지명·주소 텍스트 부분 일치 필터이고
+ * 검색 기록은 남기지 않는다(기록은 POST /api/search/logs, CLAUDE.md "단지 검색 지역코드·키워드" 절).
  */
 public record ComplexSearchRequest(
         List<HousingType> housingTypes,
         DealCategory dealCategory,
+        RentType rentType,
         BigDecimal areaMin,
         BigDecimal areaMax,
         Long amountMin,
         Long amountMax,
         Short buildYearMin,
         Short buildYearMax,
-        String sido,
-        String sigungu,
-        String dongRi,
-        String sort,
-        String keyword) {
+        String regionCode,
+        String keyword,
+        String sort) {
 
+    private static final Pattern REGION_CODE = Pattern.compile("[0-9]{10}");
+
+    /**
+     * 형식 검증(regionCode·keyword·sort)을 먼저 하고, 마지막에 "regionCode와 keyword 중 하나는 있어야
+     * 한다"를 검사한다 — 형식이 틀린 값은 "조건 없음"보다 구체적인 오류로 알려주기 위해서다. 공백뿐인
+     * keyword는 조건 없음으로 보므로 regionCode 없이 보내면 MISSING_SEARCH_CONDITION이다.
+     */
     public ComplexSearchCondition toCondition() {
-        return new ComplexSearchCondition(housingTypes, dealCategory, areaMin, areaMax, amountMin, amountMax,
-                buildYearMin, buildYearMax, sido, sigungu, dongRi, SortCondition.from(sort), keyword);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .housingTypes(housingTypes)
+                .dealCategory(dealCategory)
+                .rentType(rentType)
+                .areaMin(areaMin)
+                .areaMax(areaMax)
+                .amountMin(amountMin)
+                .amountMax(amountMax)
+                .buildYearMin(buildYearMin)
+                .buildYearMax(buildYearMax)
+                .regionCode(validRegionCode())
+                .keyword(SearchKeywordPolicy.normalizeOptional(keyword))
+                .sort(SortCondition.from(sort))
+                .build();
+        if (condition.regionCode() == null && condition.keyword() == null) {
+            throw new MissingSearchConditionException();
+        }
+        return condition;
+    }
+
+    private String validRegionCode() {
+        if (regionCode == null || regionCode.isBlank()) {
+            return null;
+        }
+        String trimmed = regionCode.trim();
+        if (!REGION_CODE.matcher(trimmed).matches()) {
+            throw new InvalidRegionCodeException();
+        }
+        return trimmed;
     }
 }

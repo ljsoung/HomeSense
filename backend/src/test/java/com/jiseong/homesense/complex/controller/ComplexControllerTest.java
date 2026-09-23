@@ -1,5 +1,6 @@
 package com.jiseong.homesense.complex.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -16,6 +17,9 @@ import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -29,17 +33,19 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.common.logging.AuditLogger;
-import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.common.security.AccessTokenEpochService;
-import com.jiseong.homesense.common.security.UserStatusResolver;
+import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.common.security.UserPrincipal;
+import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
+import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
 import com.jiseong.homesense.complex.service.ComplexService;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.RentType;
 
 @WebMvcTest(controllers = ComplexController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -75,7 +81,8 @@ class ComplexControllerTest {
     private static ComplexSummaryResponse summary(Long id) {
         return new ComplexSummaryResponse(id, "테스트단지", "서울특별시", "강남구", "역삼동", 500, (short) 5,
                 LocalDate.of(2010, 1, 1), HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 1, 10), 120000L,
-                new java.math.BigDecimal("84.99"), com.jiseong.homesense.trade.entity.MatchMethod.EXACT, (short) 12);
+                new java.math.BigDecimal("84.99"), com.jiseong.homesense.trade.entity.MatchMethod.EXACT, (short) 12,
+                null, null);
     }
 
     @Test
@@ -83,7 +90,8 @@ class ComplexControllerTest {
         when(complexService.search(any(), any()))
                 .thenReturn(new PageImpl<>(List.of(summary(1L)), PageRequest.of(0, 10), 1));
 
-        mockMvc.perform(get("/api/complexes/search").param("page", "0").param("size", "10"))
+        mockMvc.perform(get("/api/complexes/search").param("regionCode", "4111100000")
+                        .param("page", "0").param("size", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data[0].complexId").value(1))
@@ -97,6 +105,73 @@ class ComplexControllerTest {
         mockMvc.perform(get("/api/complexes/search").param("sort", "POPULARITY"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("INVALID_SORT_CONDITION"));
+    }
+
+    @Test
+    void regionCode_keyword_거래유형_필터를_조건으로_바인딩한다() throws Exception {
+        when(complexService.search(any(), any())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
+
+        mockMvc.perform(get("/api/complexes/search")
+                        .param("regionCode", "4111100000")
+                        .param("keyword", "  래미안  ")
+                        .param("rentType", "JEONSE")
+                        .param("amountMin", "30000"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ComplexSearchCondition> captor = ArgumentCaptor.forClass(ComplexSearchCondition.class);
+        verify(complexService).search(captor.capture(), any());
+        assertThat(captor.getValue().regionCode()).isEqualTo("4111100000");
+        assertThat(captor.getValue().keyword()).isEqualTo("래미안");
+        assertThat(captor.getValue().rentType()).isEqualTo(RentType.JEONSE);
+        assertThat(captor.getValue().isRent()).isTrue();
+    }
+
+    @Test
+    void 공백뿐인_keyword는_조건_없음으로_처리한다() throws Exception {
+        when(complexService.search(any(), any())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
+
+        mockMvc.perform(get("/api/complexes/search").param("regionCode", "4111100000").param("keyword", "   "))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ComplexSearchCondition> captor = ArgumentCaptor.forClass(ComplexSearchCondition.class);
+        verify(complexService).search(captor.capture(), any());
+        assertThat(captor.getValue().keyword()).isNull();
+    }
+
+    @Test
+    void regionCode와_keyword가_둘_다_없으면_400을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/complexes/search").param("rentType", "JEONSE"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_SEARCH_CONDITION"));
+        mockMvc.perform(get("/api/complexes/search").param("keyword", "   ").param("regionCode", " "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_SEARCH_CONDITION"));
+        verify(complexService, never()).search(any(), any());
+    }
+
+    @Test
+    void keyword만_있어도_검색한다() throws Exception {
+        when(complexService.search(any(), any())).thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
+
+        mockMvc.perform(get("/api/complexes/search").param("keyword", "래미안")).andExpect(status().isOk());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"411110000", "41111000000", "41111a0000", "４１１１１０００００"})
+    void regionCode가_10자리_숫자가_아니면_400을_반환한다(String regionCode) throws Exception {
+        mockMvc.perform(get("/api/complexes/search").param("regionCode", regionCode))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REGION_CODE"));
+        verify(complexService, never()).search(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a", " a ", "123456789012345678901234567890123456789012345678901"})
+    void keyword가_2자_미만이거나_50자를_넘으면_400을_반환한다(String keyword) throws Exception {
+        mockMvc.perform(get("/api/complexes/search").param("keyword", keyword))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_SEARCH_KEYWORD"));
+        verify(complexService, never()).search(any(), any());
     }
 
     @Test

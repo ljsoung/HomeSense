@@ -8,12 +8,14 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,7 +37,7 @@ import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.recentview.service.RecentViewService;
-import com.jiseong.homesense.search.service.SearchService;
+import com.jiseong.homesense.region.service.RegionCodePrefixResolver;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.MatchMethod;
@@ -54,14 +56,14 @@ class ComplexServiceTest {
     @Mock
     private RecentViewService recentViewService;
     @Mock
-    private SearchService searchService;
+    private RegionCodePrefixResolver regionCodePrefixResolver;
 
     private ComplexService complexService;
 
     @BeforeEach
     void setUp() {
         complexService = new ComplexService(
-                complexRepository, tradeRepository, complexDetailCache, recentViewService, searchService);
+                complexRepository, tradeRepository, complexDetailCache, recentViewService, regionCodePrefixResolver);
     }
 
     private static Complex complex(Long id) {
@@ -100,32 +102,41 @@ class ComplexServiceTest {
     }
 
     @Test
-    void search_리포지토리에_그대로_위임한다() {
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                null, null, null, null, null, null, null, null, null, null, null, null);
+    void search_regionCode가_없으면_prefix_없이_리포지토리에_위임한다() {
+        ComplexSearchCondition condition = ComplexSearchCondition.builder().keyword("래미안").build();
         Pageable pageable = PageRequest.of(0, 10);
         Page<ComplexSummaryResponse> expected = new PageImpl<>(List.of());
-        when(complexRepository.search(condition, pageable)).thenReturn(expected);
+        when(complexRepository.search(condition, null, pageable)).thenReturn(expected);
 
         Page<ComplexSummaryResponse> result = complexService.search(condition, pageable);
 
         assertThat(result).isSameAs(expected);
+        verifyNoInteractions(regionCodePrefixResolver);
     }
 
-    /**
-     * SVC-CPX-01.search()가 SVC-SEARCH-01.record()를 호출하는지 검증한다(신규 제안, CLAUDE.md
-     * API-SEARCH-01 절 참고) — SVC-RCV-01과 같은 계층 협력 패턴.
-     */
     @Test
-    void search_SVC_SEARCH_01_record를_호출해_검색어를_기록한다() {
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                null, null, null, null, null, null, null, null, null, null, null, null, "강남구");
+    void search_regionCode를_계층_prefix로_바꿔_리포지토리에_넘긴다() {
+        ComplexSearchCondition condition = ComplexSearchCondition.builder().regionCode("4111000000").build();
         Pageable pageable = PageRequest.of(0, 10);
-        when(complexRepository.search(condition, pageable)).thenReturn(new PageImpl<>(List.of()));
+        when(regionCodePrefixResolver.prefixOf("4111000000")).thenReturn(Optional.of("4111"));
+        when(complexRepository.search(condition, "4111", pageable)).thenReturn(new PageImpl<>(List.of()));
 
         complexService.search(condition, pageable);
 
-        verify(searchService).record("강남구");
+        verify(complexRepository).search(condition, "4111", pageable);
+    }
+
+    @Test
+    void search_존재하지_않거나_폐지된_regionCode면_조회하지_않고_빈_페이지를_돌려준다() {
+        ComplexSearchCondition condition = ComplexSearchCondition.builder().regionCode("2811000000").build();
+        Pageable pageable = PageRequest.of(0, 10);
+        when(regionCodePrefixResolver.prefixOf("2811000000")).thenReturn(Optional.empty());
+
+        Page<ComplexSummaryResponse> result = complexService.search(condition, pageable);
+
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isZero();
+        verifyNoInteractions(complexRepository);
     }
 
     @Test

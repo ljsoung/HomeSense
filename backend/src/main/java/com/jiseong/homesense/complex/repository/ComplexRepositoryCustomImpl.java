@@ -14,7 +14,7 @@ import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.dto.SortCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.entity.QComplex;
-import com.jiseong.homesense.trade.entity.DealCategory;
+import com.jiseong.homesense.region.entity.QLegalDistrictCode;
 import com.jiseong.homesense.trade.entity.QTrade;
 import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.Tuple;
@@ -36,14 +36,17 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
 
     private static final QComplex complex = QComplex.complex;
     private static final QTrade trade = QTrade.trade;
+    private static final QLegalDistrictCode legalDistrictCode = QLegalDistrictCode.legalDistrictCode;
+    private static final char LIKE_ESCAPE = '!';
 
     private final JPAQueryFactory queryFactory;
 
     @Override
-    public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, Pageable pageable) {
+    public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, String regionPrefix,
+            Pageable pageable) {
         QTrade subTrade = new QTrade("subTrade");
         QTrade tieBreakTrade = new QTrade("tieBreakTrade");
-        BooleanBuilder complexFilters = complexFilters(condition);
+        BooleanBuilder complexFilters = complexFilters(condition, regionPrefix);
         BooleanBuilder tradeFilters = tradeFilters(condition, trade);
         BooleanBuilder subTradeFilters = tradeFilters(condition, subTrade);
         BooleanBuilder tieBreakTradeFilters = tradeFilters(condition, tieBreakTrade);
@@ -87,11 +90,20 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
                 .map(row -> ComplexSummaryResponse.of(row.get(complex), row.get(trade)))
                 .toList();
 
+        // 전체 건수는 대표거래 서브쿼리 없이 EXISTS로 센다. 대표거래는 "조건을 만족하는 거래가 하나라도 있는
+        // 단지마다 정확히 1건"(MAX(deal_date) → MAX(trade_id))이므로, 목록 쿼리의 행 수는 조건 맞는 거래가
+        // 있는 단지 수와 같다. 목록과 같은 2단 상관 서브쿼리로 세면 경기도 매매가 322ms였는데, 이렇게 하면
+        // 45ms다(2026-09-23 로컬 실측, 건수 일치는 ComplexRepositoryMariaDbIT가 검증).
+        // complexFilters는 위에서 where를 만들 때 BooleanBuilder.and()가 제자리에서 바꿔 놓았으므로(trade 조건과
+        // 대표거래 서브쿼리까지 포함) 새로 만든다.
+        QTrade existsTrade = new QTrade("existsTrade");
         Long total = queryFactory
                 .select(complex.count())
                 .from(complex)
-                .join(trade).on(trade.complex.eq(complex))
-                .where(where)
+                .where(complexFilters(condition, regionPrefix).and(JPAExpressions.selectOne()
+                        .from(existsTrade)
+                        .where(existsTrade.complex.eq(complex).and(tradeFilters(condition, existsTrade)))
+                        .exists()))
                 .fetchOne();
 
         return new PageImpl<>(content, pageable, total != null ? total : 0);
@@ -119,16 +131,26 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
                 .fetch();
     }
 
-    private BooleanBuilder complexFilters(ComplexSearchCondition condition) {
+    private BooleanBuilder complexFilters(ComplexSearchCondition condition, String regionPrefix) {
         BooleanBuilder builder = new BooleanBuilder();
-        if (condition.sido() != null) {
-            builder.and(complex.sido.eq(condition.sido()));
+        // prefix는 RegionCodePrefixResolver가 만든 숫자뿐이라 LIKE 이스케이프가 필요 없다. 앞부분 고정
+        // LIKE라 legal_dong_cd 인덱스(fk_complex_legal_dong) range scan을 탄다.
+        if (regionPrefix != null) {
+            builder.and(complex.legalDistrictCode.legalDongCd.like(regionPrefix + "%"));
         }
-        if (condition.sigungu() != null) {
-            builder.and(complex.sigungu.eq(condition.sigungu()));
-        }
-        if (condition.dongRi() != null) {
-            builder.and(complex.dongRi.eq(condition.dongRi()));
+        // keyword는 단지명·K-apt 주소(legal_dong_address)·법정동명(legal_dong_name) 중 하나에 부분 일치.
+        // complex 주소는 "경기도 수원장안구 …" 표기라 "수원시"는 legal_dong_name으로만 걸린다.
+        // legal_dong_name은 조인하지 않고 IN 서브쿼리로 건다 — 조인하면 OR 조건이 complex만으로 평가되지
+        // 않아 대표거래 상관 서브쿼리가 단지 전체(약 2만)에 먼저 돌아 ~2.1s가 걸렸고, IN으로 바꾸면
+        // 조건 전체가 complex 스캔 단계에서 걸러져 45~72ms로 줄었다(2026-09-23 로컬 실측).
+        if (condition.keyword() != null) {
+            String pattern = "%" + escapeLike(condition.keyword()) + "%";
+            builder.and(complex.complexName.like(pattern, LIKE_ESCAPE)
+                    .or(complex.legalDongAddress.like(pattern, LIKE_ESCAPE))
+                    .or(complex.legalDistrictCode.legalDongCd.in(JPAExpressions
+                            .select(legalDistrictCode.legalDongCd)
+                            .from(legalDistrictCode)
+                            .where(legalDistrictCode.legalDongName.like(pattern, LIKE_ESCAPE)))));
         }
 
         // UI정의서 4.4절 — 건축년도 필터는 trade.build_year(거래 건별, API 원본이라 매매 이력마다
@@ -155,6 +177,9 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
         if (condition.dealCategory() != null) {
             builder.and(t.dealCategory.eq(condition.dealCategory()));
         }
+        if (condition.rentType() != null) {
+            builder.and(t.rentType.eq(condition.rentType()));
+        }
         if (condition.areaMin() != null) {
             builder.and(t.excluUseArea.goe(condition.areaMin()));
         }
@@ -173,9 +198,25 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
         return builder;
     }
 
-    /** RENT면 보증금(depositAmount), 그 외(SALE·미지정)면 매매금액(dealAmount) 기준(ComplexSearchRequest 문서 참고). */
+    /**
+     * 전월세(dealCategory=RENT 또는 rentType 지정)면 보증금(depositAmount), 그 외면 매매금액(dealAmount)
+     * 기준. rentType만 지정한 요청도 전월세로 봐야 한다 — TradeRepositoryCustomImpl이 같은 버그를 겪은
+     * 뒤 정한 규칙이다(RENT 행은 dealAmount가 NULL이라 범위 필터가 항상 0건이 된다).
+     */
     private NumberPath<Long> amountPath(ComplexSearchCondition condition, QTrade t) {
-        return condition.dealCategory() == DealCategory.RENT ? t.depositAmount : t.dealAmount;
+        return condition.isRent() ? t.depositAmount : t.dealAmount;
+    }
+
+    /** LIKE 와일드카드와 이스케이프 문자 자체를 {@link #LIKE_ESCAPE}로 이스케이프한다. */
+    static String escapeLike(String raw) {
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (char ch : raw.toCharArray()) {
+            if (ch == LIKE_ESCAPE || ch == '%' || ch == '_') {
+                sb.append(LIKE_ESCAPE);
+            }
+            sb.append(ch);
+        }
+        return sb.toString();
     }
 
     private OrderSpecifier<?> orderSpecifier(ComplexSearchCondition condition) {
