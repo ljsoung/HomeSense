@@ -2,11 +2,16 @@ import axios from 'axios';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertCircleIcon } from '../../components/icons/AlertCircleIcon';
+import { AlertTriangleIcon } from '../../components/icons/AlertTriangleIcon';
+import { ArrowLeftIcon } from '../../components/icons/ArrowLeftIcon';
 import { CheckIcon } from '../../components/icons/CheckIcon';
+import { CircleCheckIcon } from '../../components/icons/CircleCheckIcon';
+import { ClockIcon } from '../../components/icons/ClockIcon';
 import { EyeIcon } from '../../components/icons/EyeIcon';
 import { EyeOffIcon } from '../../components/icons/EyeOffIcon';
 import { HomeIcon } from '../../components/icons/HomeIcon';
+import { LockIcon } from '../../components/icons/LockIcon';
+import { MailIcon } from '../../components/icons/MailIcon';
 import { AuthLayout } from '../../components/layout/AuthLayout';
 import { Button } from '../../components/ui/Button';
 import { FieldHint } from '../../components/ui/FieldHint';
@@ -22,17 +27,77 @@ const GENERIC_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시
 // InvalidResetTokenException의 기본 메시지와 동일한 문구 — 서버가 이 문구를 그대로 내려주므로
 // 평소엔 노출될 일이 없지만, 응답 본문을 못 읽는 방어적인 경우(네트워크 파싱 실패 등)의 폴백이다.
 const DEFAULT_INVALID_TOKEN_MESSAGE = '유효하지 않거나 만료된 재설정 링크입니다. 다시 요청해주세요';
+// PasswordResetTokenService의 쿨다운 TTL(60초)과 동일 — 서버가 최종 권위이며 이 값은 UI 카운트다운
+// 근사치일 뿐이다(정확한 잔여 시간은 서버만 안다).
+const RESEND_COOLDOWN_SECONDS = 60;
 
-function Header({ title }: { title: string }) {
+/** 모든 화면 상단에 고정 배치되는 HomeSense 로고 — Figma는 카드 밖 좌상단에 두지만(LogoMark), 이
+ * 프로젝트의 AuthLayout은 로고를 카드 안에 넣는 AUTH-01/02 관례를 이미 확립해 두었다(재사용). 화면
+ * 하나만을 위해 두 화면에서 이미 검증된 공유 레이아웃을 바꾸는 대신, 카드 안에 두는 기존 관례를
+ * 그대로 따르는 의도적 차이다(CLAUDE.md SCR-AUTH-03 절 참고). */
+function LogoLockup() {
   return (
-    <div className="flex w-full flex-col items-center pb-7">
-      <div className="flex h-[52px] items-center gap-2 pb-4">
+    <div className="flex w-full flex-col items-center pb-6">
+      <div className="flex h-[52px] items-center gap-2">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-brand">
           <HomeIcon className="size-[18px]" />
         </div>
         <p className="text-lg font-extrabold tracking-[-0.4px] text-brand">HomeSense</p>
       </div>
-      <p className="text-2xl font-extrabold tracking-[-0.5px] text-[#101828]">{title}</p>
+    </div>
+  );
+}
+
+/** Figma StepProgress(31:18187/31:18364) — 1단계(이메일 입력)/2단계(비밀번호 설정) 진행 표시. */
+function StepIndicator({ step }: { step: 1 | 2 }) {
+  const step1Done = step === 2;
+  return (
+    <div className="flex w-full items-center justify-center gap-2 pb-7">
+      <div
+        className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+          step1Done ? 'bg-[#00c950] text-white' : 'bg-brand text-white'
+        }`}
+      >
+        {step1Done ? <CheckIcon strokeWidth={1.16667} className="size-3.5" /> : '1'}
+      </div>
+      <span className={`text-[12px] font-semibold ${step1Done ? 'text-[#00a63e]' : 'text-brand'}`}>이메일 입력</span>
+      <div className={`h-px w-8 shrink-0 ${step1Done ? 'bg-[#22c55e]' : 'bg-[#e5e7eb]'}`} />
+      <div
+        className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+          step === 2 ? 'bg-brand text-white' : 'bg-[#e5e7eb] text-[#99a1af]'
+        }`}
+      >
+        2
+      </div>
+      <span className={`text-[12px] font-semibold ${step === 2 ? 'text-brand' : 'text-[#99a1af]'}`}>비밀번호 설정</span>
+    </div>
+  );
+}
+
+/** Figma StepProgress(31:18508, 링크 만료 화면) — 스테퍼 대신 노출되는 상태 배지. */
+function ExpiredBadge() {
+  return (
+    <div className="flex w-full justify-center pb-7">
+      <div className="flex items-center gap-1.5 rounded-full border border-[#ffe2e2] bg-[#fef2f2] px-3.5 py-1.5">
+        <ClockIcon className="size-3.5 text-[#e7000b]" />
+        <span className="text-[12px] font-bold text-[#e7000b]">링크 만료</span>
+      </div>
+    </div>
+  );
+}
+
+/** Figma의 Container(56x56, rounded-2xl) 아이콘 배지 — 완전한 원(rounded-full)이 아니라 둥근 사각형이다. */
+function IconBadge({ tone, children }: { tone: 'neutral' | 'success' | 'error'; children: ReactNode }) {
+  const bg = tone === 'neutral' ? 'bg-[#e8f2f0]' : tone === 'success' ? 'bg-[#dcfce7]' : 'bg-[#fef2f2]';
+  return <div className={`flex size-14 shrink-0 items-center justify-center rounded-2xl ${bg}`}>{children}</div>;
+}
+
+function CardIntro({ icon, tone, title, description }: { icon: ReactNode; tone: 'neutral' | 'success' | 'error'; title: string; description: ReactNode }) {
+  return (
+    <div className="flex w-full flex-col items-center gap-2 pb-7 text-center">
+      <IconBadge tone={tone}>{icon}</IconBadge>
+      <p className="pt-2 text-2xl font-extrabold tracking-[-0.4px] text-[#101828]">{title}</p>
+      <p className="text-[14px] leading-[1.6] text-[#6a7282]">{description}</p>
     </div>
   );
 }
@@ -40,21 +105,13 @@ function Header({ title }: { title: string }) {
 function BackToLogin() {
   return (
     <div className="flex w-full flex-col items-center pt-5">
-      <Link to="/login" className="text-[13px] font-bold text-brand">
+      <Link
+        to="/login"
+        className="flex items-center gap-1.5 text-[13px] font-semibold text-[#6a7282] hover:text-[#364153]"
+      >
+        <ArrowLeftIcon className="size-3.5" />
         로그인으로 돌아가기
       </Link>
-    </div>
-  );
-}
-
-function StatusBadge({ tone, children }: { tone: 'success' | 'error'; children: ReactNode }) {
-  return (
-    <div
-      className={`flex size-12 items-center justify-center rounded-full ${
-        tone === 'success' ? 'bg-[#dcfce7]' : 'bg-[#ffe2e2]'
-      }`}
-    >
-      {children}
     </div>
   );
 }
@@ -65,54 +122,91 @@ interface RequestFormValues {
 
 /** AUTH-03 1단계 — 이메일 입력 후 재설정 링크 발송을 요청한다. */
 function RequestStep() {
-  const [sent, setSent] = useState(false);
+  const [phase, setPhase] = useState<'form' | 'sent'>('form');
+  const [sentEmail, setSentEmail] = useState('');
   const [serverError, setServerError] = useState<string | null>(null);
+  const [isRequesting, setIsRequesting] = useState(false);
+  // 서버 쿨다운(60초)의 클라이언트 근사치 — 정확한 잔여 시간은 서버만 안다. 0이 되면 재발송 버튼이
+  // 활성화되지만, 실제로는 여전히 서버가 429로 거부할 수 있다(그 경우 아래 catch가 다시 쿨다운을 건다).
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) {
+      return;
+    }
+    const timer = setTimeout(() => setCooldown((prev) => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
 
   const {
     register,
     handleSubmit,
     watch,
-    formState: { isSubmitting },
   } = useForm<RequestFormValues>({ defaultValues: { email: '' } });
 
   const email = watch('email');
   const emailValid = isValidEmailFormat(email);
 
-  const onSubmit = handleSubmit(async (values) => {
+  async function submitRequest(targetEmail: string) {
+    setIsRequesting(true);
     setServerError(null);
     try {
-      await requestPasswordReset({ email: values.email.trim() });
-      setSent(true);
+      await requestPasswordReset({ email: targetEmail });
+      setSentEmail(targetEmail);
+      setPhase('sent');
+      setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (error) {
       // 429(PASSWORD_RESET_COOLDOWN)만 서버 문구를 그대로 보여준다 — 그 외에는 계정 존재 여부와
       // 무관하게 항상 같은 성공 응답만 오도록 서버가 설계돼 있어(AuthController.java 참고) 이 외의
       // 분기는 원래 존재하지 않는다.
       if (axios.isAxiosError<ApiErrorResponse>(error) && error.response?.status === 429) {
         setServerError(error.response.data?.error?.message ?? GENERIC_ERROR_MESSAGE);
+        setCooldown((prev) => Math.max(prev, RESEND_COOLDOWN_SECONDS));
         return;
       }
       setServerError(GENERIC_ERROR_MESSAGE);
+    } finally {
+      setIsRequesting(false);
     }
-  });
+  }
 
-  if (sent) {
+  const onSubmit = handleSubmit((values) => submitRequest(values.email.trim()));
+  const handleResend = () => {
+    if (cooldown === 0 && !isRequesting) {
+      void submitRequest(sentEmail);
+    }
+  };
+
+  if (phase === 'sent') {
     return (
       <>
-        <Header title="이메일을 확인해주세요" />
-        <div className="flex w-full flex-col items-center gap-2 text-center">
-          <StatusBadge tone="success">
-            <CheckIcon strokeWidth={1.5} className="size-6 text-[#00a63e]" />
-          </StatusBadge>
-          <p className="pt-2 text-[14px] text-[#364153]">
-            입력하신 이메일로 재설정 링크를 발송했습니다.
-            <br />
-            메일이 보이지 않으면 스팸함도 확인해주세요.
-          </p>
+        <LogoLockup />
+        <StepIndicator step={1} />
+        <CardIntro
+          tone="success"
+          icon={<CircleCheckIcon className="size-7 text-[#00a63e]" />}
+          title="이메일을 발송했습니다"
+          description="입력하신 이메일로 재설정 링크를 발송했습니다."
+        />
+        <div className="flex w-full items-center gap-3 rounded-[14px] border border-[#e5e7eb] bg-[#f9fafb] px-4 py-3">
+          <MailIcon className="size-4 shrink-0 text-[#99a1af]" />
+          <p className="truncate text-[14px] font-medium text-[#364153]">{sentEmail}</p>
         </div>
+        <p className="w-full pt-2 text-center text-[11.5px] text-[#99a1af]">
+          보안상 이메일 존재 여부와 무관하게 동일한 안내 문구를 표시합니다.
+        </p>
         <div className="w-full pt-6">
-          <Button type="button" onClick={() => setSent(false)}>
-            다른 이메일로 다시 시도
-          </Button>
+          {cooldown > 0 ? (
+            <div className="flex h-[54.5px] w-full items-center justify-center gap-2 rounded-[14px] border-2 border-[#e5e7eb] bg-white text-[15px] font-bold text-[#9ca3af]">
+              <ClockIcon className="size-4" />
+              {cooldown}초 후 재발송 가능
+            </div>
+          ) : (
+            <Button type="button" onClick={handleResend} disabled={isRequesting}>
+              재설정 링크 발송
+            </Button>
+          )}
+          {serverError && <FieldHint status="error" message={serverError} />}
         </div>
         <BackToLogin />
       </>
@@ -121,12 +215,20 @@ function RequestStep() {
 
   return (
     <>
-      <Header title="비밀번호 찾기" />
-      <p className="w-full pb-6 text-center text-[14px] text-[#6a7282]">
-        가입 시 등록한 이메일을 입력해주세요.
-        <br />
-        비밀번호를 재설정할 수 있는 링크를 보내드립니다.
-      </p>
+      <LogoLockup />
+      <StepIndicator step={1} />
+      <CardIntro
+        tone="neutral"
+        icon={<LockIcon className="size-7 text-brand" />}
+        title="비밀번호 찾기"
+        description={
+          <>
+            가입 시 등록한 이메일을 입력해주세요.
+            <br />
+            재설정 링크를 이메일로 보내드립니다.
+          </>
+        }
+      />
       <form noValidate onSubmit={onSubmit} className="flex w-full flex-col gap-4">
         <TextField
           id="email"
@@ -141,7 +243,7 @@ function RequestStep() {
         />
         {serverError && <FieldHint id="request-error" status="error" message={serverError} />}
         <div className="w-full pt-1">
-          <Button type="submit" disabled={!emailValid || isSubmitting}>
+          <Button type="submit" disabled={!emailValid || isRequesting}>
             재설정 링크 발송
           </Button>
         </div>
@@ -229,8 +331,8 @@ function ConfirmStep({ token }: { token: string }) {
   if (tokenStatus === 'validating') {
     return (
       <>
-        <Header title="확인 중" />
-        <div className="flex w-full items-center justify-center py-10">
+        <LogoLockup />
+        <div className="flex w-full items-center justify-center py-16">
           <Spinner />
         </div>
       </>
@@ -240,16 +342,25 @@ function ConfirmStep({ token }: { token: string }) {
   if (tokenStatus === 'invalid') {
     return (
       <>
-        <Header title="링크가 만료되었습니다" />
-        <div className="flex w-full flex-col items-center gap-2 text-center">
-          <StatusBadge tone="error">
-            <AlertCircleIcon className="size-6 text-[#fb2c36]" />
-          </StatusBadge>
-          <p className="pt-2 text-[14px] text-[#364153]">{invalidMessage}</p>
+        <LogoLockup />
+        <ExpiredBadge />
+        <CardIntro
+          tone="error"
+          icon={<ClockIcon className="size-7 text-[#fb2c36]" />}
+          title="링크가 만료되었습니다"
+          description={invalidMessage}
+        />
+        <div className="flex w-full items-start gap-3 rounded-2xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3.5">
+          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-[#fb2c36]" />
+          <p className="text-[13px] leading-[1.6] text-[#e7000b]">
+            재설정 링크는 발송 후 <span className="font-bold">30분간</span> 유효합니다.
+            <br />
+            스팸함도 확인해보세요.
+          </p>
         </div>
         <div className="w-full pt-6">
           <Button type="button" onClick={() => navigate('/password-reset', { replace: true })}>
-            재설정 다시 요청
+            재설정 링크 다시 요청
           </Button>
         </div>
         <BackToLogin />
@@ -260,18 +371,20 @@ function ConfirmStep({ token }: { token: string }) {
   if (success) {
     return (
       <>
-        <Header title="비밀번호가 변경되었습니다" />
-        <div className="flex w-full flex-col items-center gap-2 text-center">
-          <StatusBadge tone="success">
-            <CheckIcon strokeWidth={1.5} className="size-6 text-[#00a63e]" />
-          </StatusBadge>
-          <p className="pt-2 text-[14px] text-[#364153]">
-            새 비밀번호로 로그인해주세요.
-            <br />
-            다른 기기에 로그인돼 있었다면 그 세션도 함께 종료됩니다.
-          </p>
-        </div>
-        <div className="w-full pt-6">
+        <LogoLockup />
+        <CardIntro
+          tone="success"
+          icon={<CircleCheckIcon className="size-7 text-[#00a63e]" />}
+          title="비밀번호가 변경되었습니다"
+          description={
+            <>
+              새 비밀번호로 로그인해주세요.
+              <br />
+              다른 기기에 로그인돼 있었다면 그 세션도 함께 종료됩니다.
+            </>
+          }
+        />
+        <div className="w-full">
           <Button type="button" onClick={() => navigate('/login', { replace: true })}>
             로그인하러 가기
           </Button>
@@ -282,7 +395,14 @@ function ConfirmStep({ token }: { token: string }) {
 
   return (
     <>
-      <Header title="새 비밀번호 설정" />
+      <LogoLockup />
+      <StepIndicator step={2} />
+      <CardIntro
+        tone="neutral"
+        icon={<LockIcon className="size-7 text-brand" />}
+        title="새 비밀번호 설정"
+        description="안전한 새 비밀번호를 설정해주세요."
+      />
       <form noValidate onSubmit={onSubmit} className="flex w-full flex-col gap-4">
         <div className="flex w-full flex-col">
           <label htmlFor="newPassword" className="text-[13px] font-semibold text-[#364153]">
@@ -321,7 +441,7 @@ function ConfirmStep({ token }: { token: string }) {
               id="newPasswordConfirm"
               type={showPasswordConfirm ? 'text' : 'password'}
               autoComplete="new-password"
-              placeholder="새 비밀번호 재입력"
+              placeholder="비밀번호 재입력"
               status={confirmFieldStatus}
               aria-invalid={confirmFieldStatus === 'error'}
               aria-describedby={confirmTouched ? 'password-confirm-hint' : undefined}
@@ -353,6 +473,7 @@ function ConfirmStep({ token }: { token: string }) {
           비밀번호 변경 완료
         </Button>
       </form>
+      <BackToLogin />
     </>
   );
 }
