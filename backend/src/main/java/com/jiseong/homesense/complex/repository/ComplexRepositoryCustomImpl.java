@@ -90,11 +90,20 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
                 .map(row -> ComplexSummaryResponse.of(row.get(complex), row.get(trade)))
                 .toList();
 
+        // 전체 건수는 대표거래 서브쿼리 없이 EXISTS로 센다. 대표거래는 "조건을 만족하는 거래가 하나라도 있는
+        // 단지마다 정확히 1건"(MAX(deal_date) → MAX(trade_id))이므로, 목록 쿼리의 행 수는 조건 맞는 거래가
+        // 있는 단지 수와 같다. 목록과 같은 2단 상관 서브쿼리로 세면 경기도 매매가 322ms였는데, 이렇게 하면
+        // 45ms다(2026-09-23 로컬 실측, 건수 일치는 ComplexRepositoryMariaDbIT가 검증).
+        // complexFilters는 위에서 where를 만들 때 BooleanBuilder.and()가 제자리에서 바꿔 놓았으므로(trade 조건과
+        // 대표거래 서브쿼리까지 포함) 새로 만든다.
+        QTrade existsTrade = new QTrade("existsTrade");
         Long total = queryFactory
                 .select(complex.count())
                 .from(complex)
-                .join(trade).on(trade.complex.eq(complex))
-                .where(where)
+                .where(complexFilters(condition, regionPrefix).and(JPAExpressions.selectOne()
+                        .from(existsTrade)
+                        .where(existsTrade.complex.eq(complex).and(tradeFilters(condition, existsTrade)))
+                        .exists()))
                 .fetchOne();
 
         return new PageImpl<>(content, pageable, total != null ? total : 0);

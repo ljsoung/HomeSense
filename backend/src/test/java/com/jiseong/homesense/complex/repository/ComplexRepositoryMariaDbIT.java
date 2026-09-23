@@ -413,6 +413,49 @@ class ComplexRepositoryMariaDbIT {
         assertThat(topIds.get(0)).isEqualTo(complexB.getComplexId());
     }
 
+    /**
+     * count를 대표거래 서브쿼리 조인에서 EXISTS로 바꿨다(2026-09-23). 옛 count는 목록 쿼리와 같은 조인의 행
+     * 수였으므로, "totalElements == 한 페이지에 전부 받은 목록 행 수"가 곧 "개선 전 count와 같다"는 뜻이다.
+     * 동률(같은 날짜 2건), 취소 거래만 있는 단지, 매매/전세 혼재, 범위 필터, keyword를 두루 섞어 확인한다.
+     */
+    @Test
+    void 전체_건수는_목록_쿼리가_실제로_돌려주는_단지_수와_같다() {
+        Complex tie = complexRepository.saveAndFlush(complex("CNT-TIE", "서울특별시", "강남구", "역삼동"));
+        tradeRepository.saveAndFlush(trade(tie, HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 3, 3),
+                70000L, null, "84.00", false));
+        tradeRepository.saveAndFlush(trade(tie, HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 3, 3),
+                71000L, null, "59.00", false));
+        tradeRepository.saveAndFlush(trade(tie, HousingType.APT, DealCategory.RENT, LocalDate.of(2026, 3, 4),
+                null, 35000L, "84.00", false));
+        Complex cancelledAndRent = complexRepository.saveAndFlush(complex("CNT-MIX", "서울특별시", "강남구", "역삼동"));
+        tradeRepository.saveAndFlush(trade(cancelledAndRent, HousingType.APT, DealCategory.SALE,
+                LocalDate.of(2026, 3, 5), 90000L, null, "84.00", true));
+        tradeRepository.saveAndFlush(trade(cancelledAndRent, HousingType.APT, DealCategory.RENT,
+                LocalDate.of(2026, 3, 6), null, 20000L, "84.00", false));
+
+        List<ComplexSearchCondition> conditions = List.of(
+                ComplexSearchCondition.builder().sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().dealCategory(DealCategory.SALE).sort(SortCondition.AMOUNT).build(),
+                ComplexSearchCondition.builder().dealCategory(DealCategory.RENT).sort(SortCondition.AREA).build(),
+                ComplexSearchCondition.builder().dealCategory(DealCategory.SALE)
+                        .areaMin(new BigDecimal("80")).sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().amountMin(30000L).amountMax(75000L)
+                        .sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().keyword("CNT").sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().keyword("단지").dealCategory(DealCategory.RENT)
+                        .sort(SortCondition.LATEST).build());
+
+        for (ComplexSearchCondition condition : conditions) {
+            Page<ComplexSummaryResponse> all = complexRepository.search(condition, null, PageRequest.of(0, 1000));
+            assertThat(all.getTotalElements()).as(condition.toString()).isEqualTo(all.getContent().size());
+            assertThat(all.getContent()).as(condition.toString())
+                    .extracting(ComplexSummaryResponse::complexId).doesNotHaveDuplicates();
+            // 작은 페이지로 나눠 받아도 total은 같아야 한다.
+            assertThat(complexRepository.search(condition, null, PageRequest.of(0, 1)).getTotalElements())
+                    .as(condition.toString()).isEqualTo(all.getTotalElements());
+        }
+    }
+
     private static List<Long> ids(Page<ComplexSummaryResponse> page) {
         return page.getContent().stream().map(ComplexSummaryResponse::complexId).toList();
     }
