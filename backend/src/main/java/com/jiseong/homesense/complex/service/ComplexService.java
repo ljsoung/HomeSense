@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.springframework.cache.annotation.Cacheable;
@@ -26,7 +27,7 @@ import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.recentview.dto.RecentViewTarget;
 import com.jiseong.homesense.recentview.service.RecentViewService;
-import com.jiseong.homesense.search.service.SearchService;
+import com.jiseong.homesense.region.service.RegionCodePrefixResolver;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
 
@@ -44,10 +45,8 @@ import lombok.RequiredArgsConstructor;
  * 분리했다 — 같은 클래스 안에 캐시 전용 메서드를 따로 둬도 self-invocation이라 프록시를 안 거쳐
  * {@code @Cacheable}이 무력화되기 때문이다(CLAUDE.md SVC-RCV-01 절 참고).
  *
- * <p>search()도 같은 계층 협력 패턴으로 SVC-SEARCH-01.record()를 호출한다(신규 제안, CLAUDE.md
- * API-SEARCH-01 절 참고) — 검색 실행마다 원문 keyword를 인기검색어 집계용으로 남긴다. record()가
- * {@code @Async}라 이 클래스의 {@code @Transactional(readOnly = true)} 경계와 무관하게 별도
- * 트랜잭션에서 실행된다(SearchService.record() 참고).
+ * <p>search()는 인기검색어를 기록하지 않는다 — 예전엔 SVC-SEARCH-01.record()를 여기서 불렀지만, 필터만
+ * 바꾼 재조회까지 기록돼 POST /api/search/logs로 분리했다(CLAUDE.md "단지 검색 지역코드·키워드" 절).
  */
 @Service
 @RequiredArgsConstructor
@@ -64,11 +63,24 @@ public class ComplexService {
     private final TradeRepository tradeRepository;
     private final ComplexDetailCache complexDetailCache;
     private final RecentViewService recentViewService;
-    private final SearchService searchService;
+    private final RegionCodePrefixResolver regionCodePrefixResolver;
 
+    /**
+     * 부수효과 없는 순수 조회다 — 인기검색어 기록은 여기서 하지 않고 프론트가 "검색 실행" 순간에
+     * POST /api/search/logs를 따로 호출한다(필터만 바꾼 재조회까지 기록되던 문제를 없애기 위해 분리).
+     *
+     * <p>regionCode가 존재하지 않거나 폐지된 코드면 예외가 아니라 빈 페이지를 돌려준다.
+     */
     public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, Pageable pageable) {
-        searchService.record(condition.keyword());
-        return complexRepository.search(condition, pageable);
+        String regionPrefix = null;
+        if (condition.regionCode() != null) {
+            Optional<String> prefix = regionCodePrefixResolver.prefixOf(condition.regionCode());
+            if (prefix.isEmpty()) {
+                return Page.empty(pageable);
+            }
+            regionPrefix = prefix.get();
+        }
+        return complexRepository.search(condition, regionPrefix, pageable);
     }
 
     @Cacheable(cacheNames = CacheNames.POPULAR_COMPLEXES, key = "#limit")
