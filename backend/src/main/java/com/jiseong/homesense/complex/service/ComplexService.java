@@ -14,6 +14,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.jiseong.homesense.common.cache.CacheNames;
 import com.jiseong.homesense.complex.dto.BoundsCondition;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
@@ -70,7 +71,7 @@ public class ComplexService {
         return complexRepository.search(condition, pageable);
     }
 
-    @Cacheable(cacheNames = "popularComplexesV2", key = "#limit")
+    @Cacheable(cacheNames = CacheNames.POPULAR_COMPLEXES, key = "#limit")
     public List<ComplexSummaryResponse> getPopular(int limit) {
         LocalDate since = LocalDate.now().minusMonths(POPULARITY_WINDOW_MONTHS);
         List<Long> complexIds = new ArrayList<>(

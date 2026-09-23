@@ -49,9 +49,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class CacheEvictionListener {
 
-    private static final String COMPLEX_DETAIL_CACHE = "complexDetailV2";
-    private static final String POPULAR_COMPLEXES_CACHE = "popularComplexesV2";
-    private static final String REGION_AUTOCOMPLETE_CACHE = "regionAutocomplete";
+    private static final String COMPLEX_DETAIL_CACHE = CacheNames.COMPLEX_DETAIL;
+    private static final String POPULAR_COMPLEXES_CACHE = CacheNames.POPULAR_COMPLEXES;
+    private static final String REGION_AUTOCOMPLETE_CACHE = CacheNames.REGION_AUTOCOMPLETE;
 
     private final CacheManager cacheManager;
 

@@ -1,11 +1,14 @@
 package com.jiseong.homesense.complex.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.jiseong.homesense.complex.entity.Complex;
 
@@ -34,4 +37,26 @@ public interface ComplexRepository extends JpaRepository<Complex, Long>, Complex
      * 지적됨, 지성 확인).
      */
     List<Complex> findAllByOrderByComplexIdDesc(Pageable pageable);
+
+    /**
+     * complex.legal_dong_cd 백필({@code ComplexLegalDongBackfillService}) 대상 — 아직 법정동코드가 없는
+     * 단지의 주소 필드만 가져온다. [complexId, sido, sigungu, dongRi, legalDongAddress]
+     */
+    @Query("""
+            SELECT c.complexId, c.sido, c.sigungu, c.dongRi, c.legalDongAddress
+            FROM Complex c WHERE c.legalDistrictCode IS NULL ORDER BY c.complexId
+            """)
+    List<Object[]> findAddressFieldsWithoutLegalDongCd();
+
+    /**
+     * 백필 쓰기. {@code legal_dong_cd IS NULL} 조건을 WHERE에 두어 재실행해도 이미 값이 있는 행은
+     * 건드리지 않는다(idempotent). JPQL 벌크 UPDATE는 auditing을 우회하므로 updated_at을 직접 넘긴다.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE complex SET legal_dong_cd = :legalDongCd, updated_at = :now
+            WHERE complex_id = :complexId AND legal_dong_cd IS NULL
+            """, nativeQuery = true)
+    int fillLegalDongCdIfNull(@Param("complexId") Long complexId, @Param("legalDongCd") String legalDongCd,
+            @Param("now") LocalDateTime now);
 }
