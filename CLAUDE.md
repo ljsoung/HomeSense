@@ -859,6 +859,11 @@ findRecentTradesByComplexIds()` 단일 소스 — 완료(공유 컴포넌트가 
 
 ### API-SEARCH-01/SVC-SEARCH-01 인기 검색어 (신규 제안 — 반영 전 검토 필요)
 
+> **2026-09-23 갱신:** 이 절의 두 결정은 뒤집혔다. "기록 방식"(`ComplexService.search()`가 `@Async`로
+> `record()`를 호출)은 `POST /api/search/logs`로 분리됐다. "keyword는 로깅 전용"은 실제 검색 필터로 바뀌었다.
+> 현재 기준은 아래 "단지 검색 지역코드·키워드·거래유형" 절이다. 아래 표는 당시 결정의 기록으로 남긴다.
+> 100자 truncate 행도 더는 해당하지 않는다 — 이제 2~50자 검증을 통과한 값만 기록된다.
+
 **이 도메인 전체가 요구사항정의서·엔티티정의서·테이블정의서·UI정의서·프로그램설계서·프로그램목록서(60개
 프로그램) 어디에도 정의되어 있지 않다.** HOME-01 히어로 검색바를 하드코딩 없이 실제 API로 연동하기로
 하면서 지성이 추가한 신규 제안 범위다 — 완료 후 프로그램목록서 3장 총괄표(60→62종, ENT-SEARCH-01
@@ -961,6 +966,84 @@ Flyway/Liquibase 같은 자동 마이그레이션이 없다는 사실 자체는 
 다른 11개 테이블처럼 새 환경(스테이징, 다른 개발자 로컬 등)에 배포할 때마다 매번 수동으로 먼저 적용해야
 한다(자동 마이그레이션 도구 없음).
 
+### API-CPX-01·SVC-CPX-01·API-SEARCH-01 단지 검색 지역코드·키워드·거래유형 (2026-09-23) — 프로그램설계서와 다른 설계 변경
+
+SRCH-01 프론트 착수 전 백엔드 선행 작업이다(브랜치 `feature/backend/search-region-keyword`). 두 공백이
+출발점이었다. 첫째, 지역 자동완성 응답(`legalDongCd`, `fullPath`)과 검색 파라미터(`sido`/`sigungu`/`dongRi`
+텍스트)의 형태가 맞지 않았다. 둘째, `keyword`가 결과를 거르지 않고 로그에만 쓰였다. 운영 반영 절차는
+`docs/runbook-complex-legal-dong-backfill.md`에 있다.
+
+| 항목 | 설계서 상태 | 실제 구현 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- | --- |
+| **complex.legal_dong_cd 백필 — 방식 선정** | 컬럼만 정의(선택 FK), 채우는 프로그램 없음 | `ComplexLegalDongResolver`(`batch.matcher`)가 **(가) 이름 매칭을 먼저 하고, 실패하면 (나) 주소 prefix 매칭으로 보완**한다. (가)는 (시도, `SigunguNormalizer`로 정규화한 시군구, 동리)가 legal_district_code leaf 행의 (시도, 정규화 시군구, eupmyeondong_name 마지막 토큰)과 같은지 본다. 같은 시군구에 같은 이름의 리가 둘이면 주소에 그 읍·면 이름이 있는지로 좁힌다. (나)는 legal_dong_address가 "시도 정규화시군구 읍면동[ 리]"로 시작하는 가장 긴 leaf 행을 고른다. 활성 코드만 대상이다. 러너는 `backfill-complex-legal-dong` 프로필이고, 기본은 dry-run이며 `--apply`를 붙여야 쓴다 | 로컬 dry-run(21,680건) 결과. (가)만 쓰면 채움 99.96%, 거래 대조 100%. (나)만 쓰면 100%, 99.99%. **조합하면 100%, 100%**(거래가 있는 17,637개 단지를 그 단지 거래들의 legal_dong_cd 최빈값과 대조). (가)가 못 채운 9건은 dong_ri가 NULL인 단지라 (나)가 읍·면 단위(8자리)로 채운다. (가)와 (나)가 서로 다른 1건(14826 화성효행구 봉담읍 동화리)은 첫 주소에 리가 빠진 경우로, 거래 최빈값이 (가)와 같다. 그래서 (가)를 우선한다. 적용 후 분포는 읍면동 코드 18,449건, 리 코드 3,231건 | complex 원본(K-apt xlsx)의 시군구·동리 표기 규칙이 바뀌면 재검증한다(`SigunguNormalizer`와 같은 전제). legal_district_code를 재적재한 뒤 신설 행정구역 단지가 새로 들어오면 러너를 다시 돌린다 |
+| **알려진 공백 — 단지 마스터 적재가 저장소 밖에서 수동으로 수행됨(재현 불가)** | 설계서는 단지 기본정보를 적재 대상으로 가정 | 이 저장소에는 complex를 적재하는 코드가 없다(적재기·스크립트·커밋 이력 전무, 원본 xlsx는 로컬 바탕화면에만 있음). 그래서 "적재 경로에서 legal_dong_cd를 채우도록 고치는 fix-forward"가 불가능하다. **대체 절차(승인됨):** 단지를 새로 적재하거나 재적재한 뒤 백필 러너를 다시 실행한다. 러너는 NULL인 행만 채운다(runbook 8절). 적재기는 만들지 않았다 | 21,680건 전부 NULL이었던 원인이 이것이다 | **백로그: 단지 마스터 적재기를 저장소에 편입한다.** 편입하면 그 적재기가 `ComplexLegalDongResolver`를 직접 호출하게 하고(복사 금지), 이 대체 절차는 폐기한다 |
+| **백필 러너의 실행 방식** | 없음 | 프로필 `backfill-complex-legal-dong`(`application-backfill-complex-legal-dong.properties`)은 `spring.main.web-application-type=none`이다. `homesense.scheduling.enabled=false`로 `@EnableScheduling`만 끄고(`SchedulingConfig` 안의 조건부 설정으로 분리), 끝나면 `SpringApplication.exit`으로 종료 코드를 반환한다(성공 0, 실패 1). non-web에서는 `HttpSecurity` 빈이 없어 기동이 실패하므로 `SecurityConfig.securityFilterChain`에 `@ConditionalOnWebApplication(SERVLET)`을 달았다. apply 후 `complexDetailV2`(matchPending), `popularComplexesV2`, `regionAutocomplete`(지역 정보 DTO) 캐시를 비운다. 캐시 이름은 `CacheNames` 상수로 모았다 | 1회성 러너가 03:00 수집 파이프라인을 함께 띄우거나 포트를 점유하면 안 된다 | 다른 1회성 러너(`rematch`, `reload-legal-district`, `backfill-lawd-cd`)는 아직 웹 서버를 띄운 채 끝나지 않는 옛 방식이다. 다시 쓸 일이 생기면 같은 방식으로 옮긴다 |
+| **regionCode 도입과 sido/sigungu/dongRi 정리** | 3.3절 search는 지역을 텍스트(시도/시군구/동리)로 받음 | `ComplexSearchRequest.regionCode`(10자리 법정동코드, 선택)를 추가했다. 프론트는 자동완성의 `legalDongCd`를 그대로 보낸다. `RegionCodePrefixResolver`(`region.service`)가 계층 prefix를 구하고, `complex.legal_dong_cd LIKE 'prefix%'`로 거른다. 형식 오류(10자리 숫자가 아님, 전각 숫자 포함)는 400 `INVALID_REGION_CODE`, 존재하지 않거나 폐지된 코드는 빈 페이지다. **`sido`/`sigungu`/`dongRi` 파라미터는 제거했다** — 프론트·백엔드 어디에도 테스트 외 호출자가 없었다(`/search` 화면은 아직 플레이스홀더라 이 API를 부르지 않는다) | 텍스트 방식은 자동완성 fullPath("경기도 수원시 장안구 파장동")를 complex 표기("수원장안구")로 바꿀 방법이 없어 시+구 도시와 리 단위에서 0건이 났다 | legal_dong_cd가 NULL인 단지는 regionCode 검색에서 빠진다(현재 0건). 단지 재적재 후 러너를 안 돌리면 새 단지가 지역 검색에서 누락된다 |
+| **prefix 규칙과 실증 근거** | 없음 | 시도(뒤 8자리 0)는 앞 2자리, 시군구 대표행(뒤 5자리 0)은 앞 5자리, 읍면동(뒤 2자리 0)은 앞 8자리, 리는 10자리다. **구를 가진 시는 앞 4자리**다. 구를 가진 시인지는 **이름으로** 판정한다 — 같은 4자리 안에 `"{시군구명} "`으로 시작하는 하위 시군구가 있는지 본다. 판정 맵은 활성 코드로 한 번 만들고 `LegalDistrictCodeReloadedEvent` 커밋 후 비운다(요청마다 조회하지 않음) | 활성 코드 전수 조사(2026-09-23). 구를 가진 시는 13곳이다(수원·성남·안양·부천·안산·고양·용인·화성·청주·천안·포항·창원·전주). 각 4자리 그룹에는 그 시와 산하 구만 있다. 반면 **영동군(43740)과 증평군(43745)은 서로 무관한데 `4374`를 공유**해, "5번째 자리가 0이면 4자리" 같은 숫자 규칙은 영동군 검색에 증평군을 섞는다. 세종(3611000000)은 시군구 계층이 없어 5자리 `36110`이고, 하위 동이 전부 이 prefix로 시작한다 | 행정구역 개편으로 새 "구를 가진 시"가 생기면 이름 규칙이 자동으로 따라간다. 하위 구 이름이 `"{시명} "` 형식을 벗어나는 표기가 CSV에 등장하면 재검증한다 |
+| **keyword 필터화와 매칭 대상** | 3.3절에 없음(API-SEARCH-01 때 로깅 전용으로 추가됐던 파라미터) | `keyword`는 trim하고, 공백뿐이면 조건 없음으로 본다. 길이는 코드포인트 기준 2~50자이고 위반하면 400 `INVALID_SEARCH_KEYWORD`(`SearchKeywordPolicy`, `common.validation`). **단지명, legal_dong_address, 그 단지 법정동코드의 legal_dong_name 중 하나에 부분 일치**하면 남긴다. `%`, `_`, 이스케이프 문자(`!`)는 이스케이프한다. legal_dong_name 매칭은 조인이 아니라 `legal_dong_cd IN (서브쿼리)`로 건다. regionCode·필터·정렬·페이지네이션과 AND로 결합된다 | legal_dong_address는 K-apt 표기("경기도 수원장안구 …")라 "수원시"가 걸리지 않는다. 그래서 legal_dong_name까지 포함했다. **조인으로 처음 구현했을 때 키워드 검색이 ~2.1s였다.** OR 조건이 조인된 테이블을 참조해 complex 스캔 단계에서 걸러지지 못하고, 대표거래 상관 서브쿼리가 단지 전체(약 2만)에 먼저 돌았기 때문이다(EXPLAIN으로 확인). IN 서브쿼리로 바꾸자 조건 전체가 complex에 걸려 **76~195ms**(로컬 실측: 래미안·안성시·자이·수원시·%%)가 됐다. LIKE 자체 비용은 21,680건 전체에서 24~27ms라 FULLTEXT(ngram)는 도입하지 않았다 | 단지 수가 크게 늘어 LIKE 스캔이 병목이 되면 그때 FULLTEXT(ngram)를 검토한다. 단지명 자동완성은 이번 범위 밖이다 |
+| **검색 로그 엔드포인트 분리** | 신규 제안(API-SEARCH-01): 기록은 `ComplexService.search()` 안에서 `@Async`로 | `ComplexService.search()`에서 기록을 제거했다(목록 조회는 부수효과 없는 순수 조회). **`POST /api/search/logs`**(바디 `{keyword}`, 인증 불필요, `SearchKeywordPolicy.normalizeRequired`로 검증하고 비어 있으면 400)를 신설했다. `SearchService.record()`는 동기 `@Transactional`이고 실패도 전파한다. `GET /api/search/popular` 집계는 이 행을 그대로 쓴다(IT로 확인) | 같은 API가 필터 변경·페이지 이동에도 불려 기록이 부풀려질 수 있었다. "검색을 실행한 순간" 1회 기록은 프론트만 알 수 있는 사건이다. 예전 `@Async`는 readOnly 트랜잭션 합류를 피하려던 것이었는데, 이제 이 메서드 자체가 요청의 목적이라 동기로 바꿨다 | 기록 남용(봇 등)이 문제가 되면 rate limit을 검토한다 — 지금은 없다 |
+| **거래유형 전세/월세 구분** | UI정의서 4.4절 거래유형은 매매/전세/월세 3가지인데, search는 `dealCategory(SALE/RENT)`만 있었다 | `rentType`(JEONSE/WOLSE) 파라미터를 추가했다. **trade 값 체계(`deal_category` + `rent_type`)와 `TradeSearchRequest`의 기존 형태를 그대로 따랐다**(단일 SALE/JEONSE/WOLSE 파라미터를 새로 만들지 않음). 매매는 `dealCategory=SALE`, 전세는 `rentType=JEONSE`, 월세는 `rentType=WOLSE`로 보낸다. rentType만 보내도 전월세로 취급해 금액 범위는 `depositAmount`(보증금) 기준이다(`ComplexSearchCondition.isRent()`, TRD가 겪은 버그와 같은 규칙). 대표거래(카드의 "최근 거래가")는 거래 필터가 걸린 상관 서브쿼리로 고르므로 **선택한 유형의 최신 거래**다(IT로 확인). `dealCategory=SALE`과 `rentType`을 함께 보내면 0건이다(TRD와 같은 동작, 400 아님) | 프론트가 이미 알고 있는 trade 값 체계를 새 이름으로 감싸면 두 도메인의 파라미터가 갈라진다 | **완결 필요(아래 알려진 갭):** 카드 응답에 전세·월세 구분과 월세금액이 없다 |
+
+**알려진 갭 — `ComplexSummaryResponse`에 `rentType`·`monthlyRentAmount`가 없다(이번에 고치지 않음).**
+대표거래가 월세여도 카드에는 `representativeDealCategory=RENT`와 보증금(`representativeAmount`)만 나간다.
+거래유형 필터 없이 조회하면 최신 거래가 월세인 단지가 "5,000만"처럼 보증금만 표시될 수 있다(로컬 응답
+샘플에서 실제로 확인: 수원한일타운아파트). FR-3.3은 월세의 보증금과 월세를 함께 요구한다. 필드를
+추가하면 `popularComplexesV2` 캐시 이름을 버전업해야 해서(위 "캐싱" 절 원칙) 이번 범위에서 뺐다. SRCH-01
+카드 작업 전에 결정하라.
+
+**성능 참고 — 지역·키워드 없이 거래유형만 거는 검색은 1.6~2.2s다(기존 문제, 이번 변경과 무관).** 대표거래
+상관 서브쿼리가 단지 전체에 도는 구조 때문이다(필터 없는 조회도 같은 시간). regionCode나 keyword로
+좁히면 5~300ms이고, 경기도 전체(4,781건)는 약 0.77s다. SRCH-01이 지역 없는 전국 검색을 기본으로 노출하면
+NFR-1(평균 200ms)을 넘는다 — 화면 설계 때 지역 선택을 전제로 할지, 쿼리를 재설계할지 정하라.
+
+**발견만 하고 고치지 않은 기존 버그(우선순위 높음) — 리스트를 반환하는 `@Cacheable` 3종이 캐시 히트 시
+500이다.** `GET /api/search/popular`, `/api/complexes/popular`, `/api/regions?query=`가 첫 호출은 200인데 두
+번째 호출(캐시 히트)부터 `SerializationException`으로 500을 낸다(로컬에서 재현). 원인: `CacheConfig`의
+`GenericJacksonJsonRedisSerializer`가 `enableUnsafeDefaultTyping()`(non-final 타입에만 타입 정보 기록)인데,
+세 메서드가 반환하는 `Stream.toList()` 결과는 `final` 클래스(`ImmutableCollections.ListN`)라 최상위 배열에
+타입 정보 없이 저장되고, 읽을 때는 타입 정보를 기대해 실패한다. 단건 DTO를 캐싱하는 `complexDetailV2`는
+해당하지 않는다. COM-CACHE-01 전반에 걸친 수정이라 이번 범위에서 고치지 않았다. **SRCH-01 자동완성이
+바로 이 버그에 걸리므로 SRCH-01 전에 별도로 고쳐야 한다.** 수정 방향: 반환 리스트를 `new ArrayList<>(…)`로
+감싸거나, 직렬화기의 타이핑 범위를 바꾼다. 어느 쪽이든 캐시 히트 경로를 실제 Redis로 검증하는 테스트를
+함께 둔다.
+
+**영향받는 프론트 호출부(이번에 수정하지 않음):**
+- `pages/home/HeroSection.tsx` `runSearch()` — `/search?housingType=..&dealType=..&keyword=원문`으로 이동한다.
+  SRCH-01이 이 쿼리를 받아 `/api/complexes/search`로 넘길 때 (1) `dealType`을 `dealCategory=SALE` 또는
+  `rentType=JEONSE/WOLSE`로 바꿔야 하고, (2) 검색 실행 시 `POST /api/search/logs`를 1회 호출해야 한다.
+  HOME-01 인기검색어 칩도 같은 `runSearch()`를 쓴다.
+- `features/search`(인기검색어 조회) — `GET /api/search/popular` 계약은 그대로다.
+- `features/region/api.ts` — 자동완성 `legalDongCd`를 이제 `regionCode`로 그대로 보내면 된다.
+- `/api/complexes/search`를 직접 부르는 프론트 코드는 아직 없다(`/search`는 `PlaceholderPage`).
+
+**문서와 다르게 구현한 부분(설계서 갱신 필요):** 3.3절 search 파라미터(sido/sigungu/dongRi → regionCode,
+keyword 필터, rentType 추가)와 처리 로직(검색 기록 제거). 3.11절 SEARCH 도메인(record 호출 주체 →
+`POST /api/search/logs`). 테이블정의서 7.2절 인덱스 13건은 "반영 전 검토 필요"에서 "반영됨"으로(아래 인덱스
+항목). UI정의서 4.4절 거래유형 라디오와 파라미터 매핑.
+
+**인덱스 13건 복구(별도 커밋 `5b2759a`).** 테이블정의서 v2.1 7.2절/8장의 CREATE INDEX 13건이
+`schema_all.sql`과 로컬 DB **둘 다에 한 건도 없었다**(2026-09-23 전수 대조). 재구성 당시 원본 문서가 이
+13건을 "반영 전 검토 필요"로 표시해 빠뜨렸기 때문이다. 문서가 기준이라는 결정에 따라
+`schema_all.sql` 끝에 원문대로 추가했다. 기존 DB용으로 `schema/indexes_v2_1.sql`(IF NOT EXISTS, 재실행
+안전)을 두고 로컬에 적용했다. 새 MariaDB 10.11 컨테이너에서 `schema_all.sql` 적용과 인덱스 스크립트 재실행을
+모두 확인했다. `idx_complex_region`은 검색 API가 지역 텍스트를 더 쓰지 않아도 BAT-MAT-02
+(`findBySidoAndSigunguAndDongRi`)가 쓰므로 복구 대상이다.
+
+**EXPLAIN 결과(로컬, 2026-09-23).** regionCode 조건은 Hibernate가 조인 없이 `c1_0.legal_dong_cd like ?`로
+만든다. 구 단위(`41111%`) count 쿼리는 `complex`가 `range / fk_complex_legal_dong / rows 91 / Using index`이고,
+실행은 5ms다(같은 쿼리를 지역 조건 없이 돌리면 1.40s). keyword 조건은 `complex` ALL(20,905행) 스캔이다.
+`%kw%`라 B-tree를 못 쓰는 것은 예상대로이고, legal_district_code는 `MATERIALIZED` 서브쿼리 1회로 끝난다.
+
+**검증:** `ComplexLegalDongResolverTest`(시+구 표기, 세종 연속 공백, 같은 이름 리 좁히기, 14826 사례, 비활성·대표행
+제외), `RegionCodePrefixResolverTest`(시도·구 보유 시·구 없는 시·세종·읍면동·리·영동/증평·폐지 코드·1회 로드와
+재적재 후 재로드), `SearchKeywordPolicyTest`, `ComplexControllerTest`/`SearchControllerTest`(파라미터 바인딩과
+400), **`ComplexSearchRegionKeywordMariaDbIT`**(신규, 15건: regionCode 계층 5종, 영동/증평, 없는 코드, keyword의
+단지명·주소·법정동명 일치, `%%`·`__`·`!%`·`0%행` 이스케이프, regionCode+keyword+전세+보증금 범위 결합,
+매매/전세/월세 분리와 유형별 대표거래, 전세 보증금 범위, 검색 시 search_log 불변, `POST /logs` 기록과 집계
+반영, 형식 오류 400). `./gradlew test` 606건, `./gradlew integrationTest` 78건 전부 통과. 로컬에서 실제 코드로
+호출한 결과: 수원시 장안구(4111100000) 82건, 수원시(4111000000) 392건, 안성시(4155000000) 80건, 경기도
+4,781건, 세종 172건, 리(4155025021) 3건, 영동군 5건, 폐지 코드(2811000000) 0건.
+
 ### 외부연동 설정(COM-CFG-01)
 프로그램 설계서는 `ExternalApiProperties` 하나에 `getDataGoKrServiceKey()`/`getKakaoApiKey()`/`getJwtSecret()` 세 메서드를 두는 단일 클래스로 정의하지만, 실제 구현은 이미 각 도메인이 소유한 `@ConfigurationProperties` 레코드로 나뉘어 있습니다 — 설계서보다 먼저 BAT-CLC-01(`DataGoKrProperties`)과 COM-SEC-01/02(`JwtProperties`)가 구현되며 이미 굳어진 구조라, COM-CFG-01 시점에 하나로 합치지 않고 그대로 두었습니다. 새로 코드를 짤 때는 이 구조를 따르세요.
 
@@ -980,8 +1063,11 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | 캐시 키 | 적용 대상 |
 | --- | --- |
 | `complexDetailV2::{complexId}` | 단지 상세 조회 |
-| `popularComplexes::{limit}` | 인기 단지 목록 |
+| `popularComplexesV2::{limit}` | 인기 단지 목록 |
 | `regionAutocomplete::{query}` | 지역 자동완성 |
+| `popularKeywords::{limit}` | 인기 검색어(TTL 1시간) |
+
+캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다(`popularKeywords`만 아직 `CacheConfig`/`SearchService`에 리터럴로 남아 있다). **리스트를 반환하는 캐시가 히트 시 500을 내는 기존 버그가 있다** — "단지 검색 지역코드·키워드·거래유형" 절 참고.
 
 거래 검색/이력 조회는 배치 직후 변경 가능성이 있어 **캐시를 적용하지 않습니다.**
 
@@ -1067,12 +1153,13 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | --- | --- | --- |
 | 인증 | `/api/auth` | `POST /login`, `/signup`, `/refresh`, `/logout`, `GET /check-email` |
 | 회원 | `/api/users` | `GET·PUT /me`, `DELETE /me` |
-| 단지 | `/api/complexes` | `GET /search`, `/popular`, `/{id}`, `/map` |
+| 단지 | `/api/complexes` | `GET /search`(`regionCode`·`keyword`·`dealCategory`/`rentType`·범위 필터·`sort`·`page`/`size`), `/popular`, `/{id}`, `/map` |
 | 실거래 | `/api/trades` | `GET /search`, `?complexId=`, `/{tradeId}` |
 | 지역 | `/api/regions` | `GET ?query=`, `/interest-summary` |
 | 최근조회 | `/api/recent-views` | `GET` |
 | 관심 | `/api/favorites` | `GET·POST·DELETE /properties`, `/regions` |
 | 알림 | `/api/notifications` | `GET·PUT /settings`, `GET`, `PATCH /{id}/read` |
+| 검색(신규 제안) | `/api/search` | `GET /popular`, `POST /logs` |
 | 통계(5단계) | `/api/stats` | `GET /type-comparison`, `/price-trend` |
 | 관리자(5단계) | `/api/admin` | `GET /batch-logs`, `POST /batch-retry`, `GET·PATCH /users` |
 
@@ -2130,8 +2217,15 @@ npm run dev                # 개발 서버 (5173, /api는 vite.config.ts 프록�
 npm run build              # 프로덕션 빌드 (tsc -b && vite build)
 npm run lint
 
-# DB — 테이블 정의서 8장 DDL 원문을 그대로 실행
+# DB — 테이블 정의서 8장 DDL 원문을 그대로 실행(성능 인덱스 13건 포함)
 mysql -u root homesense < schema_all.sql
+# 이미 테이블이 있는 DB에 인덱스 13건만 추가(재실행 안전)
+mysql -u root homesense < backend/src/main/resources/schema/indexes_v2_1.sql
+
+# complex.legal_dong_cd 백필 — 단지를 (재)적재한 뒤마다 실행. 기본 dry-run이고 --apply를 붙여야 쓴다.
+# 웹 서버·스케줄러 없이 돌고 종료 코드를 반환한다. 운영 절차: docs/runbook-complex-legal-dong-backfill.md
+./gradlew bootRun --args='--spring.profiles.active=local,backfill-complex-legal-dong'          # dry-run
+./gradlew bootRun --args='--spring.profiles.active=local,backfill-complex-legal-dong --apply'  # 적용
 ```
 
 ## UNIQUE 제약 동시성 회귀 테스트 원칙
