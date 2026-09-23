@@ -129,6 +129,10 @@ function RequestStep() {
   // 서버 쿨다운(60초)의 클라이언트 근사치 — 정확한 잔여 시간은 서버만 안다. 0이 되면 재발송 버튼이
   // 활성화되지만, 실제로는 여전히 서버가 429로 거부할 수 있다(그 경우 아래 catch가 다시 쿨다운을 건다).
   const [cooldown, setCooldown] = useState(0);
+  // 쿨다운이 걸린 대상 이메일 — 서버 쿨다운 키가 이메일별이라(CLAUDE.md AUTH-03 절 "오라클 방지"
+  // 참고), cooldown 값 하나만으로 전체 폼을 잠그면 사용자가 다른(쿨다운 없는) 이메일로 바꿔 시도하는
+  // 것까지 막아버린다 — 현재 입력값이 이 이메일과 같을 때만 잠근다.
+  const [cooldownEmail, setCooldownEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (cooldown <= 0) {
@@ -146,6 +150,7 @@ function RequestStep() {
 
   const email = watch('email');
   const emailValid = isValidEmailFormat(email);
+  const isCoolingDownForCurrentEmail = cooldown > 0 && cooldownEmail === email.trim();
 
   async function submitRequest(targetEmail: string) {
     setIsRequesting(true);
@@ -162,6 +167,7 @@ function RequestStep() {
       if (axios.isAxiosError<ApiErrorResponse>(error) && error.response?.status === 429) {
         setServerError(error.response.data?.error?.message ?? GENERIC_ERROR_MESSAGE);
         setCooldown((prev) => Math.max(prev, RESEND_COOLDOWN_SECONDS));
+        setCooldownEmail(targetEmail);
         return;
       }
       setServerError(GENERIC_ERROR_MESSAGE);
@@ -170,7 +176,15 @@ function RequestStep() {
     }
   }
 
-  const onSubmit = handleSubmit((values) => submitRequest(values.email.trim()));
+  const onSubmit = handleSubmit((values) => {
+    const trimmed = values.email.trim();
+    // 버튼이 카운트다운 박스로 바뀌어 안 보이는 동안에도, 입력 필드 하나뿐인 폼은 Enter 키로 네이티브
+    // 제출될 수 있다 — 버튼 렌더링만 막는 것으로는 우회될 수 있어 제출 핸들러 자체에서도 막는다.
+    if (cooldown > 0 && cooldownEmail === trimmed) {
+      return;
+    }
+    return submitRequest(trimmed);
+  });
   const handleResend = () => {
     if (cooldown === 0 && !isRequesting) {
       void submitRequest(sentEmail);
@@ -243,9 +257,16 @@ function RequestStep() {
         />
         {serverError && <FieldHint id="request-error" status="error" message={serverError} />}
         <div className="w-full pt-1">
-          <Button type="submit" disabled={!emailValid || isRequesting}>
-            재설정 링크 발송
-          </Button>
+          {isCoolingDownForCurrentEmail ? (
+            <div className="flex h-[54.5px] w-full items-center justify-center gap-2 rounded-[14px] border-2 border-[#e5e7eb] bg-white text-[15px] font-bold text-[#9ca3af]">
+              <ClockIcon className="size-4" />
+              {cooldown}초 후 다시 시도 가능
+            </div>
+          ) : (
+            <Button type="submit" disabled={!emailValid || isRequesting}>
+              재설정 링크 발송
+            </Button>
+          )}
         </div>
       </form>
       <BackToLogin />
