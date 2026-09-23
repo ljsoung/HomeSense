@@ -1886,6 +1886,38 @@ StrictMode의 두 번째 자동 호출에서 이미 성공해 버려 사용자�
 같은 함정이 재발할 수 있으니 이 화면의 다른 재시도 로직을 테스트할 때도 참고하라. 저장소 밖
 `C:\Users\super\homesense-e2e-scripts\`에 보관(17번째 스크립트).
 
+**P2 코드리뷰 지적 반영(2026-09-23) — 페이지가 열려 있는 채로(또는 새로고침해서) 이미 쿨다운 중인
+이메일을 다시 제출하면, 첫 429 이후로도 제출 버튼이 계속 눌려 매번 429만 다시 받았다.** `RequestStep`은
+`cooldown`을 상태로 들고 있었지만, 이 값을 실제로 소비해 버튼을 잠그는 곳은 `phase === 'sent'`(발송
+완료 화면)의 재발송 버튼뿐이었다 — 폼이 아직 `phase === 'form'`인 상태(예: 429를 받았지만 성공한 적은
+없어 `sent`로 전환되지 않은 경우, 또는 새로고침으로 `phase`가 초기화된 뒤 같은 이메일을 다시 입력한
+경우)에서는 제출 버튼의 `disabled` 조건이 `!emailValid || isRequesting`뿐이라 `cooldown`을 전혀
+참조하지 않았다. 사용자는 60초 내내 버튼을 계속 누를 수 있었고 그때마다 서버에 요청이 나갔다(서버
+쿨다운이 최종 방어선이라 실질 피해는 없지만, 광고된 "60초 클라이언트 락"이 이 경로에서만 무력화돼
+있었다).
+
+**수정**: `cooldownEmail`(신규 state) — 쿨다운이 걸린 실제 이메일을 함께 기억한다. 서버 쿨다운 키가
+이메일별이라(`PasswordResetTokenService.tryStartCooldown(email)`, 위 AUTH-03 백엔드 절 참고) `cooldown`
+값 하나만으로 폼 전체를 잠그면 사용자가 **다른**(쿨다운 없는) 이메일로 바꿔 정상적으로 제출하려는
+것까지 막아버린다 — 그래서 "현재 입력값이 `cooldownEmail`과 같을 때만" 잠근다
+(`isCoolingDownForCurrentEmail`). 429를 받으면 `setCooldownEmail(targetEmail)`도 함께 기록한다. `form`
+단계의 제출 버튼은 이제 `isCoolingDownForCurrentEmail`이면 `sent` 단계와 똑같은 잠긴 카운트다운
+박스("{n}초 후 다시 시도 가능")로 바뀌고, 카운트다운이 끝나면 다시 진짜 버튼으로 돌아온다. **버튼을
+숨기는 것만으로는 불충분했다** — 이 폼은 입력 필드가 하나뿐이라 브라우저의 암묵적 단일 필드 제출
+규칙상 제출 버튼이 화면에 없어도 이메일 필드에서 Enter를 치면 네이티브 `submit` 이벤트가 발생할 수
+있다. 그래서 `onSubmit` 핸들러 자체에도 같은 가드(`cooldown > 0 && cooldownEmail === trimmed`이면
+`submitRequest()`를 호출하지 않고 반환)를 걸어, 버튼 렌더링 우회와 무관하게 실제 API 호출 자체를
+막았다.
+
+**검증**: 신규 `auth03-form-cooldown-check.mjs`(9/9, 백엔드 불필요) — (A) 신고된 버그 재현: 폼이 idle
+상태에서 429를 받으면 제출 버튼이 즉시 잠긴 카운트다운으로 바뀌고, 그 상태에서 이메일 필드에 Enter를
+쳐도 추가 요청이 나가지 않으며(`requestCount` 단언), 60초(`page.clock.runFor(1000)` 61회 반복 — 위
+"카운트다운 테스트는 runFor를 1초 단위로 반복 호출하라" 메모와 같은 이유) 후 실제 버튼이 돌아오는지
+확인. (B) 쿨다운 중인 이메일에서 **다른** 이메일로 바꾸면 즉시 다시 진짜 버튼으로 돌아오고, 그 다른
+이메일은 실제로 정상 제출(POST 1회)되는지 확인 — `cooldownEmail` 비교 로직이 과잉 차단하지 않음을
+증명. 기존 `auth03-transient-token-error-check`(9/9)·`auth03-figma-parity-check`(19/19)도 재실행해
+회귀 없음 확인(합계 37/37). 저장소 밖 `C:\Users\super\homesense-e2e-scripts\`에 보관(18번째 스크립트).
+
 ### SCR-HOME-01 / UIC-01~03,05,07~09 구현 결정 사항
 
 HOME-01은 이 저장소가 GNB 있는 화면을 만드는 첫 사례라, AUTH-01/02의 `AuthLayout`(중앙 카드, GNB 없음)과
