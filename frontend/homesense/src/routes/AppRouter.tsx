@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { PlaceholderPage } from '../pages/PlaceholderPage';
 import { LoginPage } from '../pages/auth/LoginPage';
+import { PasswordResetPage } from '../pages/auth/PasswordResetPage';
 import { SignupPage } from '../pages/auth/SignupPage';
 import { HomePage } from '../pages/home/HomePage';
 import { PrivacyPolicyPage } from '../pages/legal/PrivacyPolicyPage';
@@ -13,7 +14,9 @@ export function AppRouter() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
-        <Route path="/forgot-password" element={<PlaceholderPage programId="AUTH-03" title="비밀번호 찾기" />} />
+        {/* 백엔드가 발송하는 재설정 링크가 {baseUrl}/password-reset?token=... 형식으로 고정돼 있다
+            (AUTH-03 프론트 프롬프트 1절) — 이 경로를 바꾸면 이미 발송된 메일의 링크가 깨진다. */}
+        <Route path="/password-reset" element={<PasswordResetPage />} />
         <Route path="/search" element={<PlaceholderPage programId="SRCH-01" title="지역·단지 검색" />} />
         <Route path="/complexes/:id" element={<PlaceholderPage programId="DTL-01" title="단지 상세" />} />
         <Route path="/map" element={<PlaceholderPage programId="MAP-01" title="지도로 보기" />} />

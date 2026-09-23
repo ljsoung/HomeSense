@@ -84,7 +84,7 @@ export function LoginPage() {
             id="password"
             label="비밀번호"
             labelAction={
-              <Link to="/forgot-password" className="text-[12px] text-[#99a1af] hover:text-[#6a7282]">
+              <Link to="/password-reset" className="text-[12px] text-[#99a1af] hover:text-[#6a7282]">
                 비밀번호 찾기
               </Link>
             }

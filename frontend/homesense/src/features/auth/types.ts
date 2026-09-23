@@ -37,3 +37,14 @@ export interface SignupResponse {
 export interface EmailCheckResponse {
   duplicate: boolean;
 }
+
+/** AUTH-03 1단계 — PasswordResetRequest.java 실제 필드 그대로(email 하나뿐). */
+export interface PasswordResetRequest {
+  email: string;
+}
+
+/** AUTH-03 2단계 — PasswordResetConfirmRequest.java 실제 필드 그대로(token/newPassword). */
+export interface PasswordResetConfirmRequest {
+  token: string;
+  newPassword: string;
+}
