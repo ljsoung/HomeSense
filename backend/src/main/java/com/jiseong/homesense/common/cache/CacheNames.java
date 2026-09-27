@@ -15,6 +15,8 @@ public final class CacheNames {
     public static final String POPULAR_COMPLEXES = "popularComplexesV3";
     /** SVC-RGN-01.autocomplete() — RegionAutocompleteResponse(legalDongCd, fullPath). */
     public static final String REGION_AUTOCOMPLETE = "regionAutocomplete";
+    /** SVC-SEARCH-01.getPopularKeywords() — PopularKeywordResponse. TTL 1시간, evict 트리거 없음. */
+    public static final String POPULAR_KEYWORDS = "popularKeywords";
 
     private CacheNames() {
     }
