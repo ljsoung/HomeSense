@@ -1,25 +1,30 @@
 package com.jiseong.homesense.search.controller;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.jiseong.homesense.common.logging.AuditLogger;
-import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.common.security.AccessTokenEpochService;
+import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.search.dto.PopularKeywordResponse;
 import com.jiseong.homesense.search.service.SearchService;
@@ -105,5 +110,27 @@ class SearchControllerTest {
 
         mockMvc.perform(get("/api/search/popular").param("limit", "20"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void 검색_기록은_trim한_keyword로_서비스를_호출하고_200을_반환한다() throws Exception {
+        mockMvc.perform(post("/api/search/logs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"keyword\":\"  안성시  \"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(searchService).record("안성시");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"keyword\":\"   \"}", "{\"keyword\":\"a\"}",
+            "{\"keyword\":\"123456789012345678901234567890123456789012345678901\"}"})
+    void 검색_기록의_keyword가_없거나_2자_미만이거나_50자를_넘으면_400이다(String body) throws Exception {
+        mockMvc.perform(post("/api/search/logs").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_SEARCH_KEYWORD"));
+
+        verify(searchService, never()).record(any());
     }
 }

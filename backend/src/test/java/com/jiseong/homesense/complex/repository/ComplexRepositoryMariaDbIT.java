@@ -151,11 +151,12 @@ class ComplexRepositoryMariaDbIT {
 
     @Test
     void 검색결과의_대표거래는_취소되지_않은_거래_중_가장_최근이다() {
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
-                null, null, null, SortCondition.LATEST);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .housingTypes(List.of(HousingType.APT))
+                .dealCategory(DealCategory.SALE)
+                .sort(SortCondition.LATEST).build();
 
-        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, null, PageRequest.of(0, 10));
 
         ComplexSummaryResponse resultA = page.getContent().stream()
                 .filter(r -> r.complexId().equals(complexA.getComplexId()))
@@ -176,11 +177,12 @@ class ComplexRepositoryMariaDbIT {
         Trade tradeB = tradeRepository.saveAndFlush(trade(complexB, HousingType.APT, DealCategory.SALE,
                 LocalDate.of(2026, 3, 1), 90000L, null, "70.00", false, MatchMethod.SIMILAR, null));
 
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
-                null, null, null, SortCondition.LATEST);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .housingTypes(List.of(HousingType.APT))
+                .dealCategory(DealCategory.SALE)
+                .sort(SortCondition.LATEST).build();
 
-        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, null, PageRequest.of(0, 10));
 
         ComplexSummaryResponse resultA = page.getContent().stream()
                 .filter(r -> r.complexId().equals(complexA.getComplexId()))
@@ -209,11 +211,12 @@ class ComplexRepositoryMariaDbIT {
         Trade laterInsertedTrade = tradeRepository.saveAndFlush(trade(tieWithinSameComplex, HousingType.APT,
                 DealCategory.SALE, tiedDate, 60000L, null, "70.00", false));
 
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
-                "서울특별시", "강남구", "역삼동", SortCondition.LATEST);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .housingTypes(List.of(HousingType.APT))
+                .dealCategory(DealCategory.SALE)
+                .sort(SortCondition.LATEST).build();
 
-        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, null, PageRequest.of(0, 10));
 
         List<ComplexSummaryResponse> matches = page.getContent().stream()
                 .filter(r -> r.complexId().equals(tieWithinSameComplex.getComplexId()))
@@ -225,11 +228,12 @@ class ComplexRepositoryMariaDbIT {
 
     @Test
     void 취소된_거래만_있는_단지는_검색결과에서_제외된다() {
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
-                null, null, null, SortCondition.LATEST);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .housingTypes(List.of(HousingType.APT))
+                .dealCategory(DealCategory.SALE)
+                .sort(SortCondition.LATEST).build();
 
-        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, null, PageRequest.of(0, 10));
 
         assertThat(page.getContent()).extracting(ComplexSummaryResponse::complexId)
                 .doesNotContain(complexCancelledOnly.getComplexId());
@@ -237,13 +241,14 @@ class ComplexRepositoryMariaDbIT {
 
     @Test
     void 최신순_금액순_면적순_모두_같은_대표거래_기준으로만_순서가_바뀐다() {
-        ComplexSearchCondition base = new ComplexSearchCondition(
-                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
-                null, null, null, SortCondition.LATEST);
+        ComplexSearchCondition base = ComplexSearchCondition.builder()
+                .housingTypes(List.of(HousingType.APT))
+                .dealCategory(DealCategory.SALE)
+                .sort(SortCondition.LATEST).build();
 
-        List<Long> latestOrder = ids(complexRepository.search(base, PageRequest.of(0, 10)));
-        List<Long> amountOrder = ids(complexRepository.search(withSort(base, SortCondition.AMOUNT), PageRequest.of(0, 10)));
-        List<Long> areaOrder = ids(complexRepository.search(withSort(base, SortCondition.AREA), PageRequest.of(0, 10)));
+        List<Long> latestOrder = ids(complexRepository.search(base, null, PageRequest.of(0, 10)));
+        List<Long> amountOrder = ids(complexRepository.search(withSort(base, SortCondition.AMOUNT), null, PageRequest.of(0, 10)));
+        List<Long> areaOrder = ids(complexRepository.search(withSort(base, SortCondition.AREA), null, PageRequest.of(0, 10)));
 
         // A(대표: 2/1, 80000, 84.90) vs B(대표: 1/15, 60000, 70.00) — 최신순은 A 먼저,
         // 금액순(오름차순)은 B 먼저, 면적순(내림차순)은 A 먼저.
@@ -257,7 +262,7 @@ class ComplexRepositoryMariaDbIT {
         // dealDate(일 단위)·금액·면적이 전부 동일한 대표거래를 가진 단지 4개 — SQL은 이런 동률 행의
         // 상대 순서를 보장하지 않으므로, complexId/tradeId 2차 정렬키가 없으면 offset/limit으로
         // 나눠 받는 인접 페이지에서 같은 단지가 중복되거나 빠질 수 있다(코드리뷰에서 지적됨).
-        // A/B(setUp)와 섞이지 않도록 별도 지역에 만든다.
+        // A/B(setUp)와 섞이지 않도록 단지명 keyword("단지TIE")로 이 4개만 골라낸다.
         LocalDate tiedDealDate = LocalDate.of(2026, 1, 1);
         List<Long> tiedComplexIds = new java.util.ArrayList<>();
         for (int i = 1; i <= 4; i++) {
@@ -267,14 +272,16 @@ class ComplexRepositoryMariaDbIT {
             tiedComplexIds.add(tied.getComplexId());
         }
 
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                List.of(HousingType.APT), DealCategory.SALE, null, null, null, null, null, null,
-                "대구광역시", "수성구", "범어동", SortCondition.LATEST);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .housingTypes(List.of(HousingType.APT))
+                .dealCategory(DealCategory.SALE)
+                .keyword("단지TIE")
+                .sort(SortCondition.LATEST).build();
 
-        List<Long> page0 = ids(complexRepository.search(condition, PageRequest.of(0, 2)));
-        List<Long> page1 = ids(complexRepository.search(condition, PageRequest.of(1, 2)));
+        List<Long> page0 = ids(complexRepository.search(condition, null, PageRequest.of(0, 2)));
+        List<Long> page1 = ids(complexRepository.search(condition, null, PageRequest.of(1, 2)));
         // 같은 조건을 다시 조회해도 완전히 같은 순서가 나와야 한다 — 결정적 정렬이라는 뜻이다.
-        List<Long> page0Again = ids(complexRepository.search(condition, PageRequest.of(0, 2)));
+        List<Long> page0Again = ids(complexRepository.search(condition, null, PageRequest.of(0, 2)));
 
         assertThat(page0).hasSize(2);
         assertThat(page1).hasSize(2);
@@ -288,11 +295,13 @@ class ComplexRepositoryMariaDbIT {
 
     @Test
     void RENT는_dealAmount가_아니라_depositAmount로_필터링된다() {
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                null, DealCategory.RENT, null, null, 20000L, 40000L, null, null,
-                null, null, null, SortCondition.LATEST);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .dealCategory(DealCategory.RENT)
+                .amountMin(20000L)
+                .amountMax(40000L)
+                .sort(SortCondition.LATEST).build();
 
-        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, null, PageRequest.of(0, 10));
 
         assertThat(page.getContent()).hasSize(1);
         assertThat(page.getContent().get(0).complexId()).isEqualTo(complexRentD.getComplexId());
@@ -328,27 +337,16 @@ class ComplexRepositoryMariaDbIT {
                 .dealDate(LocalDate.of(2026, 1, 1)).dealAmount(50000L).cancelYn(false)
                 .dedupHash("hash-out-of-range").build());
 
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                null, null, null, null, null, null, (short) 2019, (short) 2021,
-                null, null, null, SortCondition.LATEST);
+        ComplexSearchCondition condition = ComplexSearchCondition.builder()
+                .buildYearMin((short) 2019)
+                .buildYearMax((short) 2021)
+                .sort(SortCondition.LATEST).build();
 
-        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
+        Page<ComplexSummaryResponse> page = complexRepository.search(condition, null, PageRequest.of(0, 10));
 
         assertThat(page.getContent()).extracting(ComplexSummaryResponse::complexId)
                 .contains(mismatchedButInRange.getComplexId())
                 .doesNotContain(outOfRange.getComplexId());
-    }
-
-    @Test
-    void 지역_필터는_시도_시군구_동리가_모두_일치하는_단지만_반환한다() {
-        ComplexSearchCondition condition = new ComplexSearchCondition(
-                null, null, null, null, null, null, null, null,
-                "부산광역시", "해운대구", "우동", SortCondition.LATEST);
-
-        Page<ComplexSummaryResponse> page = complexRepository.search(condition, PageRequest.of(0, 10));
-
-        assertThat(page.getContent()).extracting(ComplexSummaryResponse::complexId)
-                .containsExactly(complexRentD.getComplexId());
     }
 
     @Test
@@ -415,13 +413,54 @@ class ComplexRepositoryMariaDbIT {
         assertThat(topIds.get(0)).isEqualTo(complexB.getComplexId());
     }
 
+    /**
+     * count를 대표거래 서브쿼리 조인에서 EXISTS로 바꿨다(2026-09-23). 옛 count는 목록 쿼리와 같은 조인의 행
+     * 수였으므로, "totalElements == 한 페이지에 전부 받은 목록 행 수"가 곧 "개선 전 count와 같다"는 뜻이다.
+     * 동률(같은 날짜 2건), 취소 거래만 있는 단지, 매매/전세 혼재, 범위 필터, keyword를 두루 섞어 확인한다.
+     */
+    @Test
+    void 전체_건수는_목록_쿼리가_실제로_돌려주는_단지_수와_같다() {
+        Complex tie = complexRepository.saveAndFlush(complex("CNT-TIE", "서울특별시", "강남구", "역삼동"));
+        tradeRepository.saveAndFlush(trade(tie, HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 3, 3),
+                70000L, null, "84.00", false));
+        tradeRepository.saveAndFlush(trade(tie, HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 3, 3),
+                71000L, null, "59.00", false));
+        tradeRepository.saveAndFlush(trade(tie, HousingType.APT, DealCategory.RENT, LocalDate.of(2026, 3, 4),
+                null, 35000L, "84.00", false));
+        Complex cancelledAndRent = complexRepository.saveAndFlush(complex("CNT-MIX", "서울특별시", "강남구", "역삼동"));
+        tradeRepository.saveAndFlush(trade(cancelledAndRent, HousingType.APT, DealCategory.SALE,
+                LocalDate.of(2026, 3, 5), 90000L, null, "84.00", true));
+        tradeRepository.saveAndFlush(trade(cancelledAndRent, HousingType.APT, DealCategory.RENT,
+                LocalDate.of(2026, 3, 6), null, 20000L, "84.00", false));
+
+        List<ComplexSearchCondition> conditions = List.of(
+                ComplexSearchCondition.builder().sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().dealCategory(DealCategory.SALE).sort(SortCondition.AMOUNT).build(),
+                ComplexSearchCondition.builder().dealCategory(DealCategory.RENT).sort(SortCondition.AREA).build(),
+                ComplexSearchCondition.builder().dealCategory(DealCategory.SALE)
+                        .areaMin(new BigDecimal("80")).sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().amountMin(30000L).amountMax(75000L)
+                        .sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().keyword("CNT").sort(SortCondition.LATEST).build(),
+                ComplexSearchCondition.builder().keyword("단지").dealCategory(DealCategory.RENT)
+                        .sort(SortCondition.LATEST).build());
+
+        for (ComplexSearchCondition condition : conditions) {
+            Page<ComplexSummaryResponse> all = complexRepository.search(condition, null, PageRequest.of(0, 1000));
+            assertThat(all.getTotalElements()).as(condition.toString()).isEqualTo(all.getContent().size());
+            assertThat(all.getContent()).as(condition.toString())
+                    .extracting(ComplexSummaryResponse::complexId).doesNotHaveDuplicates();
+            // 작은 페이지로 나눠 받아도 total은 같아야 한다.
+            assertThat(complexRepository.search(condition, null, PageRequest.of(0, 1)).getTotalElements())
+                    .as(condition.toString()).isEqualTo(all.getTotalElements());
+        }
+    }
+
     private static List<Long> ids(Page<ComplexSummaryResponse> page) {
         return page.getContent().stream().map(ComplexSummaryResponse::complexId).toList();
     }
 
     private static ComplexSearchCondition withSort(ComplexSearchCondition base, SortCondition sort) {
-        return new ComplexSearchCondition(base.housingTypes(), base.dealCategory(), base.areaMin(), base.areaMax(),
-                base.amountMin(), base.amountMax(), base.buildYearMin(), base.buildYearMax(), base.sido(),
-                base.sigungu(), base.dongRi(), sort);
+        return base.toBuilder().sort(sort).build();
     }
 }

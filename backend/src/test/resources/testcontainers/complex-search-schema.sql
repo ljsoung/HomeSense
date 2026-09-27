@@ -109,3 +109,13 @@ CREATE TABLE trade (
     CONSTRAINT fk_trade_complex_id FOREIGN KEY (complex_id)
         REFERENCES complex (complex_id) ON UPDATE RESTRICT ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 단지 검색이 search_log를 건드리지 않는지, POST /api/search/logs가 기록하는지 검증하는
+-- ComplexSearchRegionKeywordMariaDbIT용(schema/search_log.sql과 같은 정의).
+CREATE TABLE search_log (
+    search_log_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    keyword VARCHAR(100) NOT NULL,
+    searched_at DATETIME NOT NULL,
+    PRIMARY KEY (search_log_id),
+    KEY idx_search_log_keyword_searched_at (keyword, searched_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

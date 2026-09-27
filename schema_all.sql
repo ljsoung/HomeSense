@@ -10,10 +10,11 @@
 -- FK 17건, CHECK 10건, UNIQUE 8건) + 신규 도메인 search_log(API-SEARCH-01, 인기
 -- 검색어 로깅, 2026-09 신규 제안 — 원본 11개 테이블과 달리 이 문서 자체에는 없음).
 --
--- 포함하지 않은 것: 테이블정의서 7.2절 "제안 성능 인덱스" 13건. 원본 문서가 스스로
--- "엔티티정의서·schema_all.sql 어디에도 없는 신규 제안이며 반영 전 검토 필요"라고
--- 명시하고 있어, 이 파일도 그 구분을 그대로 유지했다. 필요해지면 7.2절 원문의
--- CREATE INDEX 문 13개를 별도로 반영할 것(EXPLAIN 검토 선행 권장).
+-- 성능 인덱스: 테이블정의서 v2.1 7.2절/8장의 CREATE INDEX 13건을 파일 끝에 포함한다.
+-- 처음 재구성할 때는 원본 문서가 이 13건을 "반영 전 검토 필요"로 표시해 빠뜨렸는데,
+-- 그 결과 로컬 DB에도 한 건도 없었다(2026-09-23 전수 대조). 문서가 기준이라는 결정에
+-- 따라 복구했다. 이미 운영 중인 DB에는 backend/src/main/resources/schema/
+-- indexes_v2_1.sql(IF NOT EXISTS, 재실행 안전)을 적용한다.
 --
 -- 실행: mysql -u root homesense < schema_all.sql
 -- ============================================================================
@@ -353,3 +354,21 @@ CREATE TABLE search_log (
     PRIMARY KEY (search_log_id),
     KEY idx_search_log_keyword_searched_at (keyword, searched_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='검색로그';
+
+-- ----------------------------------------------------------------------------
+-- 성능 인덱스 13건 (테이블정의서 v2.1 7.2절, 8장 원문)
+-- 기존 DB에 추가할 때는 backend/src/main/resources/schema/indexes_v2_1.sql 사용.
+-- ----------------------------------------------------------------------------
+CREATE INDEX idx_trade_complex_deal_date ON trade (complex_id, deal_date);
+CREATE INDEX idx_trade_legal_dong_deal_date ON trade (legal_dong_cd, deal_date);
+CREATE INDEX idx_trade_housing_deal_category ON trade (housing_type, deal_category);
+CREATE INDEX idx_trade_deal_date ON trade (deal_date);
+CREATE INDEX idx_complex_name ON complex (complex_name);
+CREATE INDEX idx_complex_region ON complex (sido, sigungu, dong_ri);
+CREATE INDEX idx_complex_location ON complex (latitude, longitude);
+CREATE INDEX idx_legal_district_region_name ON legal_district_code (sido_name, sigungu_name, eupmyeondong_name);
+CREATE INDEX idx_recent_view_user_viewed ON recent_view (user_id, viewed_at);
+CREATE INDEX idx_recent_view_session_viewed ON recent_view (session_id, viewed_at);
+CREATE INDEX idx_notification_user_read_sent ON notification (user_id, is_read, sent_at);
+CREATE INDEX idx_batch_log_started_at ON batch_log (started_at);
+CREATE INDEX idx_batch_log_success_started ON batch_log (success_yn, started_at);

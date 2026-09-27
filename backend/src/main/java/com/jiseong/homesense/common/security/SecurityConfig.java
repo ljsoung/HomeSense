@@ -1,6 +1,7 @@
 package com.jiseong.homesense.common.security;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -47,7 +48,13 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * 웹 애플리케이션일 때만 등록한다 — {@code HttpSecurity}는 서블릿 웹 컨텍스트에서만 만들어지므로,
+     * {@code spring.main.web-application-type=none}으로 띄우는 1회성 러너 프로필에서는 이 빈이 있으면
+     * 기동 자체가 실패한다.
+     */
     @Bean
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)

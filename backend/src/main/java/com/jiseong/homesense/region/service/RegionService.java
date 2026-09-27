@@ -7,6 +7,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.jiseong.homesense.common.cache.CacheNames;
 import com.jiseong.homesense.favorite.repository.FavoriteRegionRepository;
 import com.jiseong.homesense.region.dto.InterestRegionSummaryResponse;
 import com.jiseong.homesense.region.dto.RegionAutocompleteResponse;
@@ -35,7 +36,7 @@ public class RegionService {
     private final FavoriteRegionRepository favoriteRegionRepository;
     private final RegionStatsCalculator regionStatsCalculator;
 
-    @Cacheable(cacheNames = "regionAutocomplete", key = "#query")
+    @Cacheable(cacheNames = CacheNames.REGION_AUTOCOMPLETE, key = "#query")
     public List<RegionAutocompleteResponse> autocomplete(String query) {
         if (query == null || query.length() < MIN_QUERY_LENGTH) {
             return List.of();

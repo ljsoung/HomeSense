@@ -293,4 +293,16 @@ public interface TradeRepository extends JpaRepository<Trade, Long>, TradeReposi
             """)
     List<Object[]> countSaleTradesGroupedByLegalDongCd(@Param("legalDongCds") List<String> legalDongCds,
             @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * complex.legal_dong_cd 백필 교차검증용 — 단지별로 연결된 거래의 legal_dong_cd 분포. trade의
+     * 법정동코드는 Open API 응답(sggCd+umdNm) 기반이라 단지 주소 텍스트와 독립된 대조군이 된다.
+     * [complex_id, legal_dong_cd, 건수]
+     */
+    @Query(value = """
+            SELECT complex_id, legal_dong_cd, COUNT(*) FROM trade
+            WHERE complex_id IS NOT NULL AND legal_dong_cd IS NOT NULL
+            GROUP BY complex_id, legal_dong_cd
+            """, nativeQuery = true)
+    List<Object[]> countLegalDongCdByComplex();
 }

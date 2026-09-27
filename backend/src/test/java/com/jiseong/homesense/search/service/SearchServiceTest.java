@@ -1,9 +1,8 @@
 package com.jiseong.homesense.search.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -81,59 +80,21 @@ class SearchServiceTest {
         assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(3);
     }
 
+    /** 검증(trim·길이)은 Controller의 SearchKeywordPolicy가 끝낸 뒤라 받은 값을 그대로 저장한다. */
     @Test
-    void record_keyword가_null이면_저장하지_않는다() {
-        searchService.record(null);
-
-        verify(searchLogRepository, never()).save(any());
-    }
-
-    @Test
-    void record_keyword가_공백이면_저장하지_않는다() {
-        searchService.record("   ");
-
-        verify(searchLogRepository, never()).save(any());
-    }
-
-    @Test
-    void record_keyword를_trim해서_저장한다() {
-        searchService.record("  강남구  ");
+    void record_받은_keyword를_그대로_저장한다() {
+        searchService.record("강남구");
 
         ArgumentCaptor<SearchLog> captor = ArgumentCaptor.forClass(SearchLog.class);
         verify(searchLogRepository).save(captor.capture());
         assertThat(captor.getValue().getKeyword()).isEqualTo("강남구");
     }
 
-    /** 로깅 실패가 검색 자체를 실패시키면 안 된다(CLAUDE.md API-SEARCH-01 절 참고). */
+    /** 기록이 이 요청의 목적 자체라 실패를 삼키지 않는다(예전 @Async fire-and-forget과 다름). */
     @Test
-    void record_저장중_예외가_나도_전파하지_않는다() {
+    void record_저장중_예외는_호출자에게_전파한다() {
         when(searchLogRepository.save(any())).thenThrow(new RuntimeException("DB 일시 장애"));
 
-        assertThatCode(() -> searchService.record("강남구")).doesNotThrowAnyException();
-    }
-
-    /** search_log.keyword가 VARCHAR(100)이라 그대로 저장하면 flush 시점에 길이 제약 위반이 난다(Codex PR 리뷰 P2). */
-    @Test
-    void record_keyword가_100자를_넘으면_100자로_잘라서_저장한다() {
-        String tooLong = "가".repeat(150);
-
-        searchService.record(tooLong);
-
-        ArgumentCaptor<SearchLog> captor = ArgumentCaptor.forClass(SearchLog.class);
-        verify(searchLogRepository).save(captor.capture());
-        assertThat(captor.getValue().getKeyword()).hasSize(100);
-        assertThat(captor.getValue().getKeyword()).isEqualTo("가".repeat(100));
-    }
-
-    /** trim 이후 길이를 기준으로 잘라야 한다 — trim 전 길이로 판단하면 정상 길이 keyword도 잘못 잘릴 수 있다. */
-    @Test
-    void record_trim_이후_길이가_100자_이하면_자르지_않는다() {
-        String exactly100 = "가".repeat(100);
-
-        searchService.record("  " + exactly100 + "  ");
-
-        ArgumentCaptor<SearchLog> captor = ArgumentCaptor.forClass(SearchLog.class);
-        verify(searchLogRepository).save(captor.capture());
-        assertThat(captor.getValue().getKeyword()).isEqualTo(exactly100);
+        assertThatThrownBy(() -> searchService.record("강남구")).isInstanceOf(RuntimeException.class);
     }
 }
