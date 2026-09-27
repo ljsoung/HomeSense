@@ -53,6 +53,7 @@ export function RangeSlider({ label, min, max, step = 1, valueMin, valueMax, onC
         <input
           type="range"
           aria-label={`${label} 최소값`}
+          aria-valuetext={format(valueMin)}
           min={min}
           max={max}
           step={step}
@@ -63,6 +64,7 @@ export function RangeSlider({ label, min, max, step = 1, valueMin, valueMax, onC
         <input
           type="range"
           aria-label={`${label} 최대값`}
+          aria-valuetext={valueMax >= max ? `${format(valueMax)} 이상` : format(valueMax)}
           min={min}
           max={max}
           step={step}

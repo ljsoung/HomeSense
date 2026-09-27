@@ -49,44 +49,72 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, className 
   );
 
   if (variant === 'list') {
+    // 목록형 카드 레이아웃(썸네일 | 배지·이름·주소·메타 | 가격·평단가+하트)은 Figma 노드
+    // 4:1704/24:9405/24:10388(데스크톱·모바일·태블릿 검색결과) 실물 스크린샷으로 확인한 실제
+    // 구조다 — 처음 구현은 그리드 카드처럼 가격을 주소 아래 왼쪽 컬럼에 세로로 쌓았는데, 실제
+    // Figma는 가격·평단가를 오른쪽 컬럼에 배치하고 메타 줄에는 대신 건축년도를 넣는다(평단가는
+    // 메타 줄이 아니라 가격 바로 아래).
+    const favoriteButtonList = (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleFavorite();
+        }}
+        aria-label={isFavorited ? '관심 매물 해제' : '관심 매물 등록'}
+        aria-pressed={isFavorited}
+        className="p-0.5 text-[#99a1af] transition-colors hover:text-[#e7000b]"
+      >
+        <HeartIcon filled={isFavorited} className={isFavorited ? 'text-[#ff2056]' : ''} />
+      </button>
+    );
+
     return (
       <Link
         to={`/complexes/${complex.complexId}`}
-        className={`flex gap-3 rounded-[16px] border bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.1),0_1px_2px_-1px_rgba(0,0,0,0.1)] transition-colors hover:border-brand/40 ${
+        className={`flex flex-col gap-2 rounded-[16px] border bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.1),0_1px_2px_-1px_rgba(0,0,0,0.1)] transition-colors hover:border-brand/40 ${
           isSimilar ? 'border-[#fee685]' : 'border-[#f3f4f6]'
         } ${className}`}
       >
-        <div
-          className={`relative size-[104px] shrink-0 overflow-hidden rounded-[12px] bg-gradient-to-br from-[#e8f5f2] to-[#d1eae6] ${
-            isSimilar ? 'after:absolute after:inset-0 after:bg-[rgba(255,185,0,0.1)]' : ''
-          }`}
-        >
-          <div className="flex h-full w-full items-center justify-center">
-            <HomeIcon className="size-10 opacity-40 [&_path]:stroke-brand" />
+        <div className="flex gap-3">
+          <div
+            className={`relative size-[92px] shrink-0 overflow-hidden rounded-[12px] bg-gradient-to-br from-[#e8f5f2] to-[#d1eae6] ${
+              isSimilar ? 'after:absolute after:inset-0 after:bg-[rgba(255,185,0,0.1)]' : ''
+            }`}
+          >
+            <div className="flex h-full w-full items-center justify-center">
+              <HomeIcon className="size-9 opacity-40 [&_path]:stroke-brand" />
+            </div>
           </div>
-        </div>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
             <div className="min-w-0">
               <DataTrustBadge housingType={complex.representativeHousingType} matchMethod={complex.matchMethod} />
               <p className="mt-1 truncate text-[14px] font-bold text-[#101828]">{complex.complexName}</p>
               <p className="truncate text-[11.5px] text-[#99a1af]">{formatAddress(complex.sigungu, complex.dongRi)}</p>
+              <p className="mt-1 text-[11px] text-[#99a1af]">
+                전용 {formatArea(complex.representativeArea)}
+                {complex.floor !== null ? ` · ${complex.floor}층` : ''} · {formatDottedDate(complex.representativeDealDate)} · 건축{' '}
+                {complex.approvalDate.slice(0, 4)}년
+              </p>
             </div>
-            {favoriteButton}
+
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              {favoriteButtonList}
+              <p className="text-right text-[15px] font-extrabold tracking-[-0.3px] text-[#1c1c1e]">
+                {describeDealAmount(complex.representativeDealCategory, complex.rentType, complex.representativeAmount, complex.monthlyRentAmount)}
+              </p>
+              {/* 월세는 ㎡당 가격을 보여주지 않는다 — representativeAmount가 보증금뿐이라 월세금액을
+                  빼고 계산한 "㎡당 가격"은 실제 비용을 왜곡해서 보여준다. */}
+              {complex.rentType !== 'WOLSE' && (
+                <p className="text-[11px] text-[#99a1af]">{formatPricePerArea(complex.representativeAmount, complex.representativeArea)}</p>
+              )}
+            </div>
           </div>
-
-          <p className="mt-1.5 text-[16px] font-extrabold tracking-[-0.3px] text-[#1c1c1e]">
-            {describeDealAmount(complex.representativeDealCategory, complex.rentType, complex.representativeAmount, complex.monthlyRentAmount)}
-          </p>
-          <p className="mt-1 text-[11px] text-[#99a1af]">
-            전용 {formatArea(complex.representativeArea)}
-            {complex.floor !== null ? ` · ${complex.floor}층` : ''} · {formatDottedDate(complex.representativeDealDate)} ·{' '}
-            {formatPricePerArea(complex.representativeAmount, complex.representativeArea)}
-          </p>
-
-          {isSimilar && <p className="mt-2 rounded-[8px] bg-[#fef9c2] px-2.5 py-1.5 text-[11px] leading-[1.5] text-[#973c00]">{SIMILAR_CAPTION}</p>}
         </div>
+
+        {isSimilar && <p className="rounded-[8px] bg-[#fef9c2] px-2.5 py-1.5 text-[11px] leading-[1.5] text-[#973c00]">{SIMILAR_CAPTION}</p>}
       </Link>
     );
   }

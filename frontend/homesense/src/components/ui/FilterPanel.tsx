@@ -1,5 +1,6 @@
 import { Checkbox } from './Checkbox';
 import { RangeSlider } from './RangeSlider';
+import { RotateCcwIcon } from '../icons/RotateCcwIcon';
 import { AMOUNT_RANGE, AREA_RANGE, HOUSING_TYPE_OPTIONS, buildYearMax, BUILD_YEAR_MIN, type SearchFilters } from '../../features/search/searchParams';
 import type { HousingType } from '../../features/complex/types';
 
@@ -8,6 +9,13 @@ interface FilterPanelProps {
   onChangeDraft: (updater: (prev: SearchFilters) => SearchFilters) => void;
   onApply: () => void;
   onReset: () => void;
+  /**
+   * "필터" 제목 + 상단 초기화 링크를 그릴지 여부(기본 true). 데스크톱/태블릿 사이드바는 이 헤더가
+   * 필요하지만(Figma 4:1704/24:10388 — "필터" 제목 옆에 작은 "초기화" 링크가 있고, 패널 하단에도
+   * 별도로 "초기화"+"필터 적용" 버튼 쌍이 있다), 모바일 바텀시트는 `BottomSheet`가 이미 자기 헤더에
+   * "필터" 제목을 그려주므로 여기서 또 그리면 중복된다 — 그 경우 `false`로 끈다.
+   */
+  showHeader?: boolean;
 }
 
 const AMOUNT_LABEL: Record<SearchFilters['dealType'], string> = {
@@ -29,7 +37,7 @@ const formatEok = (manwon: number) => {
  * 컴포넌트에 넣지 않았다. `draft`는 부모(SRCH-01 페이지)가 갖는 임시 상태이고, "필터 적용"을 눌러야
  * 실제 URL(=검색 조건)에 반영된다 — 이 패널 자체는 URL을 직접 건드리지 않는다.
  */
-export function FilterPanel({ draft, onChangeDraft, onApply, onReset }: FilterPanelProps) {
+export function FilterPanel({ draft, onChangeDraft, onApply, onReset, showHeader = true }: FilterPanelProps) {
   const toggleHousingType = (type: HousingType, checked: boolean) => {
     onChangeDraft((prev) => {
       const next = checked ? [...new Set([...prev.housingTypes, type])] : prev.housingTypes.filter((t) => t !== type);
@@ -40,6 +48,15 @@ export function FilterPanel({ draft, onChangeDraft, onApply, onReset }: FilterPa
 
   return (
     <div className="flex flex-col gap-6">
+      {showHeader && (
+        <div className="flex items-center justify-between">
+          <h3 className="text-[16px] font-bold text-[#101828]">필터</h3>
+          <button type="button" onClick={onReset} className="flex items-center gap-1 text-[12px] text-[#99a1af] hover:text-[#6a7282]">
+            <RotateCcwIcon />
+            초기화
+          </button>
+        </div>
+      )}
       <fieldset>
         <legend className="mb-2.5 text-[13px] font-semibold text-[#364153]">매물유형</legend>
         <div className="flex flex-col gap-2.5">

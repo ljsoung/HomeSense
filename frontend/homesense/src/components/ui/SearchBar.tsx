@@ -192,6 +192,16 @@ export function SearchBar({
         className="flex items-center gap-2"
       >
         {inputBox}
+        {/* Figma 재검색 바(4:1704/24:9405/24:10388)는 입력창 옆에 "재검색" 버튼을 별도로 둔다 —
+            Enter 제출만 지원하던 이전 구현은 이 버튼이 없어 마우스만 쓰는 사용자에게 제출 수단이
+            안 보였다. */}
+        <button
+          type="submit"
+          className="flex h-full shrink-0 items-center gap-1.5 rounded-[14px] bg-brand px-4 py-2.5 text-[13.5px] font-semibold whitespace-nowrap text-white hover:bg-[#0d4f48]"
+        >
+          <SearchIcon className="size-4" />
+          재검색
+        </button>
       </form>
     );
   }

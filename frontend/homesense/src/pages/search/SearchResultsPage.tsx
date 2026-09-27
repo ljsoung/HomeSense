@@ -287,14 +287,34 @@ export function SearchResultsPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setSheetOpen(true)}
-            className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-[#e5e7eb] bg-white py-2.5 text-[13.5px] font-semibold text-[#364153] md:hidden"
-          >
-            <FilterIcon className="size-4" />
-            {activeFilterCount > 0 ? `필터 ${activeFilterCount}` : '필터'}
-          </button>
+          {/* 모바일 전용 — Figma(24:9405)는 "필터"/"지도" 두 알약 버튼을 한 행에 나란히 둔다(지도
+              링크가 이 행에 있어 아래 정렬 바에는 모바일에서 지도 링크를 다시 넣지 않는다). */}
+          <div className="mb-4 flex gap-2 md:hidden">
+            <button
+              type="button"
+              onClick={() => setSheetOpen(true)}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-[12px] border border-[#e5e7eb] bg-white py-2.5 text-[13.5px] font-semibold text-[#364153]"
+            >
+              <FilterIcon className="size-4" />
+              필터
+              {activeFilterCount > 0 && (
+                <span className="flex size-5 items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <a
+              href={`/map?${(() => {
+                const p = serializeSearchParams(filters);
+                p.delete('page');
+                return p.toString();
+              })()}`}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-[12px] border border-[#e5e7eb] bg-white py-2.5 text-[13.5px] font-semibold text-[#364153]"
+            >
+              <MapFoldIcon className="size-4" />
+              지도
+            </a>
+          </div>
 
           {noCondition ? (
             <div className="flex min-h-[320px] items-center justify-center rounded-[16px] border border-[#e5e7eb] bg-white">
@@ -368,7 +388,7 @@ export function SearchResultsPage() {
                       p.delete('page');
                       return p.toString();
                     })()}`}
-                    className="flex items-center gap-1 rounded-full border border-[#e5e7eb] px-3 py-1.5 text-[12.5px] font-medium text-[#364153] hover:bg-[#f7f8fa]"
+                    className="hidden items-center gap-1 rounded-full border border-[#e5e7eb] px-3 py-1.5 text-[12.5px] font-medium text-[#364153] hover:bg-[#f7f8fa] md:flex"
                   >
                     <MapFoldIcon className="size-3.5" />
                     지도로 보기
@@ -413,7 +433,7 @@ export function SearchResultsPage() {
       </div>
 
       <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="필터">
-        <FilterPanel draft={draft} onChangeDraft={setDraft} onApply={handleApplyFilter} onReset={handleResetFilter} />
+        <FilterPanel draft={draft} onChangeDraft={setDraft} onApply={handleApplyFilter} onReset={handleResetFilter} showHeader={false} />
       </BottomSheet>
     </MainLayout>
   );

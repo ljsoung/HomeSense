@@ -1,13 +1,18 @@
 import type { SVGProps } from 'react';
 
-/** 모바일 "필터 N" 바텀시트 진입 버튼용 슬라이더(필터) 픽토그램 — Figma 확인 없이 기존 획 두께 관례로 직접 작성. */
+/** 모바일 "필터 N" 버튼 아이콘 — Figma 노드 24:9456(모바일 검색결과 필터 버튼)의 실제 SVG를 그대로 옮겼다. */
 export function FilterIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
-      <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.33333" strokeLinecap="round" />
-      <circle cx="6" cy="4" r="1.5" fill="white" stroke="currentColor" strokeWidth="1.33333" />
-      <circle cx="11" cy="8" r="1.5" fill="white" stroke="currentColor" strokeWidth="1.33333" />
-      <circle cx="5" cy="12" r="1.5" fill="white" stroke="currentColor" strokeWidth="1.33333" />
+      <path d="M14 2.66H9.33" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.66 2.66H2" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 8H8" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.33 8H2" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 13.32H10.66" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 13.32H2" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9.33 1.33V4" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.33 6.66V9.33" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10.66 11.99V14.65" stroke="currentColor" strokeWidth="1.33" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
