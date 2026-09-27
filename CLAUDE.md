@@ -2333,7 +2333,42 @@ Playwright 네트워크 캡처로 직접 확인했다 — 상한만 바꿔 "필�
 시 유실 위험이 있던 임시 보관 위치)에 있던 27개 Playwright 스크립트 전부를 `frontend/e2e/`로 옮겨
 커밋했다 — AUTH-02/AUTH-03/SCR-LEGAL-01/SCR-SRCH-01 전체(위 각 절이 "저장소 밖에 보관"이라고 적어둔
 문장들은 이제 stale하다, 실제 위치는 `frontend/e2e/`). CI 편입은 하지 않았다(요청 범위 밖) — 실행
-전제·명령어는 `frontend/e2e/README.md` 참고. `run-all.mjs`에 SRCH-01 6개 스크립트를 추가했다.
+전제·명령어는 `frontend/e2e/README.md` 참고. `run-all.mjs`에 SRCH-01 6개 스크립트를 추가했다. 저장소
+편입 후 처음으로 실 백엔드로 전체 스위트를 돌리며 이 작업과 무관한 잔여 문제 하나를 발견·수정했다 —
+`auth03-password-reset-check.mjs`가 여전히 옛 버튼 문구("재설정 다시 요청")를 찾고 있었다(AUTH-03
+Figma 대조 재작업 때 "재설정 링크 다시 요청"으로 바뀌었지만, 당시 Docker가 꺼져 있어 실 백엔드로
+재실행해 확인한 적이 없었다 — CLAUDE.md SCR-AUTH-03 절에 이미 "다음에 백엔드가 떠 있는 세션에서 한 번
+돌려 확인하라"로 남겨져 있던 항목). 스크립트의 locator 문자열만 고쳐 23/23으로 통과시켰다 — SRCH-01/
+HOME-01 코드와는 무관하다.
+
+**후속 확인(PR 리뷰 요청, 2026-09-27 3차) — `ComplexCard`(UIC-05)는 HOME-01과 공유하는 컴포넌트라,
+`list` variant 재작업이 `grid` variant(HOME-01 인기 단지)에 새어들지 않았는지 별도로 확인했다.**
+코드 확인 — `grid` 분기(122~147행)는 이번 세션 전체에서 단 한 줄도 건드리지 않았다(이 세션에서 실제로
+수정한 것은 51~120행의 `list` 분기와 그 안에서만 쓰는 `favoriteButtonList`뿐이고, `grid` 분기가 쓰는
+`favoriteButton`은 1차 라운드에서 이미 확정된 형태 그대로다). Figma 대조 — HOME-01 프레임(3:2 로그인/
+4:1232 비로그인 데스크톱, 24:7860 태블릿, 24:7370 모바일)을 스크린샷으로 다시 받아, 같은 `bStwE4wZ5kXm7K6fBMeg6Z`
+파일 안에 HOME-01과 SRCH-01이 나란히 있다는 것도 함께 확인했다(별도 파일이 아니다). 라이브 렌더링
+대조 — 실제 로컬 백엔드로 뜬 HOME-01을 1280/768/392 세 뷰포트에서 스크린샷으로 캡처해(`home01-card-
+screenshots.mjs`) Figma와 나란히 비교한 결과 완전히 일치했다(원형 하트가 썸네일 위 오버레이, 배지
+좌하단, 가격이 주소 바로 아래 같은 컬럼, 건축년도·㎡당가격 없음, 모바일은 가로 스크롤 캐러셀) —
+의도치 않은 변화 없음. 이 확인을 매번 스크린샷 육안 대조로 반복하지 않도록 `home01-card-check.mjs`
+(신규, 18/18 — 3개 뷰포트 × "건축"/"만원당㎡" 문구 없음·하트 절대위치·pageerror 없음·비로그인 하트
+클릭 시 `/login` 이동)로 자동화해 `run-all.mjs`에 추가했다. **테스트 작성 중 발견한 사실(버그
+아님)** — `RecommendedComplexes.tsx`가 모바일 가로 스크롤용과 데스크톱/태블릿 그리드용 두 세트의
+카드를 항상 함께 렌더링하고 CSS(`hidden md:grid` 류)로 뷰포트에 맞는 쪽만 보이게 하는 기존 구조라(둘
+다 렌더되므로 `button[aria-pressed]` 개수가 항상 카드 수의 2배로 나온다), 테스트는 `:visible` 필터로
+현재 뷰포트에서 실제로 보이는 카드만 골라야 한다 — 이 프로젝트의 다른 반응형 분기(위 `srch01-tablet-
+check.mjs`가 "필터 적용" 버튼과 모바일 전용 "필터" pill을 혼동했던 것과 같은 종류의 테스트 함정).
+
+**최종 e2e 실행 결과(2026-09-27, 이번 카드 재작업 이후의 코드로 실 백엔드+dev 서버 재기동 후 전체
+재실행)**: `frontend/e2e/`의 25개 테스트 스크립트(스크린샷 전용 2개 제외) **전부 통과** —
+`run-all.mjs`의 22개 스크립트가 전부 exit 0(`node run-all.mjs`로 확인), `run-all.mjs` 목록에 없는
+독립 스크립트 3개(`auth03-figma-parity-check` 19/19, `auth03-transient-token-error-check` 9/9,
+`auth03-form-cooldown-check` 9/9)도 개별 실행해 확인했다. SRCH-01 전용 스위트만 좁혀 보면 여전히
+61/61(basic 13/mobile 10/favorite-and-desktop-back 7/slider-boundary-and-wolse 9/keyboard-and-error
+16/tablet 6)이고, 이번에 추가한 `home01-card-check`(18/18)는 이 61건과 별도로 카운트한다 — 즉 SRCH-01
+자체의 61/61은 카드 재작업 전후로 변함이 없고(재작업이 `list` 분기 안에서만 일어났으므로), 이번에
+새로 확인·자동화한 것은 "그 재작업이 `grid` 분기(HOME-01)에 영향을 주지 않았다"는 사실이다.
 
 **MAP-01 재사용을 위한 설계 — `FilterPanel`은 SRCH-01 전용 요소(결과 카운트, URL 동기화)를 갖지 않고
 `draft`+콜백 4개(`onChangeDraft`/`onApply`/`onReset`)만 받는다.** MAP-01이 이 컴포넌트를 그대로
