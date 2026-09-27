@@ -1,5 +1,6 @@
 export type HousingType = 'APT' | 'VILLA';
 export type DealCategory = 'SALE' | 'RENT';
+export type RentType = 'JEONSE' | 'WOLSE';
 export type MatchMethod = 'EXACT' | 'SIMILAR';
 
 /**
@@ -12,6 +13,11 @@ export type MatchMethod = 'EXACT' | 'SIMILAR';
  * 없어 CLAUDE.md SCR-HOME-01 절이 "프론트에서 생략"으로 확정했던 갭이다). match_method는 매칭
  * 실패 시, floor는 원본 xlsx 미기재 시 각각 NULL로 내려온다 — 두 경우 모두 UI는 해당 배지/세그먼트를
  * 렌더링하지 않는다(DataTrustBadge/ComplexCard 참고).
+ *
+ * rentType/monthlyRentAmount는 SRCH-01 백엔드 선행작업(2026-09-23, "단지 검색 지역코드·키워드·
+ * 거래유형")으로 추가됐다 — dealCategory=SALE이면 `non_null` 직렬화 설정 때문에 이 두 키 자체가
+ * 응답 JSON에 없다(라이브 curl로 확인). 그래서 optional(`?`)이 아니라 `| undefined`가 아닌
+ * `?:`(선택 프로퍼티)로 선언해 "키 부재"와 "null"을 굳이 구분하지 않고 둘 다 falsy로 취급한다.
  */
 export interface ComplexSummaryResponse {
   complexId: number;
@@ -29,4 +35,6 @@ export interface ComplexSummaryResponse {
   representativeArea: number;
   matchMethod: MatchMethod | null;
   floor: number | null;
+  rentType?: RentType;
+  monthlyRentAmount?: number;
 }

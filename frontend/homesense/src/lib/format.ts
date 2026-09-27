@@ -1,3 +1,5 @@
+import type { DealCategory, RentType } from '../features/complex/types';
+
 /**
  * 국토부 실거래가 API의 거래금액은 "만원" 단위 정수로 내려온다(TradeFieldMapper.requiredAmount()가
  * 콤마만 제거하고 그대로 파싱 — CLAUDE.md에는 명시돼 있지 않아 배치 파서 소스로 직접 확인했다).
@@ -23,6 +25,41 @@ export function formatChangeRate(changeRate: number): string {
 
 export function formatArea(area: number): string {
   return `${Math.round(area)}㎡`;
+}
+
+/** SRCH-01 리스트 카드의 "평당가" 대신 표기 — ㎡당 단가(만원/㎡)를 반올림해 보여준다. */
+export function formatPricePerArea(amountInManwon: number, area: number): string {
+  if (!area) {
+    return '';
+  }
+  return `${Math.round(amountInManwon / area).toLocaleString('ko-KR')}만원/㎡`;
+}
+
+/** "2026-09-11" → "2026.09.11". API가 아직 ISO(하이픈) 형식을 그대로 주는 필드(대표 거래일 등)용. */
+export function formatDottedDate(isoDate: string): string {
+  return isoDate.replaceAll('-', '.');
+}
+
+/**
+ * SRCH-01 리스트 카드 전용 — 매매/전세/월세에 따라 대표 거래 금액 표기를 분기한다(확정 사항 #6).
+ * dealCategory=SALE이면 매매금액 그대로, RENT+JEONSE면 "전세" 접두, RENT+WOLSE면 보증금과
+ * 월세금액을 함께("보증금 {} · 월세 {}만원") 보여준다 — FR-3.3이 요구하는 "보증금과 월세금액을
+ * 함께 제공"을 만족한다. HOME-01의 그리드 ComplexCard는 이 분기 없이 금액만 노출하던 기존 동작을
+ * 그대로 유지한다(회귀 방지 — 이 헬퍼는 새 list variant에서만 쓴다).
+ */
+export function describeDealAmount(
+  dealCategory: DealCategory,
+  rentType: RentType | undefined,
+  amount: number,
+  monthlyRentAmount: number | undefined,
+): string {
+  if (dealCategory === 'SALE') {
+    return formatKoreanPrice(amount);
+  }
+  if (rentType === 'WOLSE') {
+    return `보증금 ${formatKoreanPrice(amount)} · 월세 ${(monthlyRentAmount ?? 0).toLocaleString('ko-KR')}만원`;
+  }
+  return `전세 ${formatKoreanPrice(amount)}`;
 }
 
 /**
