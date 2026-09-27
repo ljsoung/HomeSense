@@ -2189,6 +2189,107 @@ Playwright로 검증은 했지만 그 스크립트들은 전부 `C:\Users\super\
 
 **완결 필요(신규, 출시 전 개인정보 로깅 점검 대상) — 5xx 경로의 예외 메시지에 저장 값이 섞일 수 있다.** `GlobalExceptionHandler.handleUnexpected()`와 5xx `handleExceptionInternal()`은 `AuditLogger.logBatchFailure()`를 호출하는데, 이 메서드는 예외를 `setCause(e)`로 그대로 실어 스택트레이스와 예외 메시지를 로그에 남긴다. DB 오류 원문(예: 중복 키·컬럼 길이 초과 메시지)이 예외 메시지에 실리면 이메일·닉네임 같은 저장 값이 로그에 섞일 수 있다(`ageConfirmed`는 저장하지 않아 해당하지 않는다). 지금은 예외 메시지를 가리지 않고, 4xx는 이 경로를 타지 않는다. 출시 전에 개인정보 로깅 점검(예외 메시지 마스킹 여부, 로그 보관·접근 범위)을 하라. 참고로 이 메서드는 이름·필드가 배치 실패(`BATCH_FAILURE`, `auditSeverity=CRITICAL`)로 고정돼 있어 API 5xx를 같은 이벤트로 남기는 것 자체가 부적절할 수 있다 — 점검할 때 함께 보라.
 
+### SCR-SRCH-01 / UIC-04·06 구현 결정 사항 (2026-09-27)
+
+`feature/frontend/search-result` — 검색결과 목록 화면. HOME-01이 만든 `MainLayout`/`ComplexCard`/
+`EmptyState`/`Spinner`/`SearchBar`/`useFavoriteToggle`을 그대로 재사용하고, 새로 UIC-04(`FilterPanel`+
+`RangeSlider`)·UIC-06(`Pagination`)·`BottomSheet`(모바일 필터 전용)를 추가했다. `SearchBar`(UIC-03)에는
+지역 자동완성(ARIA combobox)을 얹었다.
+
+**0단계 계약 대조(실 로컬 백엔드로 직접 호출해 확인, 문서/프롬프트 추정에 기대지 않았다):**
+
+| 항목 | 확인 결과 |
+| --- | --- |
+| `GET /api/complexes/search` | `regionCode`/`keyword`(상호 배타, 최소 하나 필수 — 없으면 400 `MISSING_SEARCH_CONDITION`) + `housingTypes`(반복 파라미터) + `dealCategory`/`rentType` + `areaMin/Max`·`amountMin/Max`(만원)·`buildYearMin/Max` + `sort`(LATEST/AMOUNT/AREA) + `page`(0-base)/`size`. 응답에 `pageMeta`(0-base page) 형제 필드 — CLAUDE.md 응답 포맷 절 그대로 |
+| `sort` 파라미터와 Spring `Pageable`의 기본 `sort` 파라미터 이름 충돌 | 실제로 문제 없음(실측 확인) — `ComplexRepositoryCustomImpl`이 `pageable.getSort()`를 쓰지 않고 `ComplexSearchCondition.sort()`(LATEST/AMOUNT/AREA enum)로만 정렬해, Spring이 "AMOUNT"를 Pageable Sort 프로퍼티명으로 잘못 파싱해도 아무 영향이 없다 |
+| SALE 응답에 `rentType`/`monthlyRentAmount` | 키 자체가 응답 JSON에서 빠진다(`non_null` 직렬화) — `ComplexSummaryResponse` 프론트 타입에 `?:`(선택 프로퍼티, `| undefined`가 아니라 키 자체 부재)로 반영 |
+| `GET /api/regions?query=` | `{legalDongCd, fullPath}[]` — 자동완성이 반환하는 값 그대로 `regionCode`/`regionLabel`로 쓰면 됨(실제 폐지된 시군구 대표행은 이미 서버가 걸러줌, CLAUDE.md "선택 불가능한 legalDongCd" 절 참고) |
+| `POST /api/search/logs` | `{keyword}` 바디, 인증 불필요, 성공 시 `ApiResponse<null>` |
+| 건축년도 슬라이더 하한 | 로컬 DB `MIN(YEAR(approval_date))=1968`(2개 단지), 1970년 준공 1개 — 둘 다 꼬리값이라 더 둥근 **1970**을 하한으로 확정(`BUILD_YEAR_MIN`, `searchParams.ts`) |
+| HOME-01 기존 구현 | `HeroSection`이 이미 `/search?housingType=..&dealType=SALE\|JEONSE\|WOLSE&keyword=..`로 navigate하고 있었다 — 실제 백엔드 계약(`housingTypes` 복수/반복, `dealCategory`+`rentType`)과 맞지 않는 옛 파라미터 모양이라 이번에 `useExecuteSearch` 공유 훅으로 교체했다(아래 표) |
+
+**확정 사항(프롬프트가 요구한 9개 항목 — 근거/구현 위치):**
+
+| # | 확정 내용 | 구현 위치 |
+| --- | --- | --- |
+| 1 | HOME-01 히어로·인기검색어 칩·SRCH-01 재검색이 `useExecuteSearch()` 하나를 공유한다. `base`(현재 SearchFilters)를 넘기면 그 필터를 유지한 채 regionCode/keyword만 교체(재검색), 안 넘기면 기본 필터로 새로 시작(히어로) | `features/search/useExecuteSearch.ts` |
+| 2 | 로그는 `mode:'region'`(fullPath)·`mode:'keyword'`(자유 텍스트)에서만 발생, `mode:'chip'`(인기검색어)은 로그 없음. SRCH-01 안의 필터/정렬/페이지/새로고침/뒤로가기는 애초에 `logSearch()`를 호출하는 경로 자체가 없다(재검색 바 제출/자동완성 선택만 호출) | `useExecuteSearch.ts`, `features/search/api.ts`(`logSearch`는 실패를 삼키는 fire-and-forget) |
+| 3 | regionCode/keyword는 `serializeSearchParams()`/`useExecuteSearch`가 항상 상호 배타적으로만 싣는다(하나 채우면 다른 하나는 `undefined`) | `searchParams.ts` |
+| 4 | 조건 없이 진입 시 API 호출 없이 안내 문구(`hasSearchCondition` 가드), 2자 미만 키워드는 클라이언트에서 막고(`isKeywordTooShort`) 서버 호출 자체를 안 함, `maxLength=50` | `SearchResultsPage.tsx`, `SearchBar.tsx` |
+| 5 | `regionLabel`은 표시 전용(API에 안 실림) — URL에 없으면 "선택한 지역"으로 폴백 | `SearchResultsPage.tsx`의 `conditionLabel` |
+| 6 | 매매=`dealCategory=SALE`, 전세=`rentType=JEONSE`, 월세=`rentType=WOLSE`. 금액 슬라이더 라벨은 매매="거래금액", 전세·월세="보증금". 기본값(매매/APT+VILLA/LATEST/1페이지/슬라이더 전체범위)은 URL에서 생략 | `searchParams.ts`(`dealTypeToApiParams`, `AMOUNT_LABEL`) |
+| 7 | 면적 10~200㎡, 금액 0~20억(만원 단위 0~200000), 건축년도 1970~올해(동적) — 손잡이가 상한에 있으면 그 파라미터를 아예 생략(서버 입장에선 "이상") | `searchParams.ts`(`AREA_RANGE`/`AMOUNT_RANGE`/`BUILD_YEAR_MIN`, `buildApiQuery`) |
+| 8 | 매물유형 체크박스는 마지막 하나를 해제할 수 없다(최소 1개 유지) | `FilterPanel.tsx`(`toggleHousingType`) |
+| 9 | `/map` 플레이스홀더 라우트 | 이미 존재 확인, 변경 불필요(`AppRouter.tsx`) |
+
+**SIMILAR 카드 캡션 정정** — Figma 원문("검색 조건과 정확히 일치하지 않는 유사 매물입니다")은 SIMILAR가
+실제로 뜻하는 바(BAT-MAT-02의 단지 마스터 매칭 신뢰도 문제, "검색 조건 불일치"가 아니다)를 잘못 설명해
+정정한 문구("지번 등 일부 정보가 정확히 일치하지 않아 유사도 기준으로 추정 매칭된 결과입니다")로 바꿨다
+— `ComplexCard.tsx`의 `SIMILAR_CAPTION` 상수, 코드 주석에 정정 근거를 남겼다.
+
+**태블릿 레이아웃 — 드로어 아님, 데스크톱과 같은 사이드바+리스트 구조.** 이전 세션(HOME-01)이 이미
+Figma 태블릿 결과 화면 스크린샷을 확인해 둔 결과와 일치 — `md:` 단일 브레이크포인트로 데스크톱/태블릿을
+공유하고 `<768px`만 모바일(바텀시트+무한스크롤) 레이아웃으로 분기했다. 768px 실측 스크린샷으로 재확인함.
+
+**버그 발견·수정 1 — StrictMode 개발 모드 이중 마운트가 뒤로가기 복원 캐시를 텅 빈 상태로 오염시켜
+실제 검색 API 호출 자체가 스킵되는 결함(Playwright로 실측 발견, 코드 리딩만으로는 못 잡았을 종류).**
+뒤로가기 복원용 모듈 스코프 캐시(`scrollCache`, `location.key`로 색인)를 "스크롤 이벤트 + effect
+cleanup" 양쪽에서 쓰도록 설계했는데, React 19 StrictMode의 개발 모드 mount→cleanup→remount가 데이터
+조회 effect보다 스크롤-저장 effect의 클린업을 먼저(또는 같은 틱에) 실행시키면서 `dataRef.current`가
+아직 초기값(`accumulated=[]`, `pageMeta=null`)인 상태를 그 URL의 캐시 엔트리로 그대로 저장해버렸다 —
+뒤이어 실행되는 진짜 데이터 조회 effect가 이 "캐시 히트"를 신뢰해 실제 API 호출 자체를 건너뛰고 빈
+목록을 "조건에 맞는 단지가 없습니다"로 잘못 렌더링했다(정상 regionCode로 진입해도 항상 이 상태가
+됐다 — `npm run dev`로 뜬 개발 서버에서 100% 재현). **수정**: `hasFetchedRef`(실제 응답을 한 번이라도
+받았는지) 가드를 추가해, 이 가드가 `true`가 되기 전에는 캐시에 쓰지 않는다.
+
+**버그 발견·수정 2 — (수정 1 이후) 카드 클릭→DTL-01 이동 시 캐시에 저장되는 스크롤 위치 자체가
+틀린 값(0)이었다.** 원래 effect cleanup(언마운트) 시점에 `window.scrollY`를 다시 읽어 캐시에 저장하는
+로직이 있었는데, 이 값이 항상 `0`으로 기록돼 실제 위치(예: 2993px)가 아니라 페이지 맨 위로 복원되는
+버그가 있었다. 원인: 카드 클릭으로 짧은 DTL-01 자리표시 페이지가 마운트되는 순간 브라우저가 "문서
+높이가 현재 스크롤 위치보다 짧아졌다"는 이유로 스크롤을 즉시 0으로 clamp하는데, React가 SRCH-01
+컴포넌트의 cleanup(그 안의 재저장 호출)을 실행하는 시점엔 이미 그 clamp가 끝난 뒤라 옳은 값을 읽을
+방법이 없었다. **수정**: 언마운트 시점의 재저장을 아예 제거하고, 'scroll' 이벤트가 실제로 발생하는
+동안의 저장만으로 충분하다는 결론(페이지를 떠나기 직전의 마지막 'scroll' 이벤트가 이미 올바른 값을
+남겨 둔다)으로 단순화했다. Playwright로 모바일 30+ 아이템 누적 후 카드 클릭→뒤로가기 시나리오를 직접
+재현해 두 수정 모두 확인했다(`srch01-mobile-check.mjs`).
+
+**버그 발견·수정 3 — 재검색 바가 URL의 기존 `regionLabel`/`keyword`로 미리 채워진 채 마운트되면,
+사용자가 손대지 않았는데도 자동완성 드롭다운이 자동으로 열려 바로 아래 "필터" 버튼 등의 클릭을
+가로챘다(Playwright `locator.click()`의 pointer-events 가로채기 에러로 실측 발견).** `SearchBar`의
+자동완성 디바운스 effect가 `value`가 바뀔 때만이 아니라 **마운트 시에도** 한 번 실행돼, 초기값이 2자
+이상이면 사용자가 포커스하지 않았어도 자동완성을 조회·오픈했다. **수정**: `focused` state를 추가해
+입력이 실제로 포커스된 동안에만 자동완성 조회·오픈이 일어나도록 게이트를 걸었다(`SearchBar.tsx`).
+
+**검증(Playwright, 실 로컬 백엔드+dev 서버, 3개 스크립트 총 30/30 통과)** — 저장소 밖
+`C:\Users\super\homesense-e2e-scripts\`에 보관(이 프로젝트의 기존 관례):
+- `srch01-basic-check.mjs`(13) — regionCode/keyword 검색 렌더링, 조건 없음/1자 키워드 시 API
+  미호출, 매매↔전세 전환 무오류, 정렬 변경 시 로그 미호출, 자유 텍스트 재검색 시 로그 정확히 1회
+  (payload 키워드 일치 포함), 데스크톱 페이지 이동 시 목록 교체(누적 아님).
+- `srch01-mobile-check.mjs`(10) — 필터 버튼→바텀시트 열림/Esc·백드롭 닫힘/스크롤 잠금, 무한스크롤
+  30+ 누적, 카드 클릭→뒤로가기 시 누적 목록·스크롤 위치 복원.
+- `srch01-favorite-and-desktop-back-check.mjs`(7) — 비로그인 하트 클릭→`/login` 이동, 데스크톱
+  2페이지 이동 후 카드 클릭→뒤로가기 시 같은 페이지(page=2)·같은 목록 유지, HOME-01 히어로 검색
+  회귀(무오류, `/search`로 정상 이동).
+
+**완결 필요(이번 세션 범위 밖으로 남긴 것 — 원 프롬프트가 요구한 전체 검증 매트릭스 중 미실행분):**
+자동완성 키보드 네비게이션(ArrowUp/Down/Enter/Esc) 자체의 전용 테스트, 슬라이더 키보드 조작(화살표
+값 변경) 전용 테스트, 에러 배너 "다시 시도" 버튼(서버 5xx 모킹) 테스트, 바텀시트 포커스 트랩의 Tab
+순환 자체를 키보드로 검증하는 테스트, 태블릿(768px) 뷰포트에서의 전체 상호작용 테스트(레이아웃
+스크린샷만 확인함). 로직상 구현은 이 절의 각 항목에 이미 반영돼 있으나(ARIA 속성, 포커스 트랩 코드,
+에러 배너 렌더링), 전용 자동화 테스트로 재확인되지는 않았다 — 다음에 이 화면을 다시 열 때
+`srch01-*.mjs` 스위트에 추가하라.
+
+**아이콘 — Figma 미검증.** `FilterIcon`(모바일 필터 버튼)은 이 세션에서 Figma 원본을 조회하지 않고
+기존 획 두께 관례(1.33333)로 직접 작성한 추정 아이콘이다(AUTH-02의 `EyeOffIcon` 선례와 같은 성격의
+불가피한 추정 — 다만 그쪽은 "원본이 없어서", 이쪽은 "시간 제약상 조회하지 않아서"라는 차이가 있다).
+`XIcon`/`ChevronLeftIcon`은 기존 `ChevronRightIcon`과 대칭·동일 스타일이라 상대적으로 안전하다. **완결
+필요** — 다음에 이 화면의 Figma를 다시 열 일이 생기면 `FilterIcon`부터 원본과 대조하라.
+
+**MAP-01 재사용을 위한 설계 — `FilterPanel`은 SRCH-01 전용 요소(결과 카운트, URL 동기화)를 갖지 않고
+`draft`+콜백 4개(`onChangeDraft`/`onApply`/`onReset`)만 받는다.** MAP-01이 이 컴포넌트를 그대로
+가져다 쓰되, 지도 뷰포트 기반 필터(팬/줌 시 자동 갱신 등 MAP-01 고유 요구)는 별도로 얹어야 한다 —
+`RangeSlider`도 마찬가지로 범용이다.
+
 ### 배포(Vercel) — SPA 클라이언트 라우팅 rewrite
 
 **증상(2026-09-16 세션)**: 실 배포(hmss.site)에서 `/privacy`를 새 탭으로 열거나 새로고침하면 404,
