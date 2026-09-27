@@ -1042,20 +1042,26 @@ SRCH-01 프론트 착수 전 백엔드 선행 작업이다(브랜치 `feature/ba
 
 그래서 **SRCH-01 프론트 PR은 운영 백필·앱 교체가 끝난 뒤에만 `develop`에 머지한다**(선행 조건).
 
-**발견만 하고 고치지 않은 기존 버그(우선순위 높음) — 리스트를 반환하는 `@Cacheable` 3종이 캐시 히트 시
-500이다.** `GET /api/search/popular`, `/api/complexes/popular`, `/api/regions?query=`가 첫 호출은 200인데 두
-번째 호출(캐시 히트)부터 `SerializationException`으로 500을 낸다(로컬에서 재현). 원인: `CacheConfig`의
-`GenericJacksonJsonRedisSerializer`가 `enableUnsafeDefaultTyping()`(non-final 타입에만 타입 정보 기록)인데,
-세 메서드가 반환하는 `Stream.toList()` 결과는 `final` 클래스(`ImmutableCollections.ListN`)라 최상위 배열에
-타입 정보 없이 저장되고, 읽을 때는 타입 정보를 기대해 실패한다. 단건 DTO를 캐싱하는 `complexDetailV2`는
-해당하지 않는다. COM-CACHE-01 전반에 걸친 수정이라 이번 범위에서 고치지 않았다. **SRCH-01 자동완성이
-바로 이 버그에 걸리므로 SRCH-01 전에 별도로 고쳐야 한다.
+**[처리완료 2026-09-27, `fix/backend/cache-list-serialization`] 리스트를 반환하는 `@Cacheable` 3종이 캐시 히트 시
+500이던 버그.** `GET /api/search/popular`, `/api/complexes/popular`, `/api/regions?query=`가 첫 호출은 200인데 두
+번째 호출(캐시 히트)부터 `SerializationException`으로 500을 냈다. 원인: 모든 캐시가 공유하던
+`GenericJacksonJsonRedisSerializer.enableUnsafeDefaultTyping()`은 final 타입에 타입 정보를 붙이지 않는다 — record
+DTO에는 `@class`가 붙지만(단건 DTO인 `complexDetailV2`는 정상), `Stream.toList()`가 돌려주는 final
+`ImmutableCollections.ListN`은 최상위 배열이 타입 정보 없이 저장되고, 읽을 때는 타입 정보를 기대해 실패했다
+(스크래치 테스트로 직렬화 결과를 직접 확인).
 
-**백로그(이 hotfix에서 함께 다룬다) — `CacheErrorHandler`가 없어 Redis 장애 시 `@Cacheable` 경로가 500이다.**
-캐시 조회·저장 예외가 그대로 전파돼, Redis가 죽거나 느리면 DB로 조회하는 대신 500을 낸다(2026-09-27 로컬
-`docker pause` 실측: `/api/complexes/popular`가 2.04s 후 500 — `spring.data.redis.timeout=2s` 적용 후, 이전엔
-60초 뒤 500). 위 캐시 직렬화 500 hotfix에서 `CacheErrorHandler`(조회 실패는 캐시 미스로, 저장·evict 실패는 로그만)를
-함께 도입할 예정이다. 검색의 `RegionCodePrefixResolver` 버전 키 조회는 이미 자체 폴백이 있어 해당하지 않는다.
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| 수정 방식 | 캐시마다 값 타입을 명시한 `JacksonJsonRedisSerializer`(`CacheConfig.cacheConfigurations()`). `enableUnsafeDefaultTyping`은 제거했다 | 반환값을 `new ArrayList<>(…)`로 감싸도 고쳐지지만, 리스트 캐시가 생길 때마다 그 규칙을 기억해야 한다. 타입을 설정에서 명시하면 역직렬화가 저장된 `@class`가 아니라 설정의 타입을 따르므로 임의 타입 역직렬화 경로도 함께 없어진다 | — |
+| 새 캐시 등록 | **새 `@Cacheable` 캐시는 `CacheNames`에 상수를 두고 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다.** 미등록 이름은 자동 생성하지 않는다(`disableCreateOnMissingCache`) — 등록을 잊으면 첫 호출에서 `IllegalArgumentException`("Cannot find cache")이 난다. **캐시 이름은 반드시 `CacheNames` 상수로 쓴다(`@Cacheable("literal")` 금지) — 테스트가 강제한다(2026-09-27 보완):** `CacheConfigTest`는 등록된 이름이 정확히 `CacheNames` 상수 집합과 같은지, `CacheNameRegistrationTest`(`@SpringBootTest`, `./gradlew test`)는 애플리케이션 빈에 선언된 모든 캐시 이름(`@Cacheable`·`@CachePut`·`@CacheEvict`·`@Caching`, 클래스 레벨 `@CacheConfig` 기본값 포함 — Spring의 `CacheOperationSource`에서 읽는다)이 등록돼 있는지 본다. 실패 메시지에 미등록 이름과 선언 메서드가 나온다. 변형 검증: 네 형태의 미등록 이름을 가진 임시 빈을 넣으면 네 개 모두 잡혔다. **한계:** 기존 상수와 문자열이 같은 리터럴(`@Cacheable("regionAutocomplete")`)은 런타임에 구분할 수 없어 통과한다 — 동작은 같지만 버전업 때 한쪽만 바뀌는 드리프트가 생길 수 있으니 리뷰에서 본다 | 미등록 캐시가 기본 설정으로 조용히 만들어지면 값 직렬화기가 없는 상태가 된다 | — |
+| `CacheErrorHandler` | `CacheConfig implements CachingConfigurer`, `errorHandler()`가 Spring의 `LoggingCacheErrorHandler`(WARN, 스택트레이스 없음)를 반환한다. 캐시 조회 실패는 미스로 처리돼 DB에서 다시 읽고, 저장·삭제 실패는 로그만 남긴다 | Redis 장애·타임아웃(2s)·읽을 수 없는 엔트리가 500이 되지 않게 한다. `CacheEvictionListener`는 `Cache`를 직접 호출해 이 핸들러를 타지 않지만 자체 try-catch가 있다 | 직렬화 버그가 다시 생기면 500 대신 WARN 로그와 매 요청 DB 조회로만 드러난다 — 캐시 히트를 실제 Redis로 검증하는 `CacheHitMariaDbIT`가 그 안전망이다 |
+| 배포 전 엔트리 | 옛 직렬화기가 저장한 `[{"@class":…,"keyword":…}]` 형태는 새 직렬화기가 그대로 읽는다(Jackson 3는 모르는 속성 `@class`를 무시). 읽을 수 없는 엔트리는 위 핸들러가 미스로 처리하고 새 값으로 덮어쓴다. 배포 시 Redis flush나 캐시 이름 버전업이 필요 없다 | `CacheHitMariaDbIT`로 두 경우 모두 확인 | — |
+
+검증: `CacheConfigTest`(TTL, null 허용, 전 캐시 등록, 네 캐시의 `Stream.toList()`·enum·날짜·금액 포함 왕복),
+`CacheHitMariaDbIT`(신규 — 실제 Redis로 네 엔드포인트를 두 번씩 호출해 두 응답이 같음, 옛 형식 엔트리 읽기, 읽을 수
+없는 엔트리의 미스 처리). **변형 검증:** `CacheConfig`에 옛 직렬화기와 기본 에러 핸들러를 잠시 되돌리면 이 IT에서
+리스트 캐시 3건과 엔트리 2건이 실패하고 단지 상세만 통과한다(버그 범위와 일치). `./gradlew test`,
+`./gradlew integrationTest` 전부 통과.
 
 **백로그(테스트 격리) — 통합 테스트가 개발용 로컬 Redis(`homesense-redis`, localhost:6379)에 값을 쓴다.**
 MariaDB는 Testcontainers로 테스트마다 격리되지만 Redis는 그런 장치가 없어, IT가 개발 중인 로컬 Redis에 직접
@@ -1126,7 +1132,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | `regionAutocomplete::{query}` | 지역 자동완성 |
 | `popularKeywords::{limit}` | 인기 검색어(TTL 1시간) |
 
-캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다(`popularKeywords`만 아직 `CacheConfig`/`SearchService`에 리터럴로 남아 있다). **리스트를 반환하는 캐시가 히트 시 500을 내는 기존 버그가 있다** — "단지 검색 지역코드·키워드·거래유형" 절 참고.
+캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다. **캐시 이름은 반드시 `CacheNames` 상수로 쓰고, 새 캐시는 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다(`CacheConfigTest`·`CacheNameRegistrationTest`가 강제)** — 미등록 캐시는 자동 생성되지 않는다(2026-09-27 리스트 캐시 500 hotfix, "단지 검색 지역코드·키워드·거래유형" 절 참고). 캐시 조회·저장 실패는 `CacheErrorHandler`가 로그만 남기고 미스로 처리한다.
 
 거래 검색/이력 조회는 배치 직후 변경 가능성이 있어 **캐시를 적용하지 않습니다.**
 

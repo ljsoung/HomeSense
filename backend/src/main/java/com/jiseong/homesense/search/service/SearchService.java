@@ -9,6 +9,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.jiseong.homesense.common.cache.CacheNames;
 import com.jiseong.homesense.search.dto.PopularKeywordResponse;
 import com.jiseong.homesense.search.entity.SearchLog;
 import com.jiseong.homesense.search.repository.SearchLogRepository;
@@ -38,7 +39,7 @@ public class SearchService {
 
     private final SearchLogRepository searchLogRepository;
 
-    @Cacheable(cacheNames = "popularKeywords", key = "#limit")
+    @Cacheable(cacheNames = CacheNames.POPULAR_KEYWORDS, key = "#limit")
     public List<PopularKeywordResponse> getPopularKeywords(int limit) {
         LocalDateTime since = LocalDateTime.now(KST).minusDays(WINDOW_DAYS);
         return searchLogRepository.findTopKeywordsSince(since, PageRequest.of(0, limit)).stream()
