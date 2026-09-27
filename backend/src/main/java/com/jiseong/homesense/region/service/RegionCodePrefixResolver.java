@@ -59,6 +59,7 @@ public class RegionCodePrefixResolver {
     private final StringRedisTemplate redisTemplate;
 
     private volatile Snapshot snapshot;
+    private volatile VersionPublication lastVersionPublication;
 
     /** 존재하지 않거나 폐지된 코드는 empty — 호출자는 빈 결과로 처리한다. */
     public Optional<String> prefixOf(String legalDongCd) {
@@ -72,12 +73,23 @@ public class RegionCodePrefixResolver {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onLegalDistrictCodeReloaded(LegalDistrictCodeReloadedEvent event) {
         snapshot = null;
+        String version = UUID.randomUUID().toString();
         try {
-            redisTemplate.opsForValue().set(VERSION_KEY, UUID.randomUUID().toString());
+            redisTemplate.opsForValue().set(VERSION_KEY, version);
+            lastVersionPublication = VersionPublication.published(version);
         } catch (RuntimeException e) {
             // 이미 커밋된 재적재를 실패로 만들지 않는다. 다른 프로세스는 재시작 전까지 옛 맵을 쓴다.
             log.warn("법정동코드 prefix 맵 버전 갱신 실패 — 다른 서버 프로세스에는 반영되지 않는다", e);
+            lastVersionPublication = VersionPublication.failed(e.toString());
         }
+    }
+
+    /**
+     * 이 프로세스에서 마지막으로 시도한 버전 발행 결과. 재적재 러너가 종료 요약에 출력한다 — 실패했다면
+     * 서비스 중인 서버는 재시작해야 새 맵을 쓴다. 아직 재적재 이벤트를 받지 않았으면 empty.
+     */
+    public Optional<VersionPublication> lastVersionPublication() {
+        return Optional.ofNullable(lastVersionPublication);
     }
 
     private Snapshot current() {
@@ -111,6 +123,18 @@ public class RegionCodePrefixResolver {
         Snapshot built = new Snapshot(version, computePrefixes(legalDistrictCodeRepository.findAll()));
         snapshot = built;
         return built;
+    }
+
+    /** 버전 발행 결과. 성공이면 version, 실패면 failureReason이 채워진다. */
+    public record VersionPublication(boolean succeeded, String version, String failureReason) {
+
+        static VersionPublication published(String version) {
+            return new VersionPublication(true, version, null);
+        }
+
+        static VersionPublication failed(String failureReason) {
+            return new VersionPublication(false, null, failureReason);
+        }
     }
 
     private record Snapshot(String version, Map<String, String> prefixByCode) {

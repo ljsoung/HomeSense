@@ -143,6 +143,10 @@ class RegionCodePrefixResolverTest {
         resolver.onLegalDistrictCodeReloaded(new LegalDistrictCodeReloadedEvent());
 
         verify(valueOperations).set(eq(RegionCodePrefixResolver.VERSION_KEY), anyString());
+        assertThat(resolver.lastVersionPublication()).hasValueSatisfying(p -> {
+            assertThat(p.succeeded()).isTrue();
+            assertThat(p.version()).isNotBlank();
+        });
         resolver.prefixOf("4111000000");
         verify(legalDistrictCodeRepository, times(2)).findAll();
     }
@@ -180,8 +184,17 @@ class RegionCodePrefixResolverTest {
 
         resolver.onLegalDistrictCodeReloaded(new LegalDistrictCodeReloadedEvent());
 
+        assertThat(resolver.lastVersionPublication()).hasValueSatisfying(p -> {
+            assertThat(p.succeeded()).isFalse();
+            assertThat(p.failureReason()).contains("down");
+        });
         resolver.prefixOf("4111000000");
         verify(legalDistrictCodeRepository, times(2)).findAll();
+    }
+
+    @Test
+    void 재적재_이벤트를_받기_전에는_발행_결과가_없다() {
+        assertThat(resolver().lastVersionPublication()).isEmpty();
     }
 
     private RegionCodePrefixResolver resolver() {

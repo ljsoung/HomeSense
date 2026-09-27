@@ -11,6 +11,9 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
+import com.jiseong.homesense.region.service.RegionCodePrefixResolver;
+import com.jiseong.homesense.region.service.RegionCodePrefixResolver.VersionPublication;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -33,6 +36,11 @@ import lombok.extern.slf4j.Slf4j;
  * 실행할 때는 이 엔트리가 jar: URL(파일시스템 실체가 없음)이라 {@code getFile()}이 재적재 시작
  * 전에 예외를 던진다. 문서화된 {@code bootRun} 실행은 uncompressed classes 디렉터리를 쓰기 때문에
  * 우연히 통과했을 뿐이라, 스트림을 임시 파일로 복사해 어떤 실행 방식에서도 동작하게 한다.
+ *
+ * <p>재적재가 끝나면 {@link RegionCodePrefixResolver}의 prefix 맵 버전 발행(Redis
+ * {@code region:prefix-map:version}) 결과를 요약 로그로 남긴다. 이 러너는 서비스 중인 서버와 다른
+ * JVM이라, 발행이 실패하면 서버는 재시작 전까지 옛 prefix 맵을 쓴다. 발행 실패는 재적재 자체의 실패가
+ * 아니므로 예외로 바꾸지 않는다 — 재적재 결과(성공/예외)는 그대로 둔다.
  */
 @Slf4j
 @Component
@@ -43,6 +51,7 @@ public class LegalDistrictCodeReloadCommandLineRunner implements CommandLineRunn
     private static final String RESOURCE_PATH = "data/법정동코드.txt";
 
     private final LegalDistrictCodeLoader legalDistrictCodeLoader;
+    private final RegionCodePrefixResolver regionCodePrefixResolver;
 
     @Override
     public void run(String... args) throws IOException {
@@ -54,8 +63,22 @@ public class LegalDistrictCodeReloadCommandLineRunner implements CommandLineRunn
             log.info("법정동코드 재적재 시작: resource={}", RESOURCE_PATH);
             legalDistrictCodeLoader.loadInitial(tempFile.toFile());
             log.info("법정동코드 재적재 완료");
+            logVersionPublication(regionCodePrefixResolver.lastVersionPublication().orElse(null));
         } finally {
             Files.deleteIfExists(tempFile);
+        }
+    }
+
+    private void logVersionPublication(VersionPublication publication) {
+        if (publication == null) {
+            log.warn("재적재 요약 | prefix 맵 버전 발행: 시도되지 않음(재적재 이벤트 미수신). "
+                    + "서비스 중인 서버를 재시작하라");
+        } else if (publication.succeeded()) {
+            log.info("재적재 요약 | prefix 맵 버전 발행: 성공 (region:prefix-map:version={})",
+                    publication.version());
+        } else {
+            log.warn("재적재 요약 | prefix 맵 버전 발행: 실패 ({}). 서비스 중인 서버를 재시작하라",
+                    publication.failureReason());
         }
     }
 }

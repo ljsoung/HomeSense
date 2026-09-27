@@ -200,3 +200,33 @@ CLAUDE.md "알려진 공백"). 새 단지를 넣거나 재적재한 뒤에는 **
 
 재적재로 기존 단지의 **주소가 바뀐** 경우는 러너가 다시 계산하지 않는다(값이 이미 있음). 그 행의
 `legal_dong_cd`를 NULL로 되돌린 뒤 러너를 실행한다.
+
+## 9. 법정동코드 재적재 (행정구역 개편 등, 비정기)
+
+재적재는 서비스 중인 앱이 아니라 **별도 프로세스**(`reload-legal-district` 프로필)에서 돈다. 서비스 중인 앱의
+지역 prefix 맵(`RegionCodePrefixResolver`)은 Redis 키 `region:prefix-map:version`이 바뀐 것을 보고 다음
+검색에서 다시 만든다. 이 키가 바뀌지 않으면 앱은 재시작 전까지 옛 맵을 쓴다. 새로 생긴 코드는 검색 결과가
+비고, 폐지·개편된 코드는 옛 prefix로 검색된다.
+
+1. 새 "법정동코드 전체자료"로 `backend/src/main/resources/data/법정동코드.txt`를 교체하고 JAR을 새로 빌드한다.
+2. 현재 버전 값을 기록한다.
+   ```bash
+   redis-cli -h "$REDIS_HOST" GET region:prefix-map:version   # 없으면 (nil)
+   ```
+3. 러너를 운영 앱과 **같은 Redis·DB 환경변수**로 실행한다. 이 러너는 웹 서버를 띄우고 스스로 종료하지 않는다.
+   운영 앱과 포트가 겹치지 않게 `--server.port=0`을 준다. 아래 요약 로그가 나오면 종료한다(Ctrl+C).
+   ```bash
+   java -jar build/libs/<artifact>.jar --spring.profiles.active=prod,reload-legal-district --server.port=0
+   ```
+   - 재적재 성공 여부는 기존처럼 `법정동코드 재적재 완료` 로그로 본다. 재적재가 예외로 실패하면 러너가 예외로 끝난다.
+   - 이어서 버전 발행 요약이 한 줄 나온다.
+     - `재적재 요약 | prefix 맵 버전 발행: 성공 (region:prefix-map:version=<uuid>)` → 4단계로.
+     - `... 실패 (<원인>). 서비스 중인 서버를 재시작하라` 또는 `... 시도되지 않음` → 5단계로.
+4. 버전 키를 확인한다. 값이 2단계와 다르고 요약 로그의 uuid와 같아야 한다.
+   ```bash
+   redis-cli -h "$REDIS_HOST" GET region:prefix-map:version
+   ```
+   같거나 조회가 안 되면 5단계로.
+5. **버전 발행에 실패했으면 서비스 중인 앱을 모두 재시작한다.** 재시작하면 prefix 맵을 DB에서 새로 만든다.
+   재적재 자체는 이미 커밋됐으므로 다시 돌릴 필요가 없다.
+6. `RegionCoverageChecker` 로그에서 커버리지 공백이 0건인지 확인한다(CLAUDE.md "법정동코드 참조자료 재적재" 절).
