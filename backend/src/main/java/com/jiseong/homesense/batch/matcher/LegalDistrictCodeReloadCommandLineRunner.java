@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
@@ -40,7 +42,12 @@ import lombok.extern.slf4j.Slf4j;
  * <p>재적재가 끝나면 {@link RegionCodePrefixResolver}의 prefix 맵 버전 발행(Redis
  * {@code region:prefix-map:version}) 결과를 요약 로그로 남긴다. 이 러너는 서비스 중인 서버와 다른
  * JVM이라, 발행이 실패하면 서버는 재시작 전까지 옛 prefix 맵을 쓴다. 발행 실패는 재적재 자체의 실패가
- * 아니므로 예외로 바꾸지 않는다 — 재적재 결과(성공/예외)는 그대로 둔다.
+ * 아니므로 종료 코드에 반영하지 않는다 — 종료 코드는 재적재 결과만 나타낸다.
+ *
+ * <p>이 프로필은 웹 서버와 {@code @Scheduled}를 띄우지 않는다(application-reload-legal-district.properties) —
+ * 러너가 떠 있는 동안 수집 배치(03:00)가 운영 앱과 중복 실행되지 않게 한다. 작업이 끝나면
+ * {@link SpringApplication#exit}로 컨텍스트를 닫고 종료 코드를 반환한다 — 성공 0, 실패 1
+ * ({@code ComplexLegalDongBackfillCommandLineRunner}와 같은 방식).
  */
 @Slf4j
 @Component
@@ -52,9 +59,26 @@ public class LegalDistrictCodeReloadCommandLineRunner implements CommandLineRunn
 
     private final LegalDistrictCodeLoader legalDistrictCodeLoader;
     private final RegionCodePrefixResolver regionCodePrefixResolver;
+    private final ApplicationContext applicationContext;
 
     @Override
-    public void run(String... args) throws IOException {
+    public void run(String... args) {
+        int exitCode = execute();
+        System.exit(SpringApplication.exit(applicationContext, () -> exitCode));
+    }
+
+    int execute() {
+        try {
+            reload();
+        } catch (IOException | RuntimeException e) {
+            log.error("법정동코드 재적재 실패", e);
+            return 1;
+        }
+        logVersionPublication(regionCodePrefixResolver.lastVersionPublication().orElse(null));
+        return 0;
+    }
+
+    private void reload() throws IOException {
         Path tempFile = Files.createTempFile("legal-district-code", ".txt");
         try {
             try (var in = new ClassPathResource(RESOURCE_PATH).getInputStream()) {
@@ -63,7 +87,6 @@ public class LegalDistrictCodeReloadCommandLineRunner implements CommandLineRunn
             log.info("법정동코드 재적재 시작: resource={}", RESOURCE_PATH);
             legalDistrictCodeLoader.loadInitial(tempFile.toFile());
             log.info("법정동코드 재적재 완료");
-            logVersionPublication(regionCodePrefixResolver.lastVersionPublication().orElse(null));
         } finally {
             Files.deleteIfExists(tempFile);
         }

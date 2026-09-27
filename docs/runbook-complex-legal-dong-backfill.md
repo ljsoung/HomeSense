@@ -213,13 +213,15 @@ CLAUDE.md "알려진 공백"). 새 단지를 넣거나 재적재한 뒤에는 **
    ```bash
    redis-cli -h "$REDIS_HOST" GET region:prefix-map:version   # 없으면 (nil)
    ```
-3. 러너를 운영 앱과 **같은 Redis·DB 환경변수**로 실행한다. 이 러너는 웹 서버를 띄우고 스스로 종료하지 않는다.
-   운영 앱과 포트가 겹치지 않게 `--server.port=0`을 준다. 아래 요약 로그가 나오면 종료한다(Ctrl+C).
+3. 러너를 운영 앱과 **같은 Redis·DB 환경변수**로 실행한다. 백필 러너와 같은 방식이다
+   (`application-reload-legal-district.properties`): 웹 서버를 띄우지 않고(포트 충돌 없음), `@Scheduled`
+   배치(03:00 수집, 05:00 탈퇴 파기)를 등록하지 않으며, 끝나면 스스로 종료한다.
    ```bash
-   java -jar build/libs/<artifact>.jar --spring.profiles.active=prod,reload-legal-district --server.port=0
+   java -jar homesense.jar --spring.profiles.active=prod,reload-legal-district
+   echo $?   # 0 = 재적재 성공, 1 = 재적재 실패
    ```
-   - 재적재 성공 여부는 기존처럼 `법정동코드 재적재 완료` 로그로 본다. 재적재가 예외로 실패하면 러너가 예외로 끝난다.
-   - 이어서 버전 발행 요약이 한 줄 나온다.
+   - 종료 코드는 재적재 결과만 나타낸다. 1이면 재적재가 실패한 것이므로 로그를 보고 원인을 고친 뒤 다시 실행한다.
+   - 재적재가 성공하면 버전 발행 요약이 한 줄 나온다. **발행 실패는 종료 코드에 반영되지 않으므로** 이 줄을 반드시 본다.
      - `재적재 요약 | prefix 맵 버전 발행: 성공 (region:prefix-map:version=<uuid>)` → 4단계로.
      - `... 실패 (<원인>). 서비스 중인 서버를 재시작하라` 또는 `... 시도되지 않음` → 5단계로.
 4. 버전 키를 확인한다. 값이 2단계와 다르고 요약 로그의 uuid와 같아야 한다.
