@@ -65,7 +65,10 @@ const browser = await chromium.launch();
   const invalidBody = await page.locator('body').innerText();
   log('B: shows expired-link message from server', invalidBody.includes('유효하지 않거나 만료된 재설정 링크입니다'));
 
-  await page.locator('button:has-text("재설정 다시 요청")').click();
+  // 2026-09-23 Figma 대조 재작업으로 버튼 문구가 "재설정 다시 요청"에서 "재설정 링크 다시 요청"으로
+  // 바뀌었다(PasswordResetPage.tsx) — 이 스크립트는 그 시점에 Docker가 꺼져 있어 실제 백엔드로
+  // 재실행되지 못한 채 옛 문구로 남아 있었다. 이번에 실 백엔드로 처음 재실행하며 발견해 맞췄다.
+  await page.locator('button:has-text("재설정 링크 다시 요청")').click();
   await page.waitForURL((url) => url.pathname === '/password-reset' && !url.search, { timeout: 10000 });
   log('B: retry button navigates back to /password-reset without token', true);
   await page.waitForSelector('#email');
