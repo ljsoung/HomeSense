@@ -194,6 +194,10 @@ export function SearchResultsPage() {
     setSearchParams(serializeSearchParams(next), options);
   };
 
+  // base로 filters(URL에 이미 커밋된 값)가 아니라 draft(필터 패널의 현재 선택 상태, "필터 적용"을
+  // 누르지 않았어도 화면에는 이미 반영돼 보이는 값)를 넘긴다 — 그렇지 않으면 사용자가 거래유형 등을
+  // 바꾸고 "적용" 없이 재검색바로 검색할 때 그 변경이 조용히 무시되고 이전 URL의 값으로 검색되는
+  // 버그가 있었다(실측 확인: 월세 적용 후 매매로 바꾸고 Enter → 요청이 여전히 rentType=WOLSE로 나감).
   const handleSubmitKeyword = (value: string) => {
     if (isKeywordTooShort(value)) {
       setKeywordTooShort(true);
@@ -202,12 +206,12 @@ export function SearchResultsPage() {
     setKeywordTooShort(false);
     const trimmed = value.trim();
     if (!trimmed) return;
-    executeSearch({ mode: 'keyword', keyword: trimmed }, filters);
+    executeSearch({ mode: 'keyword', keyword: trimmed }, draft);
   };
 
   const handleSelectRegion = (region: { legalDongCd: string; fullPath: string }) => {
     setKeywordTooShort(false);
-    executeSearch({ mode: 'region', regionCode: region.legalDongCd, regionLabel: region.fullPath }, filters);
+    executeSearch({ mode: 'region', regionCode: region.legalDongCd, regionLabel: region.fullPath }, draft);
   };
 
   const handleApplyFilter = () => {

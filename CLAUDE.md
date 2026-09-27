@@ -2375,6 +2375,41 @@ check.mjs`가 "필터 적용" 버튼과 모바일 전용 "필터" pill을 혼동
 가져다 쓰되, 지도 뷰포트 기반 필터(팬/줌 시 자동 갱신 등 MAP-01 고유 요구)는 별도로 얹어야 한다 —
 `RangeSlider`도 마찬가지로 범용이다.
 
+### SCR-SRCH-01 버그 수정 — 필터 패널의 미적용 draft가 재검색 시 조용히 무시됨 (2026-09-27, 실사용자 리포트)
+
+**증상(사용자 리포트 원문)**: "메인화면에서 거래유형을 매매/전세/월세 원하는 것을 클릭한 뒤에 검색을
+하면 거래 유형에 맞게 잘 검색이 되는데 검색 결과 화면에서 거래 유형을 선택하고나서 재검색 하려고
+하면 재검색이 되지 않습니다." — HOME-01에서는 정상, SRCH-01에서만 재현.
+
+**재현(Playwright로 실측 확인)**: SRCH-01에서 필터 패널로 월세를 선택하고 "필터 적용"을 눌러
+`rentType=WOLSE`를 URL에 커밋한다. 이어서 필터 패널에서 매매로 바꾸되 **"필터 적용"을 누르지 않고**
+재검색바(SearchBar)에서 같은 지역명으로 Enter를 치면, 실제 API 요청은 여전히 `rentType=WOLSE`로
+나갔다 — 방금 화면에서 선택한 "매매"가 반영되지 않고 조용히 이전 값으로 검색됐다.
+
+**원인**: `SearchResultsPage.handleSubmitKeyword()`/`handleSelectRegion()`이 공유 훅
+`useExecuteSearch()`를 호출할 때 `base` 인자로 `filters`(URL에서 파싱한, 이미 커밋된 값)를 넘기고
+있었다 — `draft`(FilterPanel이 들고 있는, "필터 적용"을 누르기 전까지는 URL에 반영되지 않는 현재
+선택 상태)를 넘겨야 했는데 반대로 짰다. `useExecuteSearch()`는 `dealType`/`housingTypes`를
+`overrides`가 없으면 `base`(=`start`)에서 그대로 가져오므로(`features/search/useExecuteSearch.ts`),
+재검색 시 `draft`에만 존재하는 미적용 변경이 통째로 버려지고 URL의 옛 값으로 대체됐다. HOME-01의
+히어로 검색은 이 문제가 없는데, HOME-01은 애초에 "적용" 버튼이 있는 별도 draft 상태 없이 토글을
+누르는 즉시 그 값으로 검색을 실행하기 때문이다(SRCH-01만의 2단계 draft→적용 구조에서만 성립하는
+버그).
+
+**수정**: 두 핸들러 모두 `base` 인자를 `filters` → `draft`로 교체했다(`SearchResultsPage.tsx`). 이제
+재검색은 "필터 패널에 현재 보이는 선택 상태"를 그대로 유지한 채 지역/키워드만 교체한다 — 사용자
+입장에서는 "화면에 선택된 대로 검색된다"는 직관과 일치한다. 재검색 후에는 URL이 바뀌므로 기존
+동기화 로직(`filters !== filtersSnapshot`이면 `setDraft(filters)`)이 곧바로 draft를 새 URL 값으로
+다시 맞춘다 — 그래서 재검색 직후 필터 패널도 "매매"가 선택된 상태로 정확히 보인다(별도 처리 불필요,
+기존 동기화 effect가 이미 담당).
+
+**검증**: 신규 `frontend/e2e/srch01-draft-carryover-check.mjs`(6/6) — 필터 적용으로 월세 커밋 →
+"적용" 없이 매매로 바꾸고 키워드 재검색 → 요청에 `dealCategory=SALE`이 실리고 `rentType=WOLSE`가
+남지 않음 → URL에는 매매(기본값)라 `dealType` 파라미터 자체가 생략됨 → 재검색 후 필터 패널이
+"매매"를 선택 상태로 보여줌(draft/filters 재동기화) → 같은 방식으로 지역 자동완성 선택 경로도
+전세(`rentType=JEONSE`)가 정확히 반영됨. `run-all.mjs`에 추가(23개 스크립트 전체 재실행, 전부 통과 —
+SRCH-01 기존 61건 + `home01-card-check` 18건 + 이번 신규 6건, 회귀 없음).
+
 ### 배포(Vercel) — SPA 클라이언트 라우팅 rewrite
 
 **증상(2026-09-16 세션)**: 실 배포(hmss.site)에서 `/privacy`를 새 탭으로 열거나 새로고침하면 404,

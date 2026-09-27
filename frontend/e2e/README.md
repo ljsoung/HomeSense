@@ -1,7 +1,7 @@
 # HomeSense 검증 스크립트 (frontend/e2e/)
 
 AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번호 찾기 / SCR-SRCH-01 검색결과
-목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 27개(+스크린샷 전용 2개). 원래 저장소
+목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 28개(+스크린샷 전용 2개). 원래 저장소
 밖 `C:\Users\super\homesense-e2e-scripts\`에 있었으나(캐시 정리 시 유실 위험, CLAUDE.md SCR-LEGAL-01
 백로그가 이 위험을 지적했다) 저장소 안으로 옮겨 커밋했다.
 
@@ -19,8 +19,8 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
   - `auth03-password-reset-check`는 1단계 발송·쿨다운·무효 토큰 검증에 실제 백엔드(`cd ../../backend &&
     ./gradlew bootRun`, 8080)+Redis(6379)가 필요하다 — 로컬에 SES 자격 증명이 없어 실제 발송 메일에서
     원문 토큰을 받을 방법이 없으므로 2단계 "유효한 토큰" 폼만 목킹한다(CLAUDE.md SCR-AUTH-03 절 참고).
-  - `srch01-*` 6개(basic/mobile/favorite-and-desktop-back/slider-boundary-and-wolse/keyboard-and-error/
-    tablet)는 전부 실제 백엔드(8080)가 필요하다(Redis 불필요) — MariaDB에 `complex`/`trade` 실데이터가
+  - `srch01-*` 7개(basic/mobile/favorite-and-desktop-back/slider-boundary-and-wolse/keyboard-and-error/
+    tablet/draft-carryover)는 전부 실제 백엔드(8080)가 필요하다(Redis 불필요) — MariaDB에 `complex`/`trade` 실데이터가
     있어야 의미 있는 검증이 된다(로컬 개발 DB 기준으로 작성됨, 특정 지역코드에 데이터가 없으면 일부
     단정문이 SKIP 로그만 남기고 통과 처리되도록 방어돼 있다).
   - `srch01-screenshots`는 테스트가 아니라 스크린샷 저장 스크립트다(단정문 없음).
@@ -28,7 +28,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 
 ## 실행
     npm install
-    node run-all.mjs                        # run-all.mjs 목록 21개(백엔드+Redis 필요한 것 포함)
+    node run-all.mjs                        # run-all.mjs 목록 23개(백엔드+Redis 필요한 것 포함)
     node run-all.mjs signup-age-check        # 일부만 지정
     node signup-age-check.mjs                # 단독 실행(스크립트별 PASS/FAIL 출력)
     BASE=http://localhost:5183 node srch01-basic-check.mjs   # dev 서버가 기본 포트가 아닐 때
@@ -57,6 +57,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 | srch01-slider-boundary-and-wolse-check | SCR-SRCH-01: 슬라이더 하한 경계(상한만 옮겨도 하한 파라미터가 요청에 없음을 네트워크로 확인, 면적/금액/건축년도 3종 모두), 1990년 이전 준공 단지가 기본 상태에 포함됨(하한 미적용 방증), 월세 카드가 "보증금 X · 월세 Y만원"으로 표시되고 ㎡당 가격이 빠짐, 슬라이더 라벨이 "보증금"으로 바뀜 — 9/9 |
 | srch01-keyboard-and-error-check | SCR-SRCH-01: 자동완성 키보드 네비게이션(↑/↓/Enter/Esc, 미선택 Enter 시 자유 텍스트 폴백, API 실패해도 자유 텍스트 검색 가능), 슬라이더 방향키 조작+숫자 입력 동기화, 바텀시트 포커스 트랩(Tab 30회 반복해도 탈출 없음), 에러 배너→재시도 성공, 잘못된 regionCode 서버 메시지 표시 — 16/16 |
 | srch01-tablet-check | SCR-SRCH-01(768px): 데스크톱과 같은 사이드바 레이아웃(모바일 바텀시트 버튼 아님), 필터 적용·페이지네이션 왕복 — 6/6 |
+| srch01-draft-carryover-check | SCR-SRCH-01: 필터 패널에서 거래유형 등을 바꾸고 "필터 적용"을 누르지 않은 채 재검색바(키워드 제출/지역 자동완성 선택)로 검색해도 그 draft 값이 반영되는지 — 실사용자 버그 리포트("거래유형 선택 후 재검색하면 반영 안 됨")로 발견한 회귀를 잡는다. `handleSubmitKeyword`/`handleSelectRegion`이 `executeSearch`의 base로 `filters`(URL 커밋값)가 아니라 `draft`(패널의 현재 선택)를 넘기도록 고친 수정을 검증(CLAUDE.md SCR-SRCH-01 절 참고) — 6/6 |
 | srch01-screenshots | SCR-SRCH-01: 데스크톱/태블릿/모바일 3개 뷰포트 스크린샷을 `./out/`에 저장(테스트 아님, 단정문 없음) — Figma 육안 대조용 |
 | home01-card-check | HOME-01: SRCH-01이 공유 컴포넌트 `ComplexCard`의 `list` variant를 재작업하면서 `grid` variant(HOME-01 인기 단지)에 실수로 영향을 주지 않았는지 1280/768/392 세 뷰포트에서 확인 — 카드에 "건축"(년도)·"만원/㎡"(평단가) 문구가 없음(list 전용 항목 미유입), 하트 버튼이 절대 위치 오버레이 유지, 비로그인 하트 클릭 시 `/login` 이동 — 18/18 |
 | home01-card-screenshots | HOME-01: 데스크톱/태블릿/모바일 3개 뷰포트 스크린샷을 `./out/`에 저장(테스트 아님) — Figma 4:1232/24:7860/24:7370 육안 대조용 |

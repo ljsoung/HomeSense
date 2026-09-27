@@ -16,6 +16,7 @@ const SCRIPTS = [
   // SRCH-01 — 실 백엔드(8080) 필요, dev 서버 기본 포트(5173/5183 등)는 BASE 환경변수로 지정.
   'srch01-basic-check', 'srch01-mobile-check', 'srch01-favorite-and-desktop-back-check',
   'srch01-slider-boundary-and-wolse-check', 'srch01-keyboard-and-error-check', 'srch01-tablet-check',
+  'srch01-draft-carryover-check',
   // HOME-01 — SRCH-01이 공유 컴포넌트(ComplexCard)를 재작업한 뒤 그리드 variant(HOME-01)에 영향이
   // 없는지 확인하는 회귀 테스트. 실 백엔드 필요.
   'home01-card-check',
