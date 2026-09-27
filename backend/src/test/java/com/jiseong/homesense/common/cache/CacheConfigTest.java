@@ -9,8 +9,10 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -53,13 +55,17 @@ class CacheConfigTest {
     }
 
     @Test
-    void CacheNames의_모든_캐시가_값_타입과_함께_등록돼_있다() throws IllegalAccessException {
+    void 등록된_캐시는_정확히_CacheNames_상수들이다() throws IllegalAccessException {
         // 미등록 캐시는 자동 생성하지 않으므로(disableCreateOnMissingCache) 등록 누락은 런타임 실패가 된다.
+        // 반대로 CacheNames에 없는 이름을 등록하면 상수를 거치지 않은 이름이 생긴다. 빈에 선언된 이름이 전부
+        // 등록돼 있는지는 CacheNameRegistrationTest가 본다 — 두 테스트를 합쳐 "캐시 이름은 CacheNames 상수로만"을 강제한다.
+        Set<String> constants = new HashSet<>();
         for (Field field : CacheNames.class.getDeclaredFields()) {
             if (Modifier.isStatic(field.getModifiers()) && field.getType() == String.class) {
-                assertThat(configs).containsKey((String) field.get(null));
+                constants.add((String) field.get(null));
             }
         }
+        assertThat(configs.keySet()).containsExactlyInAnyOrderElementsOf(constants);
     }
 
     // 회귀: Stream.toList()(final ImmutableCollections.ListN)가 캐시 히트 시 SerializationException을 냈다.

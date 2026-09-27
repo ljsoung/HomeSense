@@ -1053,7 +1053,7 @@ DTO에는 `@class`가 붙지만(단건 DTO인 `complexDetailV2`는 정상), `Str
 | 항목 | 결정 | 근거 | 무효화 조건 |
 | --- | --- | --- | --- |
 | 수정 방식 | 캐시마다 값 타입을 명시한 `JacksonJsonRedisSerializer`(`CacheConfig.cacheConfigurations()`). `enableUnsafeDefaultTyping`은 제거했다 | 반환값을 `new ArrayList<>(…)`로 감싸도 고쳐지지만, 리스트 캐시가 생길 때마다 그 규칙을 기억해야 한다. 타입을 설정에서 명시하면 역직렬화가 저장된 `@class`가 아니라 설정의 타입을 따르므로 임의 타입 역직렬화 경로도 함께 없어진다 | — |
-| 새 캐시 등록 | **새 `@Cacheable` 캐시는 `CacheNames`에 상수를 두고 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다.** 미등록 이름은 자동 생성하지 않는다(`disableCreateOnMissingCache`) — 등록을 잊으면 첫 호출에서 `IllegalArgumentException`("Cannot find cache")이 난다. `CacheConfigTest`가 `CacheNames`의 모든 상수가 등록돼 있는지 검사한다 | 미등록 캐시가 기본 설정으로 조용히 만들어지면 값 직렬화기가 없는 상태가 된다 | — |
+| 새 캐시 등록 | **새 `@Cacheable` 캐시는 `CacheNames`에 상수를 두고 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다.** 미등록 이름은 자동 생성하지 않는다(`disableCreateOnMissingCache`) — 등록을 잊으면 첫 호출에서 `IllegalArgumentException`("Cannot find cache")이 난다. **캐시 이름은 반드시 `CacheNames` 상수로 쓴다(`@Cacheable("literal")` 금지) — 테스트가 강제한다(2026-09-27 보완):** `CacheConfigTest`는 등록된 이름이 정확히 `CacheNames` 상수 집합과 같은지, `CacheNameRegistrationTest`(`@SpringBootTest`, `./gradlew test`)는 애플리케이션 빈에 선언된 모든 캐시 이름(`@Cacheable`·`@CachePut`·`@CacheEvict`·`@Caching`, 클래스 레벨 `@CacheConfig` 기본값 포함 — Spring의 `CacheOperationSource`에서 읽는다)이 등록돼 있는지 본다. 실패 메시지에 미등록 이름과 선언 메서드가 나온다. 변형 검증: 네 형태의 미등록 이름을 가진 임시 빈을 넣으면 네 개 모두 잡혔다. **한계:** 기존 상수와 문자열이 같은 리터럴(`@Cacheable("regionAutocomplete")`)은 런타임에 구분할 수 없어 통과한다 — 동작은 같지만 버전업 때 한쪽만 바뀌는 드리프트가 생길 수 있으니 리뷰에서 본다 | 미등록 캐시가 기본 설정으로 조용히 만들어지면 값 직렬화기가 없는 상태가 된다 | — |
 | `CacheErrorHandler` | `CacheConfig implements CachingConfigurer`, `errorHandler()`가 Spring의 `LoggingCacheErrorHandler`(WARN, 스택트레이스 없음)를 반환한다. 캐시 조회 실패는 미스로 처리돼 DB에서 다시 읽고, 저장·삭제 실패는 로그만 남긴다 | Redis 장애·타임아웃(2s)·읽을 수 없는 엔트리가 500이 되지 않게 한다. `CacheEvictionListener`는 `Cache`를 직접 호출해 이 핸들러를 타지 않지만 자체 try-catch가 있다 | 직렬화 버그가 다시 생기면 500 대신 WARN 로그와 매 요청 DB 조회로만 드러난다 — 캐시 히트를 실제 Redis로 검증하는 `CacheHitMariaDbIT`가 그 안전망이다 |
 | 배포 전 엔트리 | 옛 직렬화기가 저장한 `[{"@class":…,"keyword":…}]` 형태는 새 직렬화기가 그대로 읽는다(Jackson 3는 모르는 속성 `@class`를 무시). 읽을 수 없는 엔트리는 위 핸들러가 미스로 처리하고 새 값으로 덮어쓴다. 배포 시 Redis flush나 캐시 이름 버전업이 필요 없다 | `CacheHitMariaDbIT`로 두 경우 모두 확인 | — |
 
@@ -1132,7 +1132,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | `regionAutocomplete::{query}` | 지역 자동완성 |
 | `popularKeywords::{limit}` | 인기 검색어(TTL 1시간) |
 
-캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다. **새 캐시는 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다** — 미등록 캐시는 자동 생성되지 않는다(2026-09-27 리스트 캐시 500 hotfix, "단지 검색 지역코드·키워드·거래유형" 절 참고). 캐시 조회·저장 실패는 `CacheErrorHandler`가 로그만 남기고 미스로 처리한다.
+캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다. **캐시 이름은 반드시 `CacheNames` 상수로 쓰고, 새 캐시는 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다(`CacheConfigTest`·`CacheNameRegistrationTest`가 강제)** — 미등록 캐시는 자동 생성되지 않는다(2026-09-27 리스트 캐시 500 hotfix, "단지 검색 지역코드·키워드·거래유형" 절 참고). 캐시 조회·저장 실패는 `CacheErrorHandler`가 로그만 남기고 미스로 처리한다.
 
 거래 검색/이력 조회는 배치 직후 변경 가능성이 있어 **캐시를 적용하지 않습니다.**
 
