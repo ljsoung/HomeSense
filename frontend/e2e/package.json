@@ -1,0 +1,7 @@
+{
+  "name": "homesense-e2e-scripts",
+  "private": true,
+  "type": "module",
+  "description": "HomeSense frontend Playwright verification scripts (AUTH-02/AUTH-03/SCR-LEGAL-01/SCR-SRCH-01) — local-only, not wired into CI. See README.md.",
+  "dependencies": { "playwright": "1.63.0" }
+}
