@@ -1,7 +1,7 @@
 # HomeSense 검증 스크립트 (frontend/e2e/)
 
 AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번호 찾기 / SCR-SRCH-01 검색결과
-목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 32개(+스크린샷 전용 2개). 원래 저장소
+목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 30개(+스크린샷 전용 2개). 원래 저장소
 밖 `C:\Users\super\homesense-e2e-scripts\`에 있었으나(캐시 정리 시 유실 위험, CLAUDE.md SCR-LEGAL-01
 백로그가 이 위험을 지적했다) 저장소 안으로 옮겨 커밋했다.
 
