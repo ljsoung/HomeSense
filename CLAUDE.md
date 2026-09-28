@@ -2183,11 +2183,234 @@ Playwright로 검증은 했지만 그 스크립트들은 전부 `C:\Users\super\
 
 **완결 필요(신규, 우선순위 중간 — SRCH-01 착수 전) — 검증 스크립트를 `@playwright/test` 단정문 기반으로 전환한다.** 위 13개 중 7개(`signup-test`·`signup-functional`·`dup-409-check`·`server-email-error-clear-test`·`password-nickname-server-error-clear-test`·`nickname-trim-test`·`border-settle-check`)는 기대값과 실제값이 달라도 종료코드에 반영하지 않고 값만 출력한다(스크립트가 예외를 던져 죽을 때만 비0) — 종료코드 0이 통과를 뜻하지 않으므로 이 스크립트들의 "통과"는 출력을 사람이 읽어야 확인된다. SRCH-01을 시작하기 전에 `@playwright/test`를 도입하고 단정문(`expect`) 기반으로 옮겨라 — 새 화면이 늘수록 출력을 눈으로 대조하는 검증이 누적된다. 나머지 6개는 이미 실패 시 종료코드 1이라 옮길 때 그대로 단정문으로 바꾸면 된다.
 
+**완결 필요(신규, 2026-09-28, 이번엔 기록만) — 전체 e2e 스크립트에서 실패할 수 없는 검증을 찾아 실제 검증으로 교체한다.** 대상은 하드코딩된 `ok('...', true)`, 값을 출력만 하고 단언하지 않는 확인(위 항목의 7개 스크립트), 수집만 하고 검사하지 않는 변수(`void x`)다. **근거 — 실제 버그를 가린 사례:** `srch01-basic-check`의 "1글자 keyword로 진입해도 검색 실행 안 함" 항목이 `ok(..., true)`로 하드코딩돼 있었고, 수집한 `apiCalled`는 `void apiCalled`로 버려졌다. 그래서 `/search?keyword=래`가 그대로 서버로 가 400 → 일반 오류 화면이 뜨는 결함이 스크립트는 PASS인 채 남아 있다가 코드리뷰(P2)로 발견됐다(`fffa2d7`에서 수정, 그 항목도 실제 단정으로 교체 — 수정 전 코드에서 12건 실패 확인). **남은 후보:** `home01-logout-check`(`feature/frontend/home-header-auth`)의 "모바일: 로그아웃 후 로그인 링크 복귀"는 `true`를 넘긴다. 바로 앞의 `waitFor`가 실패하면 예외로 스크립트가 죽으므로 완전히 실패할 수 없는 검증은 아니지만, 실패가 원인 대신 시간 초과로만 드러난다 — **그 브랜치를 develop 위로 옮긴 뒤 PR을 올리기 전에** 대기 결과를 단언하는 형태로 고친다(지금은 건드리지 않는다, 지성 지시). 같은 날 찾았던 SRCH-01 후보 두 곳(`srch01-keyboard-and-error-check`의 `true` 2곳, `srch01-basic-check` 재검색 시나리오의 `void searchCalls`)은 `68495ed`에서 실제 단정으로 고쳤다. 위 `@playwright/test` 전환 항목과 함께 처리하면 `expect`로 자연히 정리된다. **무효화 조건:** 이 항목을 끝낸 뒤 새 스크립트를 쓸 때도 `ok(..., true)`를 쓰지 않는다 — 검증할 수 없는 항목이면 PASS로 세지 말고 SKIP으로 출력한다.
+
 **완결 필요(신규, 출시 전 처리 대상) — 잘못된 형식의 JSON 값에 대한 400 응답이 Jackson 원문(내부 클래스명 포함)을 그대로 노출한다.** `{"ageConfirmed":"abc"}`처럼 필드 타입과 맞지 않는 값이 오면 `HttpMessageNotReadableException`이 `GlobalExceptionHandler.handleExceptionInternal()`(4xx에 `e.getMessage()`를 그대로 사용)을 거쳐 `error.message`에 `JSON parse error: Cannot deserialize value of type java.lang.Boolean from String "abc": only "true" or "false" recognized`가 실린다(2026-09-21 `AuthControllerTest`로 확인 — 상태 400·`ApiResponse` 포맷은 정상이라 기능상 문제가 아니라 정보 노출·문구 문제다). **`ageConfirmed`에 한정되지 않는다:** 다른 필드의 파싱 오류, 깨진 JSON, 인코딩 오류도 같은 경로이고(실제로 인코딩이 깨진 요청에 `JSON parse error: Invalid UTF-8 start byte 0xb4`가 반환됐다) 모든 `@RequestBody` 엔드포인트에 공통이다. 처리 방향: COM-EXC-01에서 `HttpMessageNotReadableException`을 고정 문구(예: "요청 본문을 읽을 수 없습니다")로 변환하고 원문은 로그로만 남긴다. `ageConfirmed` 작업이 전역 예외 처리 동작을 바꾸지 않는 범위였기 때문에 그대로 남겼다.
 
 **완결 필요(신규, 우선순위 낮음) — `logging.level.com.homesense`가 실제 패키지와 달라 적용되지 않는다.** `application.properties`(`DEBUG`)·`application-prod.properties`(`INFO`) 모두 `com.homesense`를 지정하지만 실제 패키지는 `com.jiseong.homesense`라 앱 코드의 로그 레벨 설정이 전혀 먹지 않는다(`org.hibernate.SQL`은 패키지가 맞아 적용됨 — 기본 프로필 `DEBUG`, prod `WARN`). 지금은 앱 코드에 DEBUG/TRACE 로그 호출이 없어(2026-09-21 grep 확인) 실질 영향이 없지만, 수정하면 기본 프로필에서 `com.jiseong.homesense` 전체가 DEBUG로 바뀐다. **수정할 때 DEBUG 로그에 요청 값·이메일이 섞이는지 함께 확인하라** — 그 시점에 추가돼 있을 로그 호출과 Spring이 앱 패키지 로거로 남기는 내용을 모두 점검 대상으로 본다.
 
 **완결 필요(신규, 출시 전 개인정보 로깅 점검 대상) — 5xx 경로의 예외 메시지에 저장 값이 섞일 수 있다.** `GlobalExceptionHandler.handleUnexpected()`와 5xx `handleExceptionInternal()`은 `AuditLogger.logBatchFailure()`를 호출하는데, 이 메서드는 예외를 `setCause(e)`로 그대로 실어 스택트레이스와 예외 메시지를 로그에 남긴다. DB 오류 원문(예: 중복 키·컬럼 길이 초과 메시지)이 예외 메시지에 실리면 이메일·닉네임 같은 저장 값이 로그에 섞일 수 있다(`ageConfirmed`는 저장하지 않아 해당하지 않는다). 지금은 예외 메시지를 가리지 않고, 4xx는 이 경로를 타지 않는다. 출시 전에 개인정보 로깅 점검(예외 메시지 마스킹 여부, 로그 보관·접근 범위)을 하라. 참고로 이 메서드는 이름·필드가 배치 실패(`BATCH_FAILURE`, `auditSeverity=CRITICAL`)로 고정돼 있어 API 5xx를 같은 이벤트로 남기는 것 자체가 부적절할 수 있다 — 점검할 때 함께 보라.
+
+### SCR-SRCH-01 / UIC-04·06 구현 결정 사항 (2026-09-27)
+
+`feature/frontend/search-result` — 검색결과 목록 화면. HOME-01이 만든 `MainLayout`/`ComplexCard`/
+`EmptyState`/`Spinner`/`SearchBar`/`useFavoriteToggle`을 그대로 재사용하고, 새로 UIC-04(`FilterPanel`+
+`RangeSlider`)·UIC-06(`Pagination`)·`BottomSheet`(모바일 필터 전용)를 추가했다. `SearchBar`(UIC-03)에는
+지역 자동완성(ARIA combobox)을 얹었다.
+
+**0단계 계약 대조(실 로컬 백엔드로 직접 호출해 확인, 문서/프롬프트 추정에 기대지 않았다):**
+
+| 항목 | 확인 결과 |
+| --- | --- |
+| `GET /api/complexes/search` | `regionCode`/`keyword`(상호 배타, 최소 하나 필수 — 없으면 400 `MISSING_SEARCH_CONDITION`) + `housingTypes`(반복 파라미터) + `dealCategory`/`rentType` + `areaMin/Max`·`amountMin/Max`(만원)·`buildYearMin/Max` + `sort`(LATEST/AMOUNT/AREA) + `page`(0-base)/`size`. 응답에 `pageMeta`(0-base page) 형제 필드 — CLAUDE.md 응답 포맷 절 그대로 |
+| `sort` 파라미터와 Spring `Pageable`의 기본 `sort` 파라미터 이름 충돌 | 실제로 문제 없음(실측 확인) — `ComplexRepositoryCustomImpl`이 `pageable.getSort()`를 쓰지 않고 `ComplexSearchCondition.sort()`(LATEST/AMOUNT/AREA enum)로만 정렬해, Spring이 "AMOUNT"를 Pageable Sort 프로퍼티명으로 잘못 파싱해도 아무 영향이 없다 |
+| SALE 응답에 `rentType`/`monthlyRentAmount` | 키 자체가 응답 JSON에서 빠진다(`non_null` 직렬화) — `ComplexSummaryResponse` 프론트 타입에 `?:`(선택 프로퍼티, `| undefined`가 아니라 키 자체 부재)로 반영 |
+| `GET /api/regions?query=` | `{legalDongCd, fullPath}[]` — 자동완성이 반환하는 값 그대로 `regionCode`/`regionLabel`로 쓰면 됨(실제 폐지된 시군구 대표행은 이미 서버가 걸러줌, CLAUDE.md "선택 불가능한 legalDongCd" 절 참고) |
+| `POST /api/search/logs` | `{keyword}` 바디, 인증 불필요, 성공 시 `ApiResponse<null>` |
+| 건축년도 슬라이더 하한 | 로컬 DB `MIN(YEAR(approval_date))=1968`(2개 단지), 1970년 준공 1개 — 둘 다 꼬리값이라 더 둥근 **1970**을 하한으로 확정(`BUILD_YEAR_MIN`, `searchParams.ts`) |
+| HOME-01 기존 구현 | `HeroSection`이 이미 `/search?housingType=..&dealType=SALE\|JEONSE\|WOLSE&keyword=..`로 navigate하고 있었다 — 실제 백엔드 계약(`housingTypes` 복수/반복, `dealCategory`+`rentType`)과 맞지 않는 옛 파라미터 모양이라 이번에 `useExecuteSearch` 공유 훅으로 교체했다(아래 표) |
+
+**확정 사항(프롬프트가 요구한 9개 항목 — 근거/구현 위치):**
+
+| # | 확정 내용 | 구현 위치 |
+| --- | --- | --- |
+| 1 | HOME-01 히어로·인기검색어 칩·SRCH-01 재검색이 `useExecuteSearch()` 하나를 공유한다. `base`(현재 SearchFilters)를 넘기면 그 필터를 유지한 채 regionCode/keyword만 교체(재검색), 안 넘기면 기본 필터로 새로 시작(히어로) | `features/search/useExecuteSearch.ts` |
+| 2 | 로그는 `mode:'region'`(fullPath)·`mode:'keyword'`(자유 텍스트)에서만 발생, `mode:'chip'`(인기검색어)은 로그 없음. SRCH-01 안의 필터/정렬/페이지/새로고침/뒤로가기는 애초에 `logSearch()`를 호출하는 경로 자체가 없다(재검색 바 제출/자동완성 선택만 호출) | `useExecuteSearch.ts`, `features/search/api.ts`(`logSearch`는 실패를 삼키는 fire-and-forget) |
+| 3 | regionCode/keyword는 `serializeSearchParams()`/`useExecuteSearch`가 항상 상호 배타적으로만 싣는다(하나 채우면 다른 하나는 `undefined`) | `searchParams.ts` |
+| 4 | 조건 없이 진입 시 API 호출 없이 안내 문구(`hasSearchCondition` 가드), 2자 미만 키워드는 클라이언트에서 막고(`isKeywordTooShort`) 서버 호출 자체를 안 함, `maxLength=50` | `SearchResultsPage.tsx`, `SearchBar.tsx` |
+| 5 | `regionLabel`은 표시 전용(API에 안 실림) — URL에 없으면 "선택한 지역"으로 폴백 | `SearchResultsPage.tsx`의 `conditionLabel` |
+| 6 | 매매=`dealCategory=SALE`, 전세=`rentType=JEONSE`, 월세=`rentType=WOLSE`. 금액 슬라이더 라벨은 매매="거래금액", 전세·월세="보증금". 기본값(매매/APT+VILLA/LATEST/1페이지/슬라이더 전체범위)은 URL에서 생략 | `searchParams.ts`(`dealTypeToApiParams`, `AMOUNT_LABEL`) |
+| 7 | 면적 10~200㎡, 금액 0~20억(만원 단위 0~200000), 건축년도 1970~올해(동적) — 손잡이가 상한에 있으면 그 파라미터를 아예 생략(서버 입장에선 "이상") | `searchParams.ts`(`AREA_RANGE`/`AMOUNT_RANGE`/`BUILD_YEAR_MIN`, `buildApiQuery`) |
+| 8 | 매물유형 체크박스는 마지막 하나를 해제할 수 없다(최소 1개 유지) | `FilterPanel.tsx`(`toggleHousingType`) |
+| 9 | `/map` 플레이스홀더 라우트 | 이미 존재 확인, 변경 불필요(`AppRouter.tsx`) |
+
+**SIMILAR 카드 캡션 정정** — Figma 원문("검색 조건과 정확히 일치하지 않는 유사 매물입니다")은 SIMILAR가
+실제로 뜻하는 바(BAT-MAT-02의 단지 마스터 매칭 신뢰도 문제, "검색 조건 불일치"가 아니다)를 잘못 설명해
+정정한 문구("지번 등 일부 정보가 정확히 일치하지 않아 유사도 기준으로 추정 매칭된 결과입니다")로 바꿨다
+— `ComplexCard.tsx`의 `SIMILAR_CAPTION` 상수, 코드 주석에 정정 근거를 남겼다.
+
+**태블릿 레이아웃 — 드로어 아님, 데스크톱과 같은 사이드바+리스트 구조.** 이전 세션(HOME-01)이 이미
+Figma 태블릿 결과 화면 스크린샷을 확인해 둔 결과와 일치 — `md:` 단일 브레이크포인트로 데스크톱/태블릿을
+공유하고 `<768px`만 모바일(바텀시트+무한스크롤) 레이아웃으로 분기했다. 768px 실측 스크린샷으로 재확인함.
+
+**버그 발견·수정 1 — StrictMode 개발 모드 이중 마운트가 뒤로가기 복원 캐시를 텅 빈 상태로 오염시켜
+실제 검색 API 호출 자체가 스킵되는 결함(Playwright로 실측 발견, 코드 리딩만으로는 못 잡았을 종류).**
+뒤로가기 복원용 모듈 스코프 캐시(`scrollCache`, `location.key`로 색인)를 "스크롤 이벤트 + effect
+cleanup" 양쪽에서 쓰도록 설계했는데, React 19 StrictMode의 개발 모드 mount→cleanup→remount가 데이터
+조회 effect보다 스크롤-저장 effect의 클린업을 먼저(또는 같은 틱에) 실행시키면서 `dataRef.current`가
+아직 초기값(`accumulated=[]`, `pageMeta=null`)인 상태를 그 URL의 캐시 엔트리로 그대로 저장해버렸다 —
+뒤이어 실행되는 진짜 데이터 조회 effect가 이 "캐시 히트"를 신뢰해 실제 API 호출 자체를 건너뛰고 빈
+목록을 "조건에 맞는 단지가 없습니다"로 잘못 렌더링했다(정상 regionCode로 진입해도 항상 이 상태가
+됐다 — `npm run dev`로 뜬 개발 서버에서 100% 재현). **수정**: `hasFetchedRef`(실제 응답을 한 번이라도
+받았는지) 가드를 추가해, 이 가드가 `true`가 되기 전에는 캐시에 쓰지 않는다.
+
+**버그 발견·수정 2 — (수정 1 이후) 카드 클릭→DTL-01 이동 시 캐시에 저장되는 스크롤 위치 자체가
+틀린 값(0)이었다.** 원래 effect cleanup(언마운트) 시점에 `window.scrollY`를 다시 읽어 캐시에 저장하는
+로직이 있었는데, 이 값이 항상 `0`으로 기록돼 실제 위치(예: 2993px)가 아니라 페이지 맨 위로 복원되는
+버그가 있었다. 원인: 카드 클릭으로 짧은 DTL-01 자리표시 페이지가 마운트되는 순간 브라우저가 "문서
+높이가 현재 스크롤 위치보다 짧아졌다"는 이유로 스크롤을 즉시 0으로 clamp하는데, React가 SRCH-01
+컴포넌트의 cleanup(그 안의 재저장 호출)을 실행하는 시점엔 이미 그 clamp가 끝난 뒤라 옳은 값을 읽을
+방법이 없었다. **수정**: 언마운트 시점의 재저장을 아예 제거하고, 'scroll' 이벤트가 실제로 발생하는
+동안의 저장만으로 충분하다는 결론(페이지를 떠나기 직전의 마지막 'scroll' 이벤트가 이미 올바른 값을
+남겨 둔다)으로 단순화했다. Playwright로 모바일 30+ 아이템 누적 후 카드 클릭→뒤로가기 시나리오를 직접
+재현해 두 수정 모두 확인했다(`srch01-mobile-check.mjs`).
+
+**버그 발견·수정 3 — 재검색 바가 URL의 기존 `regionLabel`/`keyword`로 미리 채워진 채 마운트되면,
+사용자가 손대지 않았는데도 자동완성 드롭다운이 자동으로 열려 바로 아래 "필터" 버튼 등의 클릭을
+가로챘다(Playwright `locator.click()`의 pointer-events 가로채기 에러로 실측 발견).** `SearchBar`의
+자동완성 디바운스 effect가 `value`가 바뀔 때만이 아니라 **마운트 시에도** 한 번 실행돼, 초기값이 2자
+이상이면 사용자가 포커스하지 않았어도 자동완성을 조회·오픈했다. **수정**: `focused` state를 추가해
+입력이 실제로 포커스된 동안에만 자동완성 조회·오픈이 일어나도록 게이트를 걸었다(`SearchBar.tsx`).
+
+**검증(Playwright, 실 로컬 백엔드+dev 서버, 저장소 `frontend/e2e/`, 총 61/61 통과)** — 아래 "후속
+코드리뷰 대응" 절 참고, `srch01-*.mjs` 6개 스크립트로 나뉜다(상세는 `frontend/e2e/README.md`):
+- `srch01-basic-check.mjs`(13) — regionCode/keyword 검색 렌더링, 조건 없음/1자 키워드 시 API
+  미호출, 매매↔전세 전환 무오류, 정렬 변경 시 로그 미호출, 자유 텍스트 재검색 시 로그 정확히 1회
+  (payload 키워드 일치 포함), 데스크톱 페이지 이동 시 목록 교체(누적 아님).
+- `srch01-mobile-check.mjs`(10) — 필터 버튼→바텀시트 열림/Esc·백드롭 닫힘/스크롤 잠금, 무한스크롤
+  30+ 누적, 카드 클릭→뒤로가기 시 누적 목록·스크롤 위치 복원.
+- `srch01-favorite-and-desktop-back-check.mjs`(7) — 비로그인 하트 클릭→`/login` 이동, 데스크톱
+  2페이지 이동 후 카드 클릭→뒤로가기 시 같은 페이지(page=2)·같은 목록 유지, HOME-01 히어로 검색
+  회귀(무오류, `/search`로 정상 이동).
+- `srch01-slider-boundary-and-wolse-check.mjs`(9) — 슬라이더 하한 경계(아래 "코드리뷰 확인 질문
+  답변" 참고), 월세 카드 표시.
+- `srch01-keyboard-and-error-check.mjs`(16) — 자동완성 키보드 네비게이션, 슬라이더 방향키, 바텀시트
+  포커스 트랩, 에러 배너 재시도, 잘못된 regionCode 서버 메시지.
+- `srch01-tablet-check.mjs`(6) — 768px 사이드바 레이아웃, 필터·페이지네이션 왕복.
+
+### SCR-SRCH-01 후속 코드리뷰 대응 (2026-09-27, 같은 날 2차)
+
+PR 리뷰가 확인을 요구한 두 질문과, Figma 9개 노드를 실제로 스크린샷 대조해 찾은 구조적 불일치를
+정리한다. 브랜치는 그대로 `feature/frontend/search-result`.
+
+**확인 질문 1 — StrictMode 버그 수정 방식.** StrictMode를 끄거나 우회하지 않았다(`main.tsx`의
+`<StrictMode>`는 그대로 있다, 확인 완료). 수정은 effect를 멱등하게 만드는 방식이었다 —
+`hasFetchedRef`(실제 응답을 한 번이라도 받았는지) 가드를 추가해, StrictMode의 개발 모드
+mount→cleanup→remount가 몇 번을 돌든 "아직 데이터를 못 받은 상태"의 저장 시도는 전부 no-op이 되게
+했다. 이 가드는 StrictMode 유무와 무관하게 항상 성립하는 불변식(빈 상태를 캐시에 쓰지 않는다)이라,
+StrictMode를 끄더라도 그대로 안전하게 남는 코드다.
+
+**확인 질문 2 — 슬라이더 하한 경계.** 세 슬라이더(전용면적/거래금액/건축년도) 모두 `buildApiQuery()`/
+`serializeSearchParams()`의 생략 조건이 `filters.xxxMin !== defaults.xxxMin`으로 대칭적으로
+구현돼 있어, **상한만 옮기고 하한을 건드리지 않으면 하한 파라미터 자체가 요청에 실리지 않는다**
+(값이 "1970"으로 전송되는 게 아니라 파라미터 키 자체가 없다 — 서버 입장에서는 "하한 필터 없음"과
+동일하다). 즉 건축년도 UI 하한(1970)이 실제 DB 최솟값(1968)보다 높아도, 사용자가 하한을 건드리지
+않는 한 1968~69년 준공 단지가 걸러지는 일은 없다. 이전엔 이 사실을 코드 리딩만으로 판단했는데, 이번에
+Playwright 네트워크 캡처로 직접 확인했다 — 상한만 바꿔 "필터 적용"을 눌렀을 때 실제 요청 URL에
+`buildYearMin`/`areaMin`/`amountMin` 파라미터가 전혀 없음을 확인했고, 기본 상태(필터 미적용)에서
+실제로 "건축 1987년"처럼 1990년 이전 준공 단지가 목록에 포함됨을 확인했다(검증:
+`srch01-slider-boundary-and-wolse-check.mjs`).
+
+**Figma 시각 비교 — 9개 노드(fileKey `bStwE4wZ5kXm7K6fBMeg6Z`) 스크린샷 대조로 발견한 구조적
+불일치.** 처음 구현할 때는 그리드 카드(HOME-01)의 레이아웃을 그대로 가져다 세로로만 재배치했는데,
+실제 Figma(4:1704 데스크톱/24:9405 모바일/24:10388 태블릿 결과 목록)를 스크린샷으로 대조해보니 여러
+군데가 실제와 달랐다:
+
+| 불일치 | 수정 |
+| --- | --- |
+| 재검색 바에 제출 버튼이 없었다(Enter만 가능) | `SearchBar`의 `inline` variant에 검색 아이콘+"재검색" 텍스트 버튼을 추가했다(Figma 노드 24:9445 구조) — 입력창 옆에 나란히, `type="submit"`이라 Enter와 동일한 `submit()` 경로를 탄다. |
+| 필터 패널에 "필터" 제목과 상단 초기화 링크가 없었다(하단 "초기화"+"필터 적용" 버튼 쌍만 있었음) | `FilterPanel`에 `showHeader` prop(기본 true)을 추가해 "필터" 제목 + 작은 "↺ 초기화" 링크를 위에 그린다(아이콘은 Figma 노드 4:1777 실제 SVG, `RotateCcwIcon` 신설). 모바일 `BottomSheet`는 자기 헤더에 이미 "필터" 제목이 있어 중복을 피하려 `showHeader={false}`로 끈다 — 데스크톱/태블릿 사이드바만 이 헤더를 그린다. |
+| 카드 레이아웃이 그리드 카드처럼 가격을 주소 아래 왼쪽 컬럼에 세로로 쌓고 있었다 | 실제 Figma는 [썸네일 \| 배지·이름·주소·메타(건축년도 포함, flex-1) \| 하트·가격·㎡당가격(오른쪽, `items-end`)] 3분할 구조다. 메타 줄에서 ㎡당가격을 빼고 대신 "· 건축 {year}년"을 추가했다(`complex.approvalDate.slice(0,4)`) — ㎡당가격은 오른쪽 컬럼의 가격 바로 아래로 옮겼다. SIMILAR 배너는 이 3분할 행 전체 아래에 카드 전체 너비로 걸치도록 바꿨다(이전엔 왼쪽 텍스트 컬럼 안에만 있었다). |
+| 모바일에 "필터"/"지도" 버튼이 각각 따로였다(필터 버튼 전체너비 하나, 지도 링크는 정렬 바 안에) | Figma(24:9405)는 이 둘을 한 행에 나란히 두고(필터 버튼엔 카운트가 "필터 3"처럼 이어붙은 문자열이 아니라 원형 배지로 분리돼 있다 — `<span>` 배지로 구현), 정렬 바(총 N건+정렬칩)에는 모바일에서 지도 링크를 다시 넣지 않는다(`md:flex` 이상에서만 표시). |
+| `FilterIcon`이 Figma 미대조 추정 아이콘이었다 | Figma 노드 24:9456(모바일 필터 버튼 아이콘)의 실제 SVG로 교체했다 — 3줄 슬라이더 픽토그램. |
+| 월세 카드에도 ㎡당가격이 표시되고 있었다 | 월세는 대표거래 금액이 보증금뿐이라 월세금액을 빼고 계산한 "㎡당가격"이 실제 총비용을 왜곡한다 — `complex.rentType === 'WOLSE'`일 때 이 줄 자체를 렌더링하지 않는다(검증: `srch01-slider-boundary-and-wolse-check.mjs`). |
+
+**태블릿(768px) 레이아웃도 스크린샷(24:10388)으로 재확인 — 데스크톱과 완전히 같은 사이드바 구조,
+드로어 아님(기존 판단 재확인).** `srch01-tablet-check.mjs`로 사이드바 표시·모바일 전용 필터
+알약 버튼 미표시·필터 적용/페이지네이션 왕복까지 실제 상호작용으로 검증했다(6/6) — 스크린샷 확인만
+하고 상호작용은 안 해봤던 이전 상태의 완결 필요를 해소했다.
+
+**추가 접근성 보완 — `aria-valuetext`.** 네이티브 `<input type="range">`는 `aria-valuenow`/min/max는
+자동으로 노출하지만 사람이 읽는 값 설명(`aria-valuetext`, 예: "10㎡", "20억 이상")은 붙지 않는다 —
+`RangeSlider`의 두 range input에 `aria-valuetext`를 추가해 스크린리더가 실제 단위·"이상" 의미까지
+읽어주게 했다.
+
+**검증**: 자동완성 키보드 네비게이션(↑/↓로 하이라이트 이동, Esc로 닫힘, 하이라이트 상태에서 Enter 시
+지역 선택, 아무 것도 선택 안 한 채 Enter 시 자유 텍스트 검색 폴백, 자동완성 API 실패해도 자유 텍스트
+검색 가능), 슬라이더 방향키 조작+숫자 입력 동기화, 바텀시트 포커스 트랩(Tab 30회 반복해도 시트 밖으로
+안 나감), 에러 배너(서버 5xx 메시지 그대로 표시) → "다시 시도" 재요청 성공, 잘못된 regionCode 형식의
+서버 메시지("지역 코드가 올바르지 않습니다") 표시 — 전부 `srch01-keyboard-and-error-check.mjs`(16/16).
+
+**e2e 스크립트를 저장소로 이동 완료.** 저장소 밖 `C:\Users\super\homesense-e2e-scripts\`(캐시 정리
+시 유실 위험이 있던 임시 보관 위치)에 있던 27개 Playwright 스크립트 전부를 `frontend/e2e/`로 옮겨
+커밋했다 — AUTH-02/AUTH-03/SCR-LEGAL-01/SCR-SRCH-01 전체(위 각 절이 "저장소 밖에 보관"이라고 적어둔
+문장들은 이제 stale하다, 실제 위치는 `frontend/e2e/`). CI 편입은 하지 않았다(요청 범위 밖) — 실행
+전제·명령어는 `frontend/e2e/README.md` 참고. `run-all.mjs`에 SRCH-01 6개 스크립트를 추가했다. 저장소
+편입 후 처음으로 실 백엔드로 전체 스위트를 돌리며 이 작업과 무관한 잔여 문제 하나를 발견·수정했다 —
+`auth03-password-reset-check.mjs`가 여전히 옛 버튼 문구("재설정 다시 요청")를 찾고 있었다(AUTH-03
+Figma 대조 재작업 때 "재설정 링크 다시 요청"으로 바뀌었지만, 당시 Docker가 꺼져 있어 실 백엔드로
+재실행해 확인한 적이 없었다 — CLAUDE.md SCR-AUTH-03 절에 이미 "다음에 백엔드가 떠 있는 세션에서 한 번
+돌려 확인하라"로 남겨져 있던 항목). 스크립트의 locator 문자열만 고쳐 23/23으로 통과시켰다 — SRCH-01/
+HOME-01 코드와는 무관하다.
+
+**후속 확인(PR 리뷰 요청, 2026-09-27 3차) — `ComplexCard`(UIC-05)는 HOME-01과 공유하는 컴포넌트라,
+`list` variant 재작업이 `grid` variant(HOME-01 인기 단지)에 새어들지 않았는지 별도로 확인했다.**
+코드 확인 — `grid` 분기(122~147행)는 이번 세션 전체에서 단 한 줄도 건드리지 않았다(이 세션에서 실제로
+수정한 것은 51~120행의 `list` 분기와 그 안에서만 쓰는 `favoriteButtonList`뿐이고, `grid` 분기가 쓰는
+`favoriteButton`은 1차 라운드에서 이미 확정된 형태 그대로다). Figma 대조 — HOME-01 프레임(3:2 로그인/
+4:1232 비로그인 데스크톱, 24:7860 태블릿, 24:7370 모바일)을 스크린샷으로 다시 받아, 같은 `bStwE4wZ5kXm7K6fBMeg6Z`
+파일 안에 HOME-01과 SRCH-01이 나란히 있다는 것도 함께 확인했다(별도 파일이 아니다). 라이브 렌더링
+대조 — 실제 로컬 백엔드로 뜬 HOME-01을 1280/768/392 세 뷰포트에서 스크린샷으로 캡처해(`home01-card-
+screenshots.mjs`) Figma와 나란히 비교한 결과 완전히 일치했다(원형 하트가 썸네일 위 오버레이, 배지
+좌하단, 가격이 주소 바로 아래 같은 컬럼, 건축년도·㎡당가격 없음, 모바일은 가로 스크롤 캐러셀) —
+의도치 않은 변화 없음. 이 확인을 매번 스크린샷 육안 대조로 반복하지 않도록 `home01-card-check.mjs`
+(신규, 18/18 — 3개 뷰포트 × "건축"/"만원당㎡" 문구 없음·하트 절대위치·pageerror 없음·비로그인 하트
+클릭 시 `/login` 이동)로 자동화해 `run-all.mjs`에 추가했다. **테스트 작성 중 발견한 사실(버그
+아님)** — `RecommendedComplexes.tsx`가 모바일 가로 스크롤용과 데스크톱/태블릿 그리드용 두 세트의
+카드를 항상 함께 렌더링하고 CSS(`hidden md:grid` 류)로 뷰포트에 맞는 쪽만 보이게 하는 기존 구조라(둘
+다 렌더되므로 `button[aria-pressed]` 개수가 항상 카드 수의 2배로 나온다), 테스트는 `:visible` 필터로
+현재 뷰포트에서 실제로 보이는 카드만 골라야 한다 — 이 프로젝트의 다른 반응형 분기(위 `srch01-tablet-
+check.mjs`가 "필터 적용" 버튼과 모바일 전용 "필터" pill을 혼동했던 것과 같은 종류의 테스트 함정).
+
+**최종 e2e 실행 결과(2026-09-27, 이번 카드 재작업 이후의 코드로 실 백엔드+dev 서버 재기동 후 전체
+재실행)**: `frontend/e2e/`의 25개 테스트 스크립트(스크린샷 전용 2개 제외) **전부 통과** —
+`run-all.mjs`의 22개 스크립트가 전부 exit 0(`node run-all.mjs`로 확인), `run-all.mjs` 목록에 없는
+독립 스크립트 3개(`auth03-figma-parity-check` 19/19, `auth03-transient-token-error-check` 9/9,
+`auth03-form-cooldown-check` 9/9)도 개별 실행해 확인했다. SRCH-01 전용 스위트만 좁혀 보면 여전히
+61/61(basic 13/mobile 10/favorite-and-desktop-back 7/slider-boundary-and-wolse 9/keyboard-and-error
+16/tablet 6)이고, 이번에 추가한 `home01-card-check`(18/18)는 이 61건과 별도로 카운트한다 — 즉 SRCH-01
+자체의 61/61은 카드 재작업 전후로 변함이 없고(재작업이 `list` 분기 안에서만 일어났으므로), 이번에
+새로 확인·자동화한 것은 "그 재작업이 `grid` 분기(HOME-01)에 영향을 주지 않았다"는 사실이다.
+
+**MAP-01 재사용을 위한 설계 — `FilterPanel`은 SRCH-01 전용 요소(결과 카운트, URL 동기화)를 갖지 않고
+`draft`+콜백 4개(`onChangeDraft`/`onApply`/`onReset`)만 받는다.** MAP-01이 이 컴포넌트를 그대로
+가져다 쓰되, 지도 뷰포트 기반 필터(팬/줌 시 자동 갱신 등 MAP-01 고유 요구)는 별도로 얹어야 한다 —
+`RangeSlider`도 마찬가지로 범용이다.
+
+### SCR-SRCH-01 버그 수정 — 필터 패널의 미적용 draft가 재검색 시 조용히 무시됨 (2026-09-27, 실사용자 리포트)
+
+**증상(사용자 리포트 원문)**: "메인화면에서 거래유형을 매매/전세/월세 원하는 것을 클릭한 뒤에 검색을
+하면 거래 유형에 맞게 잘 검색이 되는데 검색 결과 화면에서 거래 유형을 선택하고나서 재검색 하려고
+하면 재검색이 되지 않습니다." — HOME-01에서는 정상, SRCH-01에서만 재현.
+
+**재현(Playwright로 실측 확인)**: SRCH-01에서 필터 패널로 월세를 선택하고 "필터 적용"을 눌러
+`rentType=WOLSE`를 URL에 커밋한다. 이어서 필터 패널에서 매매로 바꾸되 **"필터 적용"을 누르지 않고**
+재검색바(SearchBar)에서 같은 지역명으로 Enter를 치면, 실제 API 요청은 여전히 `rentType=WOLSE`로
+나갔다 — 방금 화면에서 선택한 "매매"가 반영되지 않고 조용히 이전 값으로 검색됐다.
+
+**원인**: `SearchResultsPage.handleSubmitKeyword()`/`handleSelectRegion()`이 공유 훅
+`useExecuteSearch()`를 호출할 때 `base` 인자로 `filters`(URL에서 파싱한, 이미 커밋된 값)를 넘기고
+있었다 — `draft`(FilterPanel이 들고 있는, "필터 적용"을 누르기 전까지는 URL에 반영되지 않는 현재
+선택 상태)를 넘겨야 했는데 반대로 짰다. `useExecuteSearch()`는 `dealType`/`housingTypes`를
+`overrides`가 없으면 `base`(=`start`)에서 그대로 가져오므로(`features/search/useExecuteSearch.ts`),
+재검색 시 `draft`에만 존재하는 미적용 변경이 통째로 버려지고 URL의 옛 값으로 대체됐다. HOME-01의
+히어로 검색은 이 문제가 없는데, HOME-01은 애초에 "적용" 버튼이 있는 별도 draft 상태 없이 토글을
+누르는 즉시 그 값으로 검색을 실행하기 때문이다(SRCH-01만의 2단계 draft→적용 구조에서만 성립하는
+버그).
+
+**수정**: 두 핸들러 모두 `base` 인자를 `filters` → `draft`로 교체했다(`SearchResultsPage.tsx`). 이제
+재검색은 "필터 패널에 현재 보이는 선택 상태"를 그대로 유지한 채 지역/키워드만 교체한다 — 사용자
+입장에서는 "화면에 선택된 대로 검색된다"는 직관과 일치한다. 재검색 후에는 URL이 바뀌므로 기존
+동기화 로직(`filters !== filtersSnapshot`이면 `setDraft(filters)`)이 곧바로 draft를 새 URL 값으로
+다시 맞춘다 — 그래서 재검색 직후 필터 패널도 "매매"가 선택된 상태로 정확히 보인다(별도 처리 불필요,
+기존 동기화 effect가 이미 담당).
+
+**검증**: 신규 `frontend/e2e/srch01-draft-carryover-check.mjs`(6/6) — 필터 적용으로 월세 커밋 →
+"적용" 없이 매매로 바꾸고 키워드 재검색 → 요청에 `dealCategory=SALE`이 실리고 `rentType=WOLSE`가
+남지 않음 → URL에는 매매(기본값)라 `dealType` 파라미터 자체가 생략됨 → 재검색 후 필터 패널이
+"매매"를 선택 상태로 보여줌(draft/filters 재동기화) → 같은 방식으로 지역 자동완성 선택 경로도
+전세(`rentType=JEONSE`)가 정확히 반영됨. `run-all.mjs`에 추가(23개 스크립트 전체 재실행, 전부 통과 —
+SRCH-01 기존 61건 + `home01-card-check` 18건 + 이번 신규 6건, 회귀 없음).
 
 ### 배포(Vercel) — SPA 클라이언트 라우팅 rewrite
 

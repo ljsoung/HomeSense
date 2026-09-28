@@ -8,6 +8,16 @@
  * `LocalDate.now().minusMonths(1)`)다. 거래가 0건 있는 지역과 0건인 지역을 구분해야 하므로 항상
  * 노출한다(avgPrice/changeRate가 null이어도 tradeCount는 0으로 내려온다).
  */
+/**
+ * GET /api/regions?query= (RegionAutocompleteResponse.java 실제 필드 그대로). legalDongCd는
+ * SRCH-01의 `regionCode` 검색 파라미터로 그대로 넘길 10자리 법정동코드이고, fullPath는 자동완성
+ * 목록에 그대로 보여줄 "시도 시군구 읍면동" 전체 경로다(라이브 curl로 확인).
+ */
+export interface RegionAutocompleteResponse {
+  legalDongCd: string;
+  fullPath: string;
+}
+
 export interface InterestRegionSummaryResponse {
   favoriteRegionId: number;
   legalDongCd: string;

@@ -1,10 +1,23 @@
 import { httpClient } from '../../lib/httpClient';
 import type { ApiResponse } from '../../types/api';
-import type { InterestRegionSummaryResponse } from './types';
+import type { InterestRegionSummaryResponse, RegionAutocompleteResponse } from './types';
 
 export async function getInterestSummary(): Promise<InterestRegionSummaryResponse[]> {
   const { data } = await httpClient.get<ApiResponse<InterestRegionSummaryResponse[]>>('/api/regions/interest-summary');
   return (data as Extract<ApiResponse<InterestRegionSummaryResponse[]>, { success: true }>).data;
+}
+
+/**
+ * UIC-03 자동완성이 쓴다. `signal`로 디바운스 중 더 최신 입력이 들어오면 이전 요청을 취소한다 —
+ * 실패해도(네트워크 오류·취소 등) 호출부가 빈 배열로 우아하게 폴백해 자유 텍스트 검색 자체를
+ * 막지 않는다(확정 사항 참고).
+ */
+export async function autocompleteRegions(query: string, signal?: AbortSignal): Promise<RegionAutocompleteResponse[]> {
+  const { data } = await httpClient.get<ApiResponse<RegionAutocompleteResponse[]>>('/api/regions', {
+    params: { query },
+    signal,
+  });
+  return (data as Extract<ApiResponse<RegionAutocompleteResponse[]>, { success: true }>).data;
 }
 
 /**
