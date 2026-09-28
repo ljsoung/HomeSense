@@ -28,6 +28,8 @@ const SCRIPTS = [
   'home01-header-session-check',
   // 헤더 계정 메뉴와 로그아웃(서버 폐기 포함). 실 백엔드+Redis 필요.
   'home01-logout-check',
+  // 여러 탭이 동시에 세션을 복원할 때 재발급이 브라우저 전체에서 1회인지(Web Locks). 실 백엔드+Redis 필요.
+  'home01-multitab-refresh-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;
