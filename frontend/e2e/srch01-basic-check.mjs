@@ -133,19 +133,27 @@ await withPage(async (page) => {
   ok('홈에서 1글자 검색: 검색 기록 요청 없음', logCalls.length === 0);
 });
 
-// 3-2) 재검색 바에서 1글자 제출은 이동 자체를 막고, 고치면 안내가 사라진다.
+// 3-2) 재검색 바에서 1글자 제출은 이동도 요청도 막고, 고치면 안내가 사라진다. regionCode로 연 화면이라
+//      최초 로드 때 정상 검색 요청이 1건 나가므로, "제출 이후 새로 나간 요청"이 0건인지 검사한다.
 await withPage(async (page) => {
-  const { searchCalls } = await openSearch(page, 'regionCode=4111100000&regionLabel=test');
+  const { searchCalls, logCalls } = await openSearch(page, 'regionCode=4111100000&regionLabel=test');
+  ok('재검색 전제: 최초 로드 검색 요청 1건', searchCalls.length === 1);
   const before = page.url();
   const input = page.locator('input[role="combobox"]').first();
-  await input.fill('래');
-  await input.press('Enter');
-  await page.waitForTimeout(300);
-  ok('재검색 1글자 제출: URL 그대로', page.url() === before);
-  ok('재검색 1글자 제출: 2자 안내 표시', (await alertText(page)).includes('2자 이상'));
+
+  for (const [label, value] of [['1글자', '래'], ['이모지 1개(코드포인트 1자)', '😀']]) {
+    const searchesBefore = searchCalls.length;
+    await input.fill(value);
+    await input.press('Enter');
+    await page.waitForTimeout(500);
+    ok(`재검색 ${label} 제출: 새 검색 요청 0건`, searchCalls.length === searchesBefore);
+    ok(`재검색 ${label} 제출: 검색 기록 요청 0건`, logCalls.length === 0);
+    ok(`재검색 ${label} 제출: URL 그대로`, page.url() === before);
+    ok(`재검색 ${label} 제출: 2자 안내 표시`, (await alertText(page)).includes('2자 이상'));
+  }
+
   await input.fill('래미');
   ok('재검색 입력을 고치면 안내가 사라짐', (await page.getByRole('alert').count()) === 0);
-  void searchCalls;
 });
 
 // 4) 매매/전세/월세 전환 — 카드 필드 존재 확인 및 에러 없음

@@ -139,11 +139,18 @@ const browser = await chromium.launch();
     }
   });
   await page.goto(`${BASE}/search?regionCode=4111100000&regionLabel=test`);
-  await page.waitForSelector('text=일시적인 서버 오류가 발생했습니다.', { timeout: 10000 });
-  ok('서버 5xx 시 에러 배너에 서버 메시지 그대로 표시', true);
-  await page.getByRole('button', { name: '다시 시도' }).click();
-  await page.waitForSelector('a[href^="/complexes/"]', { timeout: 10000 });
-  ok('다시 시도 클릭 시 재요청 성공하여 결과 렌더링', true);
+  // 대기 결과를 반환값으로 받아 단언한다 — 실패하면 시간 초과 예외가 아니라 어느 조건이 틀렸는지 FAIL로 드러난다.
+  const bannerMessageShown = await page.getByText('일시적인 서버 오류가 발생했습니다.').waitFor({ timeout: 10000 }).then(() => true, () => false);
+  ok('서버 5xx 시 에러 배너에 서버 메시지 그대로 표시', bannerMessageShown);
+  const retryButton = page.getByRole('button', { name: '다시 시도' });
+  ok('서버 5xx 시 "다시 시도" 버튼 표시', await retryButton.isVisible());
+  ok('서버 5xx 시 결과 카드 없음', (await page.locator('a[href^="/complexes/"]').count()) === 0);
+  const callsBeforeRetry = callCount;
+  if (await retryButton.isVisible()) await retryButton.click();
+  const cardsRendered = await page.locator('a[href^="/complexes/"]').first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+  ok('다시 시도 클릭 시 검색을 한 번 더 요청', callCount === callsBeforeRetry + 1);
+  ok('다시 시도 클릭 시 재요청 성공하여 결과 렌더링', cardsRendered);
+  ok('재요청 성공 후 에러 배너가 사라짐', (await page.getByText('일시적인 서버 오류가 발생했습니다.').count()) === 0);
   await context.close();
 }
 
