@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { HousingType } from '../complex/types';
 import { logSearch } from './api';
-import { defaultFilters, serializeSearchParams, type DealTypeUi, type SearchFilters } from './searchParams';
+import { defaultFilters, keywordIssue, serializeSearchParams, type DealTypeUi, type SearchFilters } from './searchParams';
 
 export type SearchExecuteInput =
   | { mode: 'region'; regionCode: string; regionLabel: string }
@@ -41,7 +41,9 @@ export function useExecuteSearch() {
         return;
       }
       const loggedKeyword = input.mode === 'region' ? input.regionLabel : input.keyword.trim();
-      if (loggedKeyword) {
+      // 규칙(2~50자)을 어긴 검색어는 기록하지 않는다 — 검색 화면이 요청 없이 안내만 보이고, 서버의
+      // 기록 API도 같은 규칙으로 400을 돌려준다.
+      if (loggedKeyword && (input.mode === 'region' || keywordIssue(loggedKeyword) === null)) {
         void logSearch(loggedKeyword);
       }
     },

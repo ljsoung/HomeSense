@@ -55,17 +55,97 @@ await withPage(async (page) => {
   ok('조건 없이 진입 시 API 호출 없음', !apiCalled);
 });
 
-// 3) 1글자 키워드 제출 시 클라이언트에서 막힘(서버 호출 안 함)
-await withPage(async (page) => {
-  let apiCalled = false;
-  await page.route('**/api/complexes/search*', async (route) => {
-    apiCalled = true;
-    await route.continue();
+// 3) URL로 복원한 검색어도 요청 전에 서버(SearchKeywordPolicy)와 같은 규칙으로 검사한다 — 제출 시점
+//    검사만 있을 때는 /search?keyword=래 같은 URL이 그대로 서버로 가서 400 → 일반 오류 화면이 떴다.
+async function openSearch(page, query) {
+  const searchCalls = [];
+  const logCalls = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/complexes/search')) searchCalls.push(r.url());
+    if (r.url().includes('/api/search/logs')) logCalls.push(r.postData());
   });
-  await page.goto(`${BASE}/search?keyword=%EB%9E%98`); // "래" 1글자
-  await page.waitForTimeout(500);
-  ok('1글자 keyword로 진입해도 검색 실행 안 함(조건 없음 취급 아님 — URL엔 남되 서버 호출 skip 여부 확인)', true);
-  void apiCalled;
+  await page.goto(`${BASE}/search?${query}`);
+  await page.waitForLoadState('networkidle');
+  return { searchCalls, logCalls };
+}
+const alertText = async (page) => (await page.getByRole('alert').allTextContents()).join(' ');
+const errorBannerShown = (page) => page.getByRole('button', { name: '다시 시도' }).isVisible();
+
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, `keyword=${encodeURIComponent('래')}`);
+  ok('URL 1글자 keyword: 검색 API 호출 없음', searchCalls.length === 0);
+  ok('URL 1글자 keyword: 입력창 아래 2자 안내 표시', (await alertText(page)).includes('2자 이상'));
+  ok('URL 1글자 keyword: 본문에 2자 안내(오류 화면 아님)', await page.getByText('검색어는 2자 이상 입력해주세요.').last().isVisible());
+  ok('URL 1글자 keyword: 일반 오류 배너 없음', !(await errorBannerShown(page)));
+  ok('URL 1글자 keyword: 입력창에 검색어 복원', (await page.locator('input[role="combobox"]').inputValue()) === '래');
+});
+
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, `keyword=${encodeURIComponent('😀')}`);
+  ok('URL 이모지 1개(코드포인트 1자): 서버처럼 2자 미만 처리, API 호출 없음', searchCalls.length === 0 && (await alertText(page)).includes('2자 이상'));
+});
+
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, `keyword=${encodeURIComponent('가'.repeat(51))}`);
+  ok('URL 51자 keyword: 50자 안내, API 호출 없음', searchCalls.length === 0 && (await alertText(page)).includes('50자 이하'));
+});
+
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, `keyword=${encodeURIComponent('가'.repeat(50))}`);
+  ok('URL 50자 keyword: 경계값은 검색 실행(API 호출)', searchCalls.length === 1 && !(await errorBannerShown(page)));
+});
+
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, 'keyword=%20%20');
+  ok('URL 공백만 keyword: 조건 없음 안내, API 호출 없음', searchCalls.length === 0 && (await page.getByText('검색어를 입력하세요').isVisible()));
+});
+
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, `keyword=${encodeURIComponent(' 래미 ')}`);
+  ok('URL 2글자(앞뒤 공백) keyword: trim 후 검색 실행', searchCalls.length === 1 && new URL(searchCalls[0]).searchParams.get('keyword') === '래미');
+});
+
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, `regionCode=4111100000&regionLabel=test&keyword=${encodeURIComponent('래')}`);
+  ok('regionCode와 1글자 keyword가 함께면 regionCode로 검색(keyword 미전송)', searchCalls.length === 1 && !new URL(searchCalls[0]).searchParams.has('keyword'));
+});
+
+// 3-1) 홈 히어로에서 1글자로 검색 — 결과 화면이 요청 없이 안내하고, 검색 기록도 남기지 않는다.
+await withPage(async (page) => {
+  const searchCalls = [];
+  const logCalls = [];
+  page.on('request', (r) => {
+    if (r.url().includes('/api/complexes/search')) searchCalls.push(r.url());
+    if (r.url().includes('/api/search/logs')) logCalls.push(r.postData());
+  });
+  await page.goto(`${BASE}/`);
+  await page.waitForLoadState('networkidle');
+  const input = page.locator('input[role="combobox"]').first();
+  await input.fill('래');
+  await input.press('Enter');
+  await page.waitForURL(/\/search\?/, { timeout: 5000 });
+  await page.waitForLoadState('networkidle');
+  ok('홈에서 1글자 검색: 결과 화면에서 검색 API 호출 없음', searchCalls.length === 0);
+  // 홈에서 이동한 직후엔 networkidle이 검색 화면 렌더보다 먼저 끝날 수 있어 안내가 뜰 때까지 기다린다.
+  const alertShown = await page.getByRole('alert').filter({ hasText: '2자 이상' }).waitFor({ timeout: 5000 }).then(() => true, () => false);
+  ok('홈에서 1글자 검색: 2자 안내 표시', alertShown);
+  ok('홈에서 1글자 검색: 안내가 뜬 뒤에도 검색 API 호출 없음', searchCalls.length === 0);
+  ok('홈에서 1글자 검색: 검색 기록 요청 없음', logCalls.length === 0);
+});
+
+// 3-2) 재검색 바에서 1글자 제출은 이동 자체를 막고, 고치면 안내가 사라진다.
+await withPage(async (page) => {
+  const { searchCalls } = await openSearch(page, 'regionCode=4111100000&regionLabel=test');
+  const before = page.url();
+  const input = page.locator('input[role="combobox"]').first();
+  await input.fill('래');
+  await input.press('Enter');
+  await page.waitForTimeout(300);
+  ok('재검색 1글자 제출: URL 그대로', page.url() === before);
+  ok('재검색 1글자 제출: 2자 안내 표시', (await alertText(page)).includes('2자 이상'));
+  await input.fill('래미');
+  ok('재검색 입력을 고치면 안내가 사라짐', (await page.getByRole('alert').count()) === 0);
+  void searchCalls;
 });
 
 // 4) 매매/전세/월세 전환 — 카드 필드 존재 확인 및 에러 없음

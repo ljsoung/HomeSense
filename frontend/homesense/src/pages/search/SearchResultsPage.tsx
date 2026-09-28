@@ -19,10 +19,13 @@ import {
   buildApiQuery,
   defaultFilters,
   hasSearchCondition,
-  isKeywordTooShort,
+  KEYWORD_ISSUE_MESSAGE,
+  keywordIssue,
   parseSearchParams,
   serializeSearchParams,
   SORT_OPTIONS,
+  urlKeywordIssue,
+  type KeywordIssue,
   type SearchFilters,
 } from '../../features/search/searchParams';
 import { useExecuteSearch } from '../../features/search/useExecuteSearch';
@@ -78,7 +81,9 @@ export function SearchResultsPage() {
 
   const filters = useMemo(() => parseSearchParams(searchParams), [searchParams]);
   const [keywordInput, setKeywordInput] = useState(filters.keyword ?? filters.regionLabel ?? '');
-  const [keywordTooShort, setKeywordTooShort] = useState(false);
+  // 재검색 바에서 제출한 검색어의 규칙 위반(제출 시점 검사). URL에서 복원한 검색어의 위반은
+  // 아래 invalidUrlKeyword로 따로 파생한다.
+  const [submitIssue, setSubmitIssue] = useState<KeywordIssue | null>(null);
 
   const [accumulated, setAccumulated] = useState<ComplexSummaryResponse[]>([]);
   const [pageMeta, setPageMeta] = useState<PageMeta | null>(null);
@@ -132,7 +137,9 @@ export function SearchResultsPage() {
         return;
       }
 
-      if (!hasSearchCondition(filters)) {
+      // URL로 들어온 검색어(직접 입력·새로고침·뒤로가기·홈 히어로에서 1글자로 검색)도 제출 시점과 같은
+      // 규칙으로 요청 전에 막는다 — 서버가 400을 돌려줘 일반 오류 화면이 뜨는 대신 안내 문구를 보인다.
+      if (!hasSearchCondition(filters) || urlKeywordIssue(filters)) {
         setAccumulated([]);
         setPageMeta(null);
         setStatus('idle');
@@ -199,18 +206,19 @@ export function SearchResultsPage() {
   // 바꾸고 "적용" 없이 재검색바로 검색할 때 그 변경이 조용히 무시되고 이전 URL의 값으로 검색되는
   // 버그가 있었다(실측 확인: 월세 적용 후 매매로 바꾸고 Enter → 요청이 여전히 rentType=WOLSE로 나감).
   const handleSubmitKeyword = (value: string) => {
-    if (isKeywordTooShort(value)) {
-      setKeywordTooShort(true);
+    const issue = keywordIssue(value);
+    if (issue) {
+      setSubmitIssue(issue);
       return;
     }
-    setKeywordTooShort(false);
+    setSubmitIssue(null);
     const trimmed = value.trim();
     if (!trimmed) return;
     executeSearch({ mode: 'keyword', keyword: trimmed }, draft);
   };
 
   const handleSelectRegion = (region: { legalDongCd: string; fullPath: string }) => {
-    setKeywordTooShort(false);
+    setSubmitIssue(null);
     executeSearch({ mode: 'region', regionCode: region.legalDongCd, regionLabel: region.fullPath }, draft);
   };
 
@@ -255,6 +263,9 @@ export function SearchResultsPage() {
 
   const conditionLabel = filters.regionLabel ?? filters.keyword ?? '선택한 지역';
   const noCondition = !hasSearchCondition(filters);
+  const invalidUrlKeyword = urlKeywordIssue(filters);
+  // 입력창의 안내 문구: 방금 제출한 검색어의 위반이 우선이고, 없으면 URL 검색어의 위반을 보인다.
+  const inlineIssue = submitIssue ?? invalidUrlKeyword;
   const isFirstLoad = status === 'loading' && accumulated.length === 0;
   const hasMore = !!pageMeta && filters.page < pageMeta.totalPages;
   const activeFilterCount = [
@@ -279,13 +290,17 @@ export function SearchResultsPage() {
               value={keywordInput}
               onChange={(value) => {
                 setKeywordInput(value);
-                setKeywordTooShort(false);
+                setSubmitIssue(null);
               }}
               onSubmitKeyword={handleSubmitKeyword}
               onSelectRegion={handleSelectRegion}
               placeholder="지역명·단지명(건물명)으로 재검색"
             />
-            {keywordTooShort && <p className="text-[12px] text-[#e7000b]">검색어는 2자 이상 입력해주세요.</p>}
+            {inlineIssue && (
+              <p role="alert" className="text-[12px] text-[#e7000b]">
+                {KEYWORD_ISSUE_MESSAGE[inlineIssue]}
+              </p>
+            )}
             <p className="text-[13px] text-[#6a7282]">
               <span className="font-semibold text-[#101828]">&lsquo;{conditionLabel}&rsquo;</span> 검색 결과
             </p>
@@ -326,6 +341,14 @@ export function SearchResultsPage() {
                 icon={<SearchIcon className="size-5" />}
                 title="검색어를 입력하세요"
                 description="지역명이나 단지명으로 검색해보세요."
+              />
+            </div>
+          ) : invalidUrlKeyword ? (
+            <div className="flex min-h-[320px] items-center justify-center rounded-[16px] border border-[#e5e7eb] bg-white">
+              <EmptyState
+                icon={<SearchIcon className="size-5" />}
+                title={KEYWORD_ISSUE_MESSAGE[invalidUrlKeyword]}
+                description="검색어를 고쳐 다시 검색해보세요."
               />
             </div>
           ) : status === 'error' && accumulated.length === 0 ? (

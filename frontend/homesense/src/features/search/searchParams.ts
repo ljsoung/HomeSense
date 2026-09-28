@@ -95,7 +95,8 @@ export function parseSearchParams(params: URLSearchParams): SearchFilters {
   return {
     regionCode: params.get('regionCode') ?? undefined,
     regionLabel: params.get('regionLabel') ?? undefined,
-    keyword: params.get('keyword') ?? undefined,
+    // 공백만 있는 keyword는 서버(SearchKeywordPolicy.normalizeOptional)와 같이 "조건 없음"으로 본다.
+    keyword: params.get('keyword')?.trim() || undefined,
     housingTypes: housingTypes.length > 0 ? housingTypes : defaults.housingTypes,
     dealType: dealTypeFromUrl(params.get('dealType')),
     areaMin: num('areaMin', defaults.areaMin),
@@ -185,14 +186,39 @@ export function buildApiQuery(filters: SearchFilters, pageSizeOverride?: number)
   return params;
 }
 
-/** 클라이언트 쪽 최소 검증 — 서버(2~50자)와 동일한 규칙을 미리 걸러 왕복 없이 즉시 피드백한다. */
-export function isKeywordTooShort(keyword: string): boolean {
-  const trimmed = keyword.trim();
-  return trimmed.length > 0 && trimmed.length < 2;
+export const KEYWORD_MIN_LENGTH = 2;
+export const KEYWORD_MAX_LENGTH = 50;
+
+export type KeywordIssue = 'tooShort' | 'tooLong';
+
+/**
+ * 서버 SearchKeywordPolicy와 같은 규칙 — 앞뒤 공백을 뺀 뒤 코드포인트 기준 2~50자(이모지 1개는 1자).
+ * 공백만이면 검사 대상이 아니다(조건 없음, null). 규칙을 어긴 검색어로 요청하면 서버가 400
+ * INVALID_SEARCH_KEYWORD를 돌려주므로, 제출 시점뿐 아니라 URL에서 복원한 검색어도 요청 전에 이
+ * 함수로 거른다.
+ */
+export function keywordIssue(keyword: string): KeywordIssue | null {
+  const length = [...keyword.trim()].length;
+  if (length === 0) return null;
+  if (length < KEYWORD_MIN_LENGTH) return 'tooShort';
+  if (length > KEYWORD_MAX_LENGTH) return 'tooLong';
+  return null;
 }
 
-export const KEYWORD_MAX_LENGTH = 50;
+export const KEYWORD_ISSUE_MESSAGE: Record<KeywordIssue, string> = {
+  tooShort: `검색어는 ${KEYWORD_MIN_LENGTH}자 이상 입력해주세요.`,
+  tooLong: `검색어는 ${KEYWORD_MAX_LENGTH}자 이하로 입력해주세요.`,
+};
 
 export function hasSearchCondition(filters: SearchFilters): boolean {
   return Boolean(filters.regionCode || filters.keyword);
+}
+
+/**
+ * URL의 검색 조건 중 요청 전에 막아야 할 검색어 문제. regionCode가 있으면 API는 keyword를 싣지 않으므로
+ * (buildApiQuery) 검사하지 않는다.
+ */
+export function urlKeywordIssue(filters: SearchFilters): KeywordIssue | null {
+  if (filters.regionCode || !filters.keyword) return null;
+  return keywordIssue(filters.keyword);
 }
