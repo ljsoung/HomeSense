@@ -30,6 +30,8 @@ const SCRIPTS = [
   'home01-logout-check',
   // 여러 탭이 동시에 세션을 복원할 때 재발급이 브라우저 전체에서 1회인지(Web Locks). 실 백엔드+Redis 필요.
   'home01-multitab-refresh-check',
+  // 세션 복원 중 다른 계정으로 로그인해도 늦은 재발급 결과가 덮어쓰지 않는지. 실 백엔드+Redis 필요.
+  'home01-login-during-restore-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;

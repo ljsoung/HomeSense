@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AuthContext } from './authContext';
 import { login as loginRequest, signup as signupRequest } from './api';
-import { restoreSession, revokeSessionOnServer } from './session';
+import { restoreSession, revokeSessionOnServer, storeTokens } from './session';
 import { getMe } from '../user/api';
 import type { UserResponse } from '../user/types';
 import { tokenStorage } from '../../lib/tokenStorage';
@@ -17,14 +17,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStorage.getAccessToken() !== null ? 'checking' : 'anonymous',
   );
   const [user, setUser] = useState<UserResponse | null>(null);
+  // 로그인·가입이 성공했을 때(토큰 저장 직전)와 로그아웃이 시작될 때 올린다. 복원(restoreSession)은 시작
+  // 시점의 값을 기억했다가, 끝났을 때 값이 바뀌었으면 결과를 버린다 — 사용자가 직접 바꾼 세션을 늦게 끝난
+  // 복원 결과가 덮지 않게 한다. 로그인 "시작"에 올리지 않는 이유: 비밀번호가 틀려 로그인이 실패하면 복원
+  // 결과까지 버려져 헤더가 확인 중 상태에 머문다. 저장소 쪽 덮어쓰기는 session.ts의 compare-and-set이 막는다.
+  const sessionGeneration = useRef(0);
 
   useEffect(() => {
     if (status !== 'checking') {
       return;
     }
     let cancelled = false;
+    const generationAtStart = sessionGeneration.current;
     void restoreSession().then((result) => {
-      if (cancelled) return;
+      if (cancelled || sessionGeneration.current !== generationAtStart) return;
       if (result.kind === 'authenticated') {
         setUser(result.user);
         setStatus('authenticated');
@@ -42,7 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 실패해도 로그인 자체는 성공이라 인증 상태는 유지한다(GNB는 닉네임 없이 기본값으로 그린다).
   const login = useCallback(async (payload: LoginRequest) => {
     const result = await loginRequest(payload);
-    tokenStorage.setTokens(result.accessToken, result.refreshToken);
+    sessionGeneration.current += 1;
+    await storeTokens(result.accessToken, result.refreshToken);
     setStatus('authenticated');
     try {
       setUser(await getMe());
@@ -55,7 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 포함하므로, login()과 달리 별도 getMe() 호출 없이 그 자리에서 바로 user를 채운다.
   const signup = useCallback(async (payload: SignupRequest) => {
     const result = await signupRequest(payload);
-    tokenStorage.setTokens(result.accessToken, result.refreshToken);
+    sessionGeneration.current += 1;
+    await storeTokens(result.accessToken, result.refreshToken);
     setUser({ userId: result.userId, email: result.email, nickname: result.nickname, createdAt: '' });
     setStatus('authenticated');
   }, []);
@@ -63,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 서버 폐기(최선 노력) 후 로컬 토큰을 지운다 — 서버가 응답하지 않아도 이 기기에서는 반드시
   // 로그아웃된다.
   const logout = useCallback(async () => {
+    sessionGeneration.current += 1;
     try {
       await revokeSessionOnServer();
     } catch {

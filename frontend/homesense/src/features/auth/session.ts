@@ -44,6 +44,14 @@ const REFRESH_TIMEOUT_MS = 10_000;
  */
 const LOCK_WAIT_TIMEOUT_MS = 5_000;
 
+/**
+ * 재발급한 토큰은 응답을 기다리는 동안 저장소가 바뀌지 않았을 때만 저장한다(compare-and-set). 그사이
+ * 로그인·가입(같은 탭이든 다른 탭이든)이나 로그아웃으로 저장소가 바뀌었다면 결과를 버린다 — 조건 없이
+ * 덮어쓰면 A 세션 복원 중에 B로 로그인했을 때 B의 토큰이 A의 재발급 결과로 바뀌어, 화면은 B인데 이후 인증
+ * 요청은 A로 나가는 상태가 됐다(Codex P1, e2e home01-login-during-restore-check로 재현). 비교와 저장
+ * 사이에 await가 없어 이 탭 안에서는 끼어들 틈이 없고, 다른 탭의 로그인 저장은 같은 락(`storeTokens`)을
+ * 거친다. 버린 재발급 결과(A의 새 Refresh Token)는 어디에도 저장되지 않는다.
+ */
 async function refreshTokens(refreshToken: string): Promise<void> {
   const { data } = await httpClient.post<ApiResponse<LoginResponse>>(
     '/api/auth/refresh',
@@ -51,6 +59,7 @@ async function refreshTokens(refreshToken: string): Promise<void> {
     { timeout: REFRESH_TIMEOUT_MS },
   );
   const tokens = (data as Extract<ApiResponse<LoginResponse>, { success: true }>).data;
+  if (tokenStorage.getRefreshToken() !== refreshToken) return;
   tokenStorage.setTokens(tokens.accessToken, tokens.refreshToken);
 }
 
@@ -144,6 +153,20 @@ async function verify(): Promise<SessionResult> {
     return { kind: 'invalid' };
   } catch {
     return { kind: 'unreachable' }; // 락 대기 초과 — 지우지 못했으므로 다음 로드에서 다시 확인한다.
+  }
+}
+
+/**
+ * 로그인·가입으로 받은 토큰을 저장한다. 재발급과 같은 락을 거쳐, 다른 탭에서 진행 중인 재발급의
+ * compare-and-set이나 조건부 삭제와 순서가 섞이지 않게 한다. 락 대기가 상한을 넘겨도(다른 탭이 락을 쥔
+ * 채 멈춘 경우) 방금 로그인한 결과는 반드시 저장한다 — 그때도 재발급 쪽 compare-and-set이 이 값을
+ * 덮어쓰지 않게 막는다.
+ */
+export async function storeTokens(accessToken: string, refreshToken: string): Promise<void> {
+  try {
+    await withRefreshLock(() => tokenStorage.setTokens(accessToken, refreshToken));
+  } catch {
+    tokenStorage.setTokens(accessToken, refreshToken);
   }
 }
 
