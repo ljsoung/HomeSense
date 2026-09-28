@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { autocompleteRegions } from '../../features/region/api';
 import type { RegionAutocompleteResponse } from '../../features/region/types';
 import { KEYWORD_MAX_LENGTH } from '../../features/search/searchParams';
@@ -11,8 +11,11 @@ interface SearchBarProps {
   onSubmitKeyword: (value: string) => void;
   onSelectRegion: (region: RegionAutocompleteResponse) => void;
   placeholder?: string;
-  /** 'stacked' = HOME-01 히어로(검색창 아래 큰 버튼), 'inline' = SRCH-01 재검색 바(한 줄, 버튼 없음). */
-  variant?: 'stacked' | 'inline';
+  /**
+   * 'hero' = HOME-01 히어로(Figma 4:1302 — 2px 테두리 입력창 안 오른쪽에 "검색" 버튼),
+   * 'inline' = SRCH-01 재검색 바(입력창 옆에 별도 "재검색" 버튼).
+   */
+  variant?: 'hero' | 'inline';
   autoFocus?: boolean;
 }
 
@@ -39,7 +42,7 @@ export function SearchBar({
   onSubmitKeyword,
   onSelectRegion,
   placeholder = '지역명·단지명(건물명)으로 검색',
-  variant = 'stacked',
+  variant = 'hero',
   autoFocus,
 }: SearchBarProps) {
   const listboxId = useId();
@@ -138,9 +141,9 @@ export function SearchBar({
     }
   };
 
-  const inputBox = (
+  const renderInputBox = (boxClassName: string, trailing?: ReactNode) => (
     <div className="relative flex-1">
-      <div className="flex items-center gap-3 rounded-[14px] border border-[#e5e7eb] px-3.5 py-2.5 focus-within:border-brand">
+      <div className={`flex items-center gap-3 rounded-[14px] border-[#e5e7eb] px-3.5 focus-within:border-brand ${boxClassName}`}>
         <SearchIcon className="size-[18px] shrink-0 text-[#99a1af]" />
         <input
           ref={inputRef}
@@ -181,6 +184,7 @@ export function SearchBar({
             <XIcon className="size-4" />
           </button>
         )}
+        {trailing}
       </div>
       {open && suggestions.length > 0 && (
         <ul
@@ -217,7 +221,7 @@ export function SearchBar({
         }}
         className="flex items-center gap-2"
       >
-        {inputBox}
+        {renderInputBox('border py-2.5')}
         {/* Figma 재검색 바(4:1704/24:9405/24:10388)는 입력창 옆에 "재검색" 버튼을 별도로 둔다 —
             Enter 제출만 지원하던 이전 구현은 이 버튼이 없어 마우스만 쓰는 사용자에게 제출 수단이
             안 보였다. */}
@@ -239,12 +243,18 @@ export function SearchBar({
         event.preventDefault();
         submit();
       }}
-      className="flex flex-col gap-3 p-4"
+      className="px-4 py-3"
     >
-      {inputBox}
-      <button type="submit" className="h-[45px] w-full rounded-[14px] bg-brand text-[14px] font-semibold text-white hover:bg-[#0d4f48]">
-        검색
-      </button>
+      {renderInputBox(
+        'border-2 py-2.5',
+        <button
+          type="submit"
+          className="flex shrink-0 items-center gap-1.5 rounded-[10px] bg-brand px-5 py-2 text-[13.5px] font-semibold whitespace-nowrap text-white hover:bg-[#0d4f48]"
+        >
+          <SearchIcon className="size-3.5" />
+          검색
+        </button>,
+      )}
     </form>
   );
 }

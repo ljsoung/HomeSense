@@ -10,13 +10,14 @@ const POPULAR_LIMIT = 8;
 interface RecommendedComplexesProps {
   favoritedIds: Set<number>;
   onToggleFavorite: (complexId: number) => void;
+  pendingFavoriteId: number | null;
 }
 
 /**
  * HOME-01 구성요소 5 — GET /api/complexes/popular 연동. 완료 조건: 모바일은 1.2장 보이는 가로
  * 스크롤 캐러셀(Figma 모바일 프레임 확인), 데스크톱/태블릿은 그리드.
  */
-export function RecommendedComplexes({ favoritedIds, onToggleFavorite }: RecommendedComplexesProps) {
+export function RecommendedComplexes({ favoritedIds, onToggleFavorite, pendingFavoriteId }: RecommendedComplexesProps) {
   const [complexes, setComplexes] = useState<ComplexSummaryResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -70,6 +71,7 @@ export function RecommendedComplexes({ favoritedIds, onToggleFavorite }: Recomme
                 complex={complex}
                 isFavorited={favoritedIds.has(complex.complexId)}
                 onToggleFavorite={() => onToggleFavorite(complex.complexId)}
+                favoritePending={pendingFavoriteId === complex.complexId}
                 className="w-[83%] shrink-0"
               />
             ))}
@@ -81,6 +83,7 @@ export function RecommendedComplexes({ favoritedIds, onToggleFavorite }: Recomme
                 complex={complex}
                 isFavorited={favoritedIds.has(complex.complexId)}
                 onToggleFavorite={() => onToggleFavorite(complex.complexId)}
+                favoritePending={pendingFavoriteId === complex.complexId}
               />
             ))}
           </div>

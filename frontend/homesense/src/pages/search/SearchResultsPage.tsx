@@ -77,7 +77,7 @@ export function SearchResultsPage() {
   const location = useLocation();
   const isMobile = useIsMobile();
   const executeSearch = useExecuteSearch();
-  const { favoritedIds, toggleFavorite } = useFavoriteToggle();
+  const { favoritedIds, toggleFavorite, pendingFavoriteId } = useFavoriteToggle();
 
   const filters = useMemo(() => parseSearchParams(searchParams), [searchParams]);
   const [keywordInput, setKeywordInput] = useState(filters.keyword ?? filters.regionLabel ?? '');
@@ -431,6 +431,7 @@ export function SearchResultsPage() {
                     variant="list"
                     isFavorited={favoritedIds.has(complex.complexId)}
                     onToggleFavorite={() => toggleFavorite(complex.complexId)}
+                    favoritePending={pendingFavoriteId === complex.complexId}
                   />
                 ))}
               </div>

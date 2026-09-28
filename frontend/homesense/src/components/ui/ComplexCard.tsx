@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { HomeIcon } from '../icons/HomeIcon';
 import { HeartIcon } from '../icons/HeartIcon';
 import { DataTrustBadge } from './DataTrustBadge';
+import { favoritePendingClass } from './favoritePending';
 import { describeDealAmount, formatAddress, formatArea, formatDottedDate, formatKoreanPrice, formatPricePerArea } from '../../lib/format';
 import type { ComplexSummaryResponse } from '../../features/complex/types';
 
@@ -9,6 +10,8 @@ interface ComplexCardProps {
   complex: ComplexSummaryResponse;
   isFavorited: boolean;
   onToggleFavorite: () => void;
+  /** 세션 확인 중에 누른 하트가 판정을 기다리는 중이면 true — 하트에 aria-busy와 대기 표시를 단다. */
+  favoritePending?: boolean;
   className?: string;
   /** 'grid' = HOME-01 인기 단지(기존 동작 그대로), 'list' = SRCH-01 검색 결과 목록형 카드. */
   variant?: 'grid' | 'list';
@@ -30,7 +33,7 @@ const SIMILAR_CAPTION = '지번 등 일부 정보가 정확히 일치하지 않�
  * 세그먼트를 렌더링하지 않는다(2026-09-17, CPX-RCV-RGN 카드 표시 필드 보강으로 필드 자체는
  * 이미 채워짐 — CLAUDE.md SCR-HOME-01 절 참고).
  */
-export function ComplexCard({ complex, isFavorited, onToggleFavorite, className = '', variant = 'grid' }: ComplexCardProps) {
+export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePending = false, className = '', variant = 'grid' }: ComplexCardProps) {
   const isSimilar = complex.matchMethod === 'SIMILAR';
   const favoriteButton = (
     <button
@@ -42,7 +45,8 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, className 
       }}
       aria-label={isFavorited ? '관심 매물 해제' : '관심 매물 등록'}
       aria-pressed={isFavorited}
-      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/80 text-[#4a5565] shadow-[0_1px_3px_rgba(0,0,0,0.1),0_1px_2px_rgba(0,0,0,0.1)] backdrop-blur-sm transition-colors hover:text-[#e7000b]"
+      aria-busy={favoritePending || undefined}
+      className={`flex size-8 shrink-0 items-center justify-center rounded-full bg-white/80 text-[#4a5565] shadow-[0_1px_3px_rgba(0,0,0,0.1),0_1px_2px_rgba(0,0,0,0.1)] backdrop-blur-sm transition-colors hover:text-[#e7000b] ${favoritePendingClass(favoritePending)}`}
     >
       <HeartIcon filled={isFavorited} className={isFavorited ? 'text-[#ff2056]' : ''} />
     </button>
@@ -64,7 +68,8 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, className 
         }}
         aria-label={isFavorited ? '관심 매물 해제' : '관심 매물 등록'}
         aria-pressed={isFavorited}
-        className="p-0.5 text-[#99a1af] transition-colors hover:text-[#e7000b]"
+        aria-busy={favoritePending || undefined}
+        className={`rounded-full p-0.5 text-[#99a1af] transition-colors hover:text-[#e7000b] ${favoritePendingClass(favoritePending)}`}
       >
         <HeartIcon filled={isFavorited} className={isFavorited ? 'text-[#ff2056]' : ''} />
       </button>

@@ -1,9 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
 import { HomeIcon } from '../icons/HomeIcon';
 import { useAuth } from '../../features/auth/useAuth';
+import { UserMenu } from './UserMenu';
 
+// `/`(HOME-01)에서도 "지역·단지 검색"을 활성으로 표시한다 — Figma 데스크톱 로그인(3:2)/비로그인
+// (4:1232) 두 프레임 모두 홈 화면에서 이 탭을 활성 상태로 그린다(홈 히어로 자체가 검색 진입점).
 const NAV_LINKS = [
-  { to: '/search', label: '지역·단지 검색' },
+  { to: '/search', label: '지역·단지 검색', alsoActiveOn: ['/'] },
   { to: '/map', label: '지도로 보기' },
   { to: '/favorites', label: '관심목록' },
   { to: '/notifications', label: '알림' },
@@ -13,8 +16,9 @@ const NAV_LINKS = [
  * UIC-01. 데스크톱/태블릿에서 노출되고, 모바일은 BottomTabNav(UIC-02)로 대체된다(md:flex 이하는
  * MainLayout이 숨긴다). 완료 조건 — 로그인/비로그인에 따라 우측 영역이 아바타+닉네임+알림벨
  * (로그인) 또는 로그인/회원가입 버튼(비로그인)으로 갈린다(Figma 데스크톱 로그인 3:2 / 로그아웃
- * 4:1232 노드로 각각 확인). 아바타는 로그아웃 버튼이 아니라 MY-01(마이페이지, 자리표시)로
- * 이동한다 — Figma 정적 목업엔 드롭다운/로그아웃 어포던스가 없어 임의로 만들지 않았다.
+ * 4:1232 노드로 각각 확인). 아바타를 누르면 "마이페이지 / 로그아웃" 메뉴(UserMenu)가 열린다 —
+ * Figma 정적 목업엔 로그아웃 위치가 없지만 로그아웃할 방법 자체가 없던 상태를 해소하려고 추가했다
+ * (마이페이지 MY-01이 구현되면 로그아웃을 그 화면에 둘지 다시 판단한다).
  *
  * 알림 진입점은 중앙 네비의 "알림" 텍스트 링크 하나뿐이다(`/notifications` → MY-04 알림 이력 —
  * `NotificationController.getNotifications()`/`NotificationResponse` Javadoc이 명시적으로
@@ -28,7 +32,9 @@ const NAV_LINKS = [
  * 정의서) 밖의 참고 자료일 뿐이라 문서 쪽을 따랐다(CLAUDE.md SCR-HOME-01 절 판단 기록 참고).
  */
 export function Gnb() {
-  const { isAuthenticated, user } = useAuth();
+  // 세션 확인(getMe/refresh)이 끝나기 전에는 우측 영역을 비워 둔다 — 예전엔 토큰이 있다는 것만으로
+  // 빈 이니셜 아바타를 그려, 만료된 토큰만 남은 비로그인 사용자가 로그인된 것처럼 보였다.
+  const { isAuthenticated, authChecking } = useAuth();
   const location = useLocation();
 
   return (
@@ -43,7 +49,7 @@ export function Gnb() {
 
         <nav className="flex flex-1 items-center justify-center gap-0.5">
           {NAV_LINKS.map((link) => {
-            const active = location.pathname === link.to;
+            const active = location.pathname === link.to || (link.alsoActiveOn?.includes(location.pathname) ?? false);
             return (
               <Link
                 key={link.to}
@@ -58,14 +64,9 @@ export function Gnb() {
           })}
         </nav>
 
-        <div className="flex shrink-0 items-center gap-1.5">
-          {isAuthenticated ? (
-            <Link to="/my" className="flex items-center gap-2 rounded-full py-1 pr-3 pl-1 hover:bg-[#f7f8fa]">
-              <span className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
-                {(user?.nickname ?? ' ').charAt(0)}
-              </span>
-              <span className="text-[13px] font-medium text-[#364153]">{user?.nickname ?? ''}</span>
-            </Link>
+        <div className="flex shrink-0 items-center gap-1.5" aria-busy={authChecking}>
+          {authChecking ? null : isAuthenticated ? (
+            <UserMenu variant="desktop" />
           ) : (
             <>
               <Link to="/login" className="rounded-[10px] px-3 py-1.5 text-[13.5px] font-medium text-[#364153] hover:bg-[#f7f8fa]">
