@@ -134,11 +134,15 @@ const stored = (page) => page.evaluate((keys) => keys.map((k) => localStorage.ge
   ok('모바일: 아바타(계정 메뉴) 표시', await trigger.isVisible());
   await trigger.click();
   const menu = page.getByRole('menu', { name: '계정 메뉴' });
+  // 메뉴가 안 열리면 boundingBox()가 null이라, 예외로 죽지 않고 FAIL로 드러나게 null을 먼저 거른다.
   const box = await menu.boundingBox();
-  ok('모바일: 메뉴가 화면 안에 들어옴', box.x >= 0 && box.x + box.width <= 392);
+  ok('모바일: 메뉴가 화면 안에 들어옴', box !== null && box.x >= 0 && box.x + box.width <= 392);
   await menu.getByRole('menuitem', { name: '로그아웃' }).click();
-  await header.getByRole('link', { name: '로그인' }).waitFor({ timeout: 5000 });
-  ok('모바일: 로그아웃 후 로그인 링크 복귀', true);
+  // 대기 결과를 반환값으로 받아 단언한다 — 실패하면 시간 초과 예외가 아니라 이 항목의 FAIL로 드러난다.
+  const loginLinkShown = await header.getByRole('link', { name: '로그인' }).waitFor({ timeout: 5000 }).then(() => true, () => false);
+  ok('모바일: 로그아웃 후 로그인 링크 복귀', loginLinkShown);
+  ok('모바일: 로그아웃 후 계정 메뉴(아바타) 사라짐', (await trigger.count()) === 0);
+  ok('모바일: 로컬 토큰 삭제', (await stored(page)).every((v) => v === null));
   ok('모바일: 서버 로그아웃 200', JSON.stringify(logoutResponses) === '[200]');
   ok('pageerror 없음(모바일)', errors.length === 0);
   await context.close();
