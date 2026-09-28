@@ -17,6 +17,8 @@ const SCRIPTS = [
   'srch01-basic-check', 'srch01-mobile-check', 'srch01-favorite-and-desktop-back-check',
   'srch01-slider-boundary-and-wolse-check', 'srch01-keyboard-and-error-check', 'srch01-tablet-check',
   'srch01-draft-carryover-check',
+  // 모바일 필터 바텀시트 — 값 변경 시 포커스 유지, 시트 라디오 선택 표시. 실 백엔드 필요.
+  'srch01-bottomsheet-focus-check',
   // UIC-03 — 자동완성 늦은 응답 경합(덮어쓰기·blur 후 재오픈). 실 백엔드 필요.
   'uic03-autocomplete-race-check',
   // HOME-01 — SRCH-01이 공유 컴포넌트(ComplexCard)를 재작업한 뒤 그리드 variant(HOME-01)에 영향이

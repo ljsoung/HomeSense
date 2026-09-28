@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Checkbox } from './Checkbox';
 import { RangeSlider } from './RangeSlider';
 import { RotateCcwIcon } from '../icons/RotateCcwIcon';
@@ -38,6 +39,11 @@ const formatEok = (manwon: number) => {
  * 실제 URL(=검색 조건)에 반영된다 — 이 패널 자체는 URL을 직접 건드리지 않는다.
  */
 export function FilterPanel({ draft, onChangeDraft, onApply, onReset, showHeader = true }: FilterPanelProps) {
+  // 라디오 그룹 이름은 인스턴스마다 달라야 한다 — SRCH-01 모바일은 숨겨진 데스크톱 사이드바와 바텀시트에
+  // FilterPanel을 동시에 렌더하는데, 둘이 같은 name을 쓰면 브라우저가 6개 라디오를 한 그룹으로 묶어
+  // 문서 전체에서 하나만 체크되게 한다. 그 결과 시트에서 거래유형을 바꾸면 체크가 숨겨진 사이드바
+  // 쪽으로 넘어가 시트에는 아무것도 선택되지 않은 것처럼 보였다.
+  const dealTypeGroupName = `dealType-${useId()}`;
   const toggleHousingType = (type: HousingType, checked: boolean) => {
     onChangeDraft((prev) => {
       const next = checked ? [...new Set([...prev.housingTypes, type])] : prev.housingTypes.filter((t) => t !== type);
@@ -78,7 +84,8 @@ export function FilterPanel({ draft, onChangeDraft, onApply, onReset, showHeader
             <label key={option} className="flex cursor-pointer items-center gap-2.5">
               <input
                 type="radio"
-                name="dealType"
+                name={dealTypeGroupName}
+                value={option}
                 checked={draft.dealType === option}
                 onChange={() => onChangeDraft((prev) => ({ ...prev, dealType: option }))}
                 className="size-4 accent-brand"

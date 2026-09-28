@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useEffectEvent, useRef, type ReactNode } from 'react';
 
 interface BottomSheetProps {
   open: boolean;
@@ -17,6 +17,12 @@ const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled
 export function BottomSheet({ open, onClose, title, children }: BottomSheetProps) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  // Esc 처리는 항상 최신 onClose를 부르되 effect 의존성에는 넣지 않는다 — 호출부가 인라인 화살표
+  // 함수(`onClose={() => setSheetOpen(false)}`)를 넘기면 시트 안에서 필터를 바꿀 때마다 onClose가
+  // 새 함수가 되고, 그걸 의존성에 두면 effect가 cleanup(트리거로 포커스 복귀) → 재초기화(첫 요소로
+  // 포커스)를 반복해 라디오·슬라이더를 조작할 때마다 포커스가 닫기 버튼으로 튀었다. 포커스 트랩과
+  // 스크롤 잠금은 `open`이 바뀔 때만 시작·종료한다.
+  const closeOnEscape = useEffectEvent(() => onClose());
 
   useEffect(() => {
     if (!open) return;
@@ -30,7 +36,7 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        closeOnEscape();
         return;
       }
       if (event.key !== 'Tab' || !sheetRef.current) return;
@@ -53,7 +59,7 @@ export function BottomSheet({ open, onClose, title, children }: BottomSheetProps
       document.body.style.overflow = originalOverflow;
       triggerRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
