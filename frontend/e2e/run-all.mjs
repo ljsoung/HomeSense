@@ -32,6 +32,8 @@ const SCRIPTS = [
   'home01-multitab-refresh-check',
   // 세션 복원 중 다른 계정으로 로그인해도 늦은 재발급 결과가 덮어쓰지 않는지. 실 백엔드+Redis 필요.
   'home01-login-during-restore-check',
+  // 세션 확인 중 하트 클릭 등 인증 의존 동작이 판정까지 미뤄지는지. 실 백엔드+Redis 필요.
+  'home01-auth-checking-actions-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;

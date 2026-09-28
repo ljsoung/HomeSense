@@ -1,3 +1,4 @@
+import { favoritePendingClass } from '../../components/ui/favoritePending';
 import { useEffect, useState } from 'react';
 import { ClockIcon } from '../../components/icons/ClockIcon';
 import { HeartIcon } from '../../components/icons/HeartIcon';
@@ -14,6 +15,7 @@ const HOUSING_TYPE_LABEL: Record<string, string> = { APT: '아파트', VILLA: '�
 interface RecentViewsProps {
   favoritedIds: Set<number>;
   onToggleFavorite: (complexId: number) => void;
+  pendingFavoriteId: number | null;
 }
 
 /**
@@ -30,12 +32,15 @@ interface RecentViewsProps {
  * 가격/전용면적·층수는 여전히 RecentViewResponse에 없는 필드라(recent_view 테이블 자체에
  * 대응 데이터가 없음) 계속 생략한다.
  */
-export function RecentViews({ favoritedIds, onToggleFavorite }: RecentViewsProps) {
-  const { isAuthenticated } = useAuth();
+export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId }: RecentViewsProps) {
+  const { isAuthenticated, authChecking } = useAuth();
   const [views, setViews] = useState<RecentViewResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 세션 확인 중에는 불러오지 않는다 — 저장소의 옛(만료됐을 수 있는) 토큰으로 불러오면 로그인 사용자에게도
+  // 비로그인 기준 목록과 "로그인하면…" 문구가 잠깐 보인다. 판정이 나면 그 기준으로 한 번 불러온다.
   useEffect(() => {
+    if (authChecking) return;
     let cancelled = false;
     const load = async () => {
       setLoading(true);
@@ -58,7 +63,7 @@ export function RecentViews({ favoritedIds, onToggleFavorite }: RecentViewsProps
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, authChecking]);
 
   return (
     <div className="flex h-full flex-col rounded-[16px] border border-[#f3f4f6] bg-white p-5 shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.1)]">
@@ -67,7 +72,7 @@ export function RecentViews({ favoritedIds, onToggleFavorite }: RecentViewsProps
         <p className="text-[15px] font-bold text-[#101828]">최근 조회한 단지</p>
       </div>
 
-      {loading ? (
+      {loading || authChecking ? (
         <div className="flex flex-1 items-center justify-center">
           <Spinner />
         </div>
@@ -111,7 +116,8 @@ export function RecentViews({ favoritedIds, onToggleFavorite }: RecentViewsProps
                       onClick={() => onToggleFavorite(view.complexId)}
                       aria-label={favoritedIds.has(view.complexId) ? '관심 매물 해제' : '관심 매물 등록'}
                       aria-pressed={favoritedIds.has(view.complexId)}
-                      className="shrink-0 text-[#99a1af] hover:text-[#e7000b]"
+                      aria-busy={pendingFavoriteId === view.complexId || undefined}
+                      className={`shrink-0 rounded-full text-[#99a1af] hover:text-[#e7000b] ${favoritePendingClass(pendingFavoriteId === view.complexId)}`}
                     >
                       <HeartIcon
                         filled={favoritedIds.has(view.complexId)}

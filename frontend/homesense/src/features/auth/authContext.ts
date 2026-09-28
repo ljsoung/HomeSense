@@ -3,7 +3,11 @@ import type { UserResponse } from '../user/types';
 import type { LoginRequest, SignupRequest } from './types';
 
 export interface AuthContextValue {
-  /** 서버가 세션을 확인한 경우에만 true — localStorage에 토큰이 있다는 것만으로는 true가 아니다. */
+  /**
+   * 서버가 세션을 확인한 경우에만 true — localStorage에 토큰이 있다는 것만으로는 true가 아니다.
+   * `authChecking`이 true인 동안에는 로그인 사용자도 false다. 이 값이 false라는 이유만으로 비로그인으로
+   * 단정하고 동작(로그인 화면 이동, 비로그인 문구 표시 등)하지 말고, 확인이 끝날 때까지 미루거나 로딩으로 둔다.
+   */
   isAuthenticated: boolean;
   /**
    * 새로고침 후 저장된 토큰을 서버로 확인(getMe, 필요하면 refresh 1회)하는 동안 true. 이 동안은

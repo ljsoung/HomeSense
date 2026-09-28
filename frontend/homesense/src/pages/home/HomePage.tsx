@@ -8,7 +8,7 @@ import { useFavoriteToggle } from './useFavoriteToggle';
 
 /** SCR-HOME-01. */
 export function HomePage() {
-  const { favoritedIds, toggleFavorite } = useFavoriteToggle();
+  const { favoritedIds, toggleFavorite, pendingFavoriteId } = useFavoriteToggle();
 
   return (
     <MainLayout>
@@ -16,9 +16,9 @@ export function HomePage() {
       <MapBanner />
       <section className="mx-auto grid max-w-[1280px] gap-5 px-4 pt-8 md:grid-cols-2 md:px-8">
         <InterestRegionSummary />
-        <RecentViews favoritedIds={favoritedIds} onToggleFavorite={toggleFavorite} />
+        <RecentViews favoritedIds={favoritedIds} onToggleFavorite={toggleFavorite} pendingFavoriteId={pendingFavoriteId} />
       </section>
-      <RecommendedComplexes favoritedIds={favoritedIds} onToggleFavorite={toggleFavorite} />
+      <RecommendedComplexes favoritedIds={favoritedIds} onToggleFavorite={toggleFavorite} pendingFavoriteId={pendingFavoriteId} />
     </MainLayout>
   );
 }
