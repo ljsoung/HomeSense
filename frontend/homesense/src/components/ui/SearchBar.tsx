@@ -20,6 +20,14 @@ const DEBOUNCE_MS = 300;
 const MIN_QUERY_LENGTH = 2;
 
 /**
+ * 자동완성 요청에 보내는 값, `suggestionsQueryRef`에 기록하는 값, 재포커스 시 비교하는 값이 모두
+ * 같은 정규화를 거치도록 한 곳에 둔다 — 한쪽만 바뀌면 재포커스 비교가 조용히 어긋난다.
+ */
+function normalizeQuery(raw: string): string {
+  return raw.trim();
+}
+
+/**
  * UIC-03 — 자유 텍스트 검색 + 지역 자동완성을 겸하는 검색창. ARIA combobox 패턴(입력에
  * role=combobox/aria-expanded/aria-controls/aria-activedescendant, 목록에 role=listbox/option)을
  * 그대로 따른다. 자동완성 실패(네트워크 오류 등)는 목록을 비우기만 할 뿐 자유 텍스트 검색 자체를
@@ -41,36 +49,54 @@ export function SearchBar({
   const [highlighted, setHighlighted] = useState(-1);
   const [focused, setFocused] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  // `suggestions`가 어떤 입력값으로 조회된 결과인지 — 포커스 복귀 시 현재 값과 다른 옛 제안을
+  // 다시 여는 것을 막는다(예: blur 중 URL 동기화로 값이 바뀐 경우).
+  const suggestionsQueryRef = useRef<string | null>(null);
 
   // `focused`가 아니면 자동완성을 아예 조회·오픈하지 않는다 — 재검색 바가 URL의 기존 keyword/
   // regionLabel로 미리 채워진 채 마운트될 때(SRCH-01 재검색 입력창), 사용자가 손대지 않았는데도
   // 그 초기값으로 자동완성이 떠서 바로 아래 "필터" 버튼 등 다른 요소의 클릭을 가로채는 버그가
   // 실측(Playwright)으로 확인됐다 — 포커스 여부로 "사용자가 실제로 이 입력을 조작 중인지"를
   // 구분해서 막는다.
+  //
+  // cleanup에서 타이머뿐 아니라 이미 보낸 요청도 abort한다 — 값이 바뀌거나 blur된 뒤 도착한 이전
+  // 값의 느린 응답이 최신 제안을 덮어쓰거나, blur로 닫힌 목록을 포커스 없는 상태에서 다시 여는
+  // 것을 막는다. abort된 요청의 then/catch는 signal.aborted로 걸러 상태를 건드리지 않는다
+  // (axios가 abort를 reject로 처리해도 catch가 목록을 비우지 않게).
   useEffect(() => {
     if (!focused) return;
-    const trimmed = value.trim();
+    const query = normalizeQuery(value);
+    let controller: AbortController | null = null;
     const timer = setTimeout(() => {
-      if (trimmed.length < MIN_QUERY_LENGTH) {
+      if (query.length < MIN_QUERY_LENGTH) {
         setSuggestions([]);
+        suggestionsQueryRef.current = null;
         setOpen(false);
         return;
       }
       abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      autocompleteRegions(trimmed, controller.signal)
+      const current = new AbortController();
+      controller = current;
+      abortRef.current = current;
+      autocompleteRegions(query, current.signal)
         .then((results) => {
+          if (current.signal.aborted) return;
           setSuggestions(results);
+          suggestionsQueryRef.current = query;
           setOpen(results.length > 0);
           setHighlighted(-1);
         })
         .catch(() => {
+          if (current.signal.aborted) return;
           setSuggestions([]);
+          suggestionsQueryRef.current = null;
           setOpen(false);
         });
     }, DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller?.abort();
+    };
   }, [value, focused]);
 
   const closeSuggestions = () => {
@@ -131,7 +157,7 @@ export function SearchBar({
           onKeyDown={handleKeyDown}
           onFocus={() => {
             setFocused(true);
-            if (suggestions.length > 0) setOpen(true);
+            if (suggestions.length > 0 && suggestionsQueryRef.current === normalizeQuery(value)) setOpen(true);
           }}
           onBlur={() => {
             setFocused(false);
