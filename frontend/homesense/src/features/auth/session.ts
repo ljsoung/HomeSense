@@ -187,27 +187,65 @@ export function restoreSession(): Promise<SessionResult> {
   return inflight;
 }
 
-async function postLogout(refreshToken: string): Promise<void> {
-  await httpClient.post<ApiResponse<null>>('/api/auth/logout', { refreshToken });
+/** 로그아웃 요청 하나의 응답 대기 상한 — 공유 axios 인스턴스에는 기본 timeout이 없다. */
+const LOGOUT_REQUEST_TIMEOUT_MS = 5_000;
+
+/**
+ * 로그아웃 버튼을 누른 뒤 서버 폐기를 기다리는 전체 상한. 넘기면 서버 폐기를 중단하고 로컬 로그아웃을 끝낸다
+ * (서버 폐기는 최선 노력). 로그아웃 → 401 → 재발급(락 대기 5초 + 재발급 10초) → 로그아웃으로 이어지면 요청별
+ * timeout만으로는 20초 넘게 걸릴 수 있어 전체 상한을 따로 둔다.
+ */
+const LOGOUT_REVOKE_DEADLINE_MS = 5_000;
+
+async function postLogout(refreshToken: string, signal: AbortSignal): Promise<void> {
+  await httpClient.post<ApiResponse<null>>('/api/auth/logout', { refreshToken }, { timeout: LOGOUT_REQUEST_TIMEOUT_MS, signal });
 }
 
 /**
  * 서버 쪽 Refresh Token을 폐기한다(SVC-AUTH-01.logout). 이 API는 인증이 필요해 Access Token이 만료돼
  * 401이면 한 번 재발급한 뒤 새 Refresh Token으로 다시 로그아웃한다 — 재발급으로 옛 토큰은 이미
- * 교체·폐기되므로 결과적으로 이 기기의 세션이 서버에서 확실히 끊긴다. 실패해도 호출자는 로컬 토큰을
- * 지우고 로그아웃을 완료한다(서버 폐기는 최선 노력).
+ * 교체·폐기되므로 결과적으로 이 기기의 세션이 서버에서 확실히 끊긴다.
+ *
+ * `signal`이 중단되면(전체 상한 초과) 진행 중인 로그아웃 요청을 취소하고 다음 단계로 가지 않는다 — 호출자가
+ * 로컬 로그아웃을 끝낸 뒤 사용자가 다른 계정으로 다시 로그인했을 수 있는데, 뒤늦게 이어진 이 작업이 저장소를
+ * 다시 읽어 그 새 계정의 토큰으로 로그아웃을 보내면 안 된다. 중단 뒤 늦게 도착한 재발급 결과는 저장소가 이미
+ * 바뀌었으므로 `refreshTokens`의 조건부 저장이 버린다.
  */
-export async function revokeSessionOnServer(): Promise<void> {
+async function revokeSessionOnServer(signal: AbortSignal): Promise<void> {
   const refreshToken = tokenStorage.getRefreshToken();
   if (!refreshToken) return;
   try {
-    await postLogout(refreshToken);
+    await postLogout(refreshToken, signal);
     return;
   } catch (error) {
     if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
   }
+  if (signal.aborted) return;
   // 다른 탭과 재발급이 겹치지 않게 같은 락을 거친다(다른 탭이 이미 재발급했으면 그 토큰으로 로그아웃).
   if ((await refreshAcrossTabs(refreshToken)) === 'no-session') return;
+  if (signal.aborted) return;
   const rotated = tokenStorage.getRefreshToken();
-  if (rotated) await postLogout(rotated);
+  if (rotated) await postLogout(rotated, signal);
+}
+
+/**
+ * 서버 폐기를 `LOGOUT_REVOKE_DEADLINE_MS` 안에서만 기다린다. 넘기면 중단 신호를 보내고 곧바로 돌아온다 —
+ * 호출자(`AuthProvider.logout`)는 결과와 무관하게 `finally`에서 로컬 로그아웃을 끝낸다. 예외는 던지지 않는다.
+ */
+export async function revokeSessionWithinDeadline(): Promise<void> {
+  const controller = new AbortController();
+  const deadline = new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      controller.abort();
+      resolve();
+    }, LOGOUT_REVOKE_DEADLINE_MS);
+    controller.signal.addEventListener('abort', () => clearTimeout(timer));
+  });
+  try {
+    await Promise.race([revokeSessionOnServer(controller.signal), deadline]);
+  } catch {
+    // 네트워크 오류·timeout 등 — 서버 폐기는 최선 노력이다.
+  } finally {
+    controller.abort(); // 정상 종료든 상한 초과든, 남은 단계가 이어지지 않게 한다.
+  }
 }

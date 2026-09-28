@@ -34,6 +34,8 @@ const SCRIPTS = [
   'home01-login-during-restore-check',
   // 세션 확인 중 하트 클릭 등 인증 의존 동작이 판정까지 미뤄지는지. 실 백엔드+Redis 필요.
   'home01-auth-checking-actions-check',
+  // 서버 로그아웃이 멈춰도 로컬 로그아웃이 제한 시간 안에 끝나는지. 실 백엔드+Redis 필요.
+  'home01-logout-hang-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;

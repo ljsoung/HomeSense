@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AuthContext } from './authContext';
 import { login as loginRequest, signup as signupRequest } from './api';
-import { restoreSession, revokeSessionOnServer, storeTokens } from './session';
+import { restoreSession, revokeSessionWithinDeadline, storeTokens } from './session';
 import { getMe } from '../user/api';
 import type { UserResponse } from '../user/types';
 import { tokenStorage } from '../../lib/tokenStorage';
@@ -68,18 +68,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('authenticated');
   }, []);
 
-  // 서버 폐기(최선 노력) 후 로컬 토큰을 지운다 — 서버가 응답하지 않아도 이 기기에서는 반드시
-  // 로그아웃된다.
+  // 서버 폐기(최선 노력, 상한 5초) 후 로컬 토큰을 지운다 — 서버가 응답하지 않거나 요청이 멈춰도 상한 뒤
+  // finally에서 반드시 로컬 로그아웃을 끝낸다(예전엔 멈춘 요청이 로그아웃을 영원히 붙잡았다, Codex P2).
   const logout = useCallback(async () => {
     sessionGeneration.current += 1;
     try {
-      await revokeSessionOnServer();
-    } catch {
-      // 네트워크 오류 등 — 로컬 로그아웃은 그대로 진행한다.
+      await revokeSessionWithinDeadline();
+    } finally {
+      tokenStorage.clearTokens();
+      setStatus('anonymous');
+      setUser(null);
     }
-    tokenStorage.clearTokens();
-    setStatus('anonymous');
-    setUser(null);
   }, []);
 
   const value = useMemo(
