@@ -1,7 +1,7 @@
 # HomeSense 검증 스크립트 (frontend/e2e/)
 
 AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번호 찾기 / SCR-SRCH-01 검색결과
-목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 31개(+스크린샷 전용 2개). 원래 저장소
+목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 32개(+스크린샷 전용 2개). 원래 저장소
 밖 `C:\Users\super\homesense-e2e-scripts\`에 있었으나(캐시 정리 시 유실 위험, CLAUDE.md SCR-LEGAL-01
 백로그가 이 위험을 지적했다) 저장소 안으로 옮겨 커밋했다.
 
@@ -28,7 +28,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 
 ## 실행
     npm install
-    node run-all.mjs                        # run-all.mjs 목록 26개(백엔드+Redis 필요한 것 포함)
+    node run-all.mjs                        # run-all.mjs 목록 27개(백엔드+Redis 필요한 것 포함)
     node run-all.mjs signup-age-check        # 일부만 지정
     node signup-age-check.mjs                # 단독 실행(스크립트별 PASS/FAIL 출력)
     BASE=http://localhost:5183 node srch01-basic-check.mjs   # dev 서버가 기본 포트가 아닐 때
@@ -61,6 +61,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 | srch01-bottomsheet-focus-check | SCR-SRCH-01 모바일(392px) 필터 바텀시트: (1) 시트 안에서 라디오(방향키)·슬라이더(방향키)·숫자 입력으로 값을 바꿔도 키보드 포커스가 그 컨트롤에 머묾 — 수정 전엔 호출부의 인라인 `onClose`가 매 렌더 새 함수라 BottomSheet effect가 cleanup(트리거로 포커스)→재초기화(닫기 버튼으로 포커스)를 반복했다(`useEffectEvent`로 수정), (2) 시트의 거래유형 라디오가 정확히 하나 체크됨 — 수정 전엔 숨겨진 데스크톱 사이드바 FilterPanel과 라디오 `name`이 같아 체크가 사이드바로 넘어가 시트에는 열었을 때부터 아무것도 선택되지 않은 것처럼 보였다(`useId`로 인스턴스별 name), (3) Esc 닫힘·트리거 포커스 복귀·스크롤 잠금 해제, 시트에서 고른 월세가 URL에 반영, (4) 시트·숨겨진 사이드바가 함께 렌더돼도 문서 전체 중복 id 0개·시트 안 id 참조(`for`/`aria-*`)가 모두 존재하는 요소를 가리킴·두 패널의 라디오 그룹 이름이 다름, 시트 안 라벨("연립다세대"·"월세"·"매매") 클릭 시 시트 쪽 컨트롤이 바뀜. 수정 전 코드에서 7건 실패 확인 — 23/23, 실 백엔드 필요 |
 | uic03-autocomplete-race-check | UIC-03 SearchBar 자동완성 경합: `page.route`로 "수원" 응답을 게이트에 붙잡아 순서를 확정적으로 재현한다(고정 지연으로는 디바운스 300ms 창에 맞추기 어렵다). (1) "안성"으로 바꾼 직후 수원 응답을 풀어도 입력이 "안성"인 동안 수원 후보가 한 번도 보이지 않고(MutationObserver로 스쳐 간 오염까지 기록), 최종 목록은 안성 후보만 남으며 비어 있지 않음, (2) 요청이 나간 뒤 blur하면 지연 응답이 도착해도 목록이 닫혀 있음, (3) 지연 없는 입력→마우스 클릭 선택 정상 경로 회귀. 취소 여부는 `route.fulfill` 성패가 아니라 `requestfailed` 이벤트로 판정한다(Playwright는 이미 취소된 요청에 fulfill해도 예외를 던지지 않는다). 수정 전 코드에서 4건 실패함을 확인 — 12/12, 실 백엔드 필요 |
 | home01-header-session-check | HOME-01 최상단: 비로그인/로그인 GNB, 홈에서 "지역·단지 검색" 탭 활성, 히어로 배경 사진 로드, 입력창 안 "검색" 버튼(2px 테두리, 같은 줄)으로 검색 실행(Figma 3:2/4:1232/4:1302). 세션 복원: 무효 토큰만 남으면 비로그인으로 보이고 토큰이 지워짐("로그인 안 했는데 로그인된 것처럼 보임" 리포트 재현), Access Token 무효+Refresh Token 유효면 refresh가 StrictMode 이중 effect에도 정확히 1회만 나가고 로그인 유지 — 가입 API로 테스트 계정을 만든다, 실 백엔드+Redis 필요 — 23/23 |
+| home01-logout-check | 헤더 계정 메뉴(UserMenu): 아바타 클릭 시 "마이페이지 / 로그아웃" 메뉴, 첫 항목 포커스·↑/↓ 순환·Esc(버튼으로 포커스 복귀)·바깥 클릭 닫힘. 로그아웃: 서버 `POST /api/auth/logout` 200, 로컬 토큰 삭제, 로그인 버튼 복귀, 토스트, 로그아웃 전 Refresh Token으로 재발급이 거부됨(서버 폐기 확인). Access Token이 만료된 채 로그아웃하면 401 → refresh 1회 → 재시도 200, 원래 Refresh Token도 폐기. 모바일(392px) 헤더에서도 동작 — 실 백엔드+Redis 필요 — 27/27 |
 | srch01-screenshots | SCR-SRCH-01: 데스크톱/태블릿/모바일 3개 뷰포트 스크린샷을 `./out/`에 저장(테스트 아님, 단정문 없음) — Figma 육안 대조용 |
 | home01-card-check | HOME-01: SRCH-01이 공유 컴포넌트 `ComplexCard`의 `list` variant를 재작업하면서 `grid` variant(HOME-01 인기 단지)에 실수로 영향을 주지 않았는지 1280/768/392 세 뷰포트에서 확인 — 카드에 "건축"(년도)·"만원/㎡"(평단가) 문구가 없음(list 전용 항목 미유입), 하트 버튼이 절대 위치 오버레이 유지, 비로그인 하트 클릭 시 `/login` 이동 — 18/18 |
 | home01-card-screenshots | HOME-01: 데스크톱/태블릿/모바일 3개 뷰포트 스크린샷을 `./out/`에 저장(테스트 아님) — Figma 4:1232/24:7860/24:7370 육안 대조용 |

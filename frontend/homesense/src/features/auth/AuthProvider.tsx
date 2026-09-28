@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthContext } from './authContext';
 import { login as loginRequest, signup as signupRequest } from './api';
-import { restoreSession } from './session';
+import { restoreSession, revokeSessionOnServer } from './session';
 import { getMe } from '../user/api';
 import type { UserResponse } from '../user/types';
 import { tokenStorage } from '../../lib/tokenStorage';
@@ -60,7 +60,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('authenticated');
   }, []);
 
-  const logout = useCallback(() => {
+  // 서버 폐기(최선 노력) 후 로컬 토큰을 지운다 — 서버가 응답하지 않아도 이 기기에서는 반드시
+  // 로그아웃된다.
+  const logout = useCallback(async () => {
+    try {
+      await revokeSessionOnServer();
+    } catch {
+      // 네트워크 오류 등 — 로컬 로그아웃은 그대로 진행한다.
+    }
     tokenStorage.clearTokens();
     setStatus('anonymous');
     setUser(null);

@@ -67,3 +67,27 @@ export function restoreSession(): Promise<SessionResult> {
   }
   return inflight;
 }
+
+async function postLogout(refreshToken: string): Promise<void> {
+  await httpClient.post<ApiResponse<null>>('/api/auth/logout', { refreshToken });
+}
+
+/**
+ * 서버 쪽 Refresh Token을 폐기한다(SVC-AUTH-01.logout). 이 API는 인증이 필요해 Access Token이 만료돼
+ * 401이면 한 번 재발급한 뒤 새 Refresh Token으로 다시 로그아웃한다 — 재발급으로 옛 토큰은 이미
+ * 교체·폐기되므로 결과적으로 이 기기의 세션이 서버에서 확실히 끊긴다. 실패해도 호출자는 로컬 토큰을
+ * 지우고 로그아웃을 완료한다(서버 폐기는 최선 노력).
+ */
+export async function revokeSessionOnServer(): Promise<void> {
+  const refreshToken = tokenStorage.getRefreshToken();
+  if (!refreshToken) return;
+  try {
+    await postLogout(refreshToken);
+    return;
+  } catch (error) {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
+  }
+  await refreshTokens(refreshToken);
+  const rotated = tokenStorage.getRefreshToken();
+  if (rotated) await postLogout(rotated);
+}

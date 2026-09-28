@@ -88,7 +88,7 @@ const header = (page) => page.locator('header').first();
 {
   const { context, page, errors, refreshCalls } = await openHome({ tokens: { access: 'stale.access.token', refresh: 'stale.refresh.token' } });
   ok('무효 토큰: 로그인 버튼 표시(로그인된 것처럼 보이지 않음)', await header(page).getByRole('link', { name: '로그인' }).isVisible());
-  ok('무효 토큰: 아바타(/my) 링크 없음', (await header(page).locator('a[href="/my"]').count()) === 0);
+  ok('무효 토큰: 계정 메뉴(아바타) 없음', (await header(page).getByRole('button', { name: /계정 메뉴/ }).count()) === 0);
   ok('무효 토큰: 관심 지역 요약 대신 가입 유도 카드', await page.getByText('관심 지역을 등록하고').isVisible());
   const stored = await page.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [ACCESS_KEY, REFRESH_KEY]);
   ok('무효 토큰: localStorage 토큰이 지워짐', stored.every((v) => v === null));
@@ -100,7 +100,7 @@ const header = (page) => page.locator('header').first();
 // 3) Access Token 무효 + Refresh Token 유효 — 한 번만 재발급하고 로그인 유지
 {
   const { context, page, errors, refreshCalls } = await openHome({ tokens: { access: 'expired.access.token', refresh: signup.refreshToken } });
-  const avatar = header(page).locator('a[href="/my"]');
+  const avatar = header(page).getByRole('button', { name: /계정 메뉴/ });
   ok('재발급: 아바타 표시(로그인 유지)', await avatar.isVisible());
   ok('재발급: 닉네임 표시', (await avatar.textContent()).includes(account.nickname));
   ok('재발급: refresh 요청이 정확히 1회(StrictMode 이중 effect에도)', refreshCalls.length === 1);
@@ -109,7 +109,7 @@ const header = (page) => page.locator('header').first();
 
   await page.reload();
   await page.waitForLoadState('networkidle');
-  ok('새로고침 후에도 로그인 유지', await header(page).locator('a[href="/my"]').isVisible());
+  ok('새로고침 후에도 로그인 유지', await header(page).getByRole('button', { name: /계정 메뉴/ }).isVisible());
   ok('pageerror 없음(재발급)', errors.length === 0);
   await context.close();
 }

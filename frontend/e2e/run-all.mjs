@@ -26,6 +26,8 @@ const SCRIPTS = [
   'home01-card-check',
   // HOME-01 최상단(GNB·히어로 Figma 대조)과 새로고침 시 세션 복원(무효 토큰 정리, refresh 1회). 실 백엔드+Redis 필요.
   'home01-header-session-check',
+  // 헤더 계정 메뉴와 로그아웃(서버 폐기 포함). 실 백엔드+Redis 필요.
+  'home01-logout-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;
