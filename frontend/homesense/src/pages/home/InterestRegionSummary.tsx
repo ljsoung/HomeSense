@@ -26,7 +26,7 @@ import { useAuth } from '../../features/auth/useAuth';
  * 맞출 수 있어 이 쪽을 택했다).
  */
 export function InterestRegionSummary() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authChecking } = useAuth();
   const [regions, setRegions] = useState<InterestRegionSummaryResponse[] | null>(null);
   const [loading, setLoading] = useState(isAuthenticated);
 
@@ -70,7 +70,12 @@ export function InterestRegionSummary() {
         </div>
       )}
 
-      {!isAuthenticated ? (
+      {authChecking ? (
+        // 세션 확인 중에는 가입 유도 카드를 먼저 보였다가 뒤집지 않도록 로딩으로 둔다.
+        <div className="flex flex-1 items-center justify-center">
+          <Spinner />
+        </div>
+      ) : !isAuthenticated ? (
         <SignupInducementCard />
       ) : loading ? (
         <div className="flex flex-1 items-center justify-center">

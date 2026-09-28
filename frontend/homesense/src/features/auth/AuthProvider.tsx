@@ -1,43 +1,54 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AuthContext } from './authContext';
 import { login as loginRequest, signup as signupRequest } from './api';
+import { restoreSession } from './session';
 import { getMe } from '../user/api';
 import type { UserResponse } from '../user/types';
 import { tokenStorage } from '../../lib/tokenStorage';
 import type { LoginRequest, SignupRequest } from './types';
 
+type AuthStatus = 'checking' | 'authenticated' | 'anonymous';
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => tokenStorage.getAccessToken() !== null);
+  // 토큰이 localStorage에 있다는 것만으로 로그인 상태로 보지 않는다 — 예전엔 그렇게 해서, 만료되거나
+  // 폐기된 토큰만 남은 비로그인 사용자가 GNB에서 로그인된 것처럼(빈 아바타) 보였다. 토큰이 있으면
+  // 'checking'으로 시작해 서버 확인(restoreSession) 결과로 확정한다.
+  const [status, setStatus] = useState<AuthStatus>(() =>
+    tokenStorage.getAccessToken() !== null ? 'checking' : 'anonymous',
+  );
   const [user, setUser] = useState<UserResponse | null>(null);
 
-  // 새로고침 시 토큰은 localStorage에 남아있지만 user는 메모리 상태라 유실된다 — LoginResponse엔
-  // nickname이 없어(SignupResponse와 달리 토큰 3필드뿐, CLAUDE.md 참고 불필요할 만큼 백엔드 소스로
-  // 직접 확인함) 마운트 시점에 GET /api/users/me로 다시 채운다. 실패해도(예: accessToken 만료)
-  // 로그인 여부 자체는 바꾸지 않는다 — 401 인터셉터가 없는 지금은 그대로 두고, 이후 화면이 실제로
-  // accessToken 갱신 흐름을 추가할 때 이 자리도 함께 재검토한다.
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (status !== 'checking') {
       return;
     }
     let cancelled = false;
-    getMe()
-      .then((me) => {
-        if (!cancelled) {
-          setUser(me);
-        }
-      })
-      .catch(() => {
-        // 조회 실패는 GNB가 스켈레톤/기본값으로 대체하므로 조용히 무시한다.
-      });
+    void restoreSession().then((result) => {
+      if (cancelled) return;
+      if (result.kind === 'authenticated') {
+        setUser(result.user);
+        setStatus('authenticated');
+      } else {
+        setUser(null);
+        setStatus('anonymous');
+      }
+    });
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [status]);
 
+  // LoginResponse엔 nickname이 없어(토큰 3필드뿐) 로그인 직후 GET /api/users/me로 채운다. 조회가
+  // 실패해도 로그인 자체는 성공이라 인증 상태는 유지한다(GNB는 닉네임 없이 기본값으로 그린다).
   const login = useCallback(async (payload: LoginRequest) => {
     const result = await loginRequest(payload);
     tokenStorage.setTokens(result.accessToken, result.refreshToken);
-    setIsAuthenticated(true);
+    setStatus('authenticated');
+    try {
+      setUser(await getMe());
+    } catch {
+      setUser(null);
+    }
   }, []);
 
   // SVC-AUTH-01.signup()이 가입+자동 로그인을 한 번에 처리하고 응답에 nickname까지 평탄하게
@@ -46,18 +57,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await signupRequest(payload);
     tokenStorage.setTokens(result.accessToken, result.refreshToken);
     setUser({ userId: result.userId, email: result.email, nickname: result.nickname, createdAt: '' });
-    setIsAuthenticated(true);
+    setStatus('authenticated');
   }, []);
 
   const logout = useCallback(() => {
     tokenStorage.clearTokens();
-    setIsAuthenticated(false);
+    setStatus('anonymous');
     setUser(null);
   }, []);
 
   const value = useMemo(
-    () => ({ isAuthenticated, user, login, signup, logout }),
-    [isAuthenticated, user, login, signup, logout],
+    () => ({
+      isAuthenticated: status === 'authenticated',
+      authChecking: status === 'checking',
+      user,
+      login,
+      signup,
+      logout,
+    }),
+    [status, user, login, signup, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

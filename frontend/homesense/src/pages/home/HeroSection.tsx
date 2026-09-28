@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import heroBackground from '../../assets/home/hero-background.jpg';
 import { SearchBar } from '../../components/ui/SearchBar';
 import { SegmentedToggle } from '../../components/ui/SegmentedToggle';
 import { getPopularKeywords } from '../../features/search/api';
@@ -52,13 +53,17 @@ export function HeroSection() {
 
   return (
     <section className="relative overflow-hidden bg-[#0f5c54] py-10 md:py-14">
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage:
-            'linear-gradient(145deg, rgba(11,74,67,0.92) 8%, rgba(15,92,84,0.8) 50%, rgba(8,55,50,0.88) 92%)',
-        }}
-      />
+      {/* Figma 4:1271/3:46 — 도시 사진 위에 브랜드 톤 그라디언트를 덮는다(사진 자체는 장식이라 alt 없음). */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <img src={heroBackground} alt="" className="size-full object-cover" />
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'linear-gradient(171.5deg, rgba(11,74,67,0.92) 7.7%, rgba(15,92,84,0.8) 50%, rgba(8,55,50,0.88) 92.3%)',
+          }}
+        />
+      </div>
       <div className="relative mx-auto flex max-w-[720px] flex-col items-center px-4">
         <p className="pb-3 text-[11px] font-semibold tracking-[1.3px] text-white/60 uppercase">
           국토교통부 실거래가 공개 데이터

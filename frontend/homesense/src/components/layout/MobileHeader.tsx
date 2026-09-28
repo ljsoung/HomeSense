@@ -13,7 +13,7 @@ import { useAuth } from '../../features/auth/useAuth';
  * 완결 필요.
  */
 export function MobileHeader() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, authChecking, user } = useAuth();
 
   return (
     <header className="border-b border-[#e5e7eb] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
@@ -25,7 +25,7 @@ export function MobileHeader() {
           <p className="text-[17px] font-extrabold tracking-[-0.4px] text-brand">HomeSense</p>
         </Link>
 
-        {isAuthenticated ? (
+        {authChecking ? null : isAuthenticated ? (
           <Link to="/my" className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
             {(user?.nickname ?? ' ').charAt(0)}
           </Link>

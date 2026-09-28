@@ -2,8 +2,10 @@ import { Link, useLocation } from 'react-router-dom';
 import { HomeIcon } from '../icons/HomeIcon';
 import { useAuth } from '../../features/auth/useAuth';
 
+// `/`(HOME-01)에서도 "지역·단지 검색"을 활성으로 표시한다 — Figma 데스크톱 로그인(3:2)/비로그인
+// (4:1232) 두 프레임 모두 홈 화면에서 이 탭을 활성 상태로 그린다(홈 히어로 자체가 검색 진입점).
 const NAV_LINKS = [
-  { to: '/search', label: '지역·단지 검색' },
+  { to: '/search', label: '지역·단지 검색', alsoActiveOn: ['/'] },
   { to: '/map', label: '지도로 보기' },
   { to: '/favorites', label: '관심목록' },
   { to: '/notifications', label: '알림' },
@@ -28,7 +30,9 @@ const NAV_LINKS = [
  * 정의서) 밖의 참고 자료일 뿐이라 문서 쪽을 따랐다(CLAUDE.md SCR-HOME-01 절 판단 기록 참고).
  */
 export function Gnb() {
-  const { isAuthenticated, user } = useAuth();
+  // 세션 확인(getMe/refresh)이 끝나기 전에는 우측 영역을 비워 둔다 — 예전엔 토큰이 있다는 것만으로
+  // 빈 이니셜 아바타를 그려, 만료된 토큰만 남은 비로그인 사용자가 로그인된 것처럼 보였다.
+  const { isAuthenticated, authChecking, user } = useAuth();
   const location = useLocation();
 
   return (
@@ -43,7 +47,7 @@ export function Gnb() {
 
         <nav className="flex flex-1 items-center justify-center gap-0.5">
           {NAV_LINKS.map((link) => {
-            const active = location.pathname === link.to;
+            const active = location.pathname === link.to || (link.alsoActiveOn?.includes(location.pathname) ?? false);
             return (
               <Link
                 key={link.to}
@@ -58,8 +62,8 @@ export function Gnb() {
           })}
         </nav>
 
-        <div className="flex shrink-0 items-center gap-1.5">
-          {isAuthenticated ? (
+        <div className="flex shrink-0 items-center gap-1.5" aria-busy={authChecking}>
+          {authChecking ? null : isAuthenticated ? (
             <Link to="/my" className="flex items-center gap-2 rounded-full py-1 pr-3 pl-1 hover:bg-[#f7f8fa]">
               <span className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
                 {(user?.nickname ?? ' ').charAt(0)}

@@ -24,6 +24,8 @@ const SCRIPTS = [
   // HOME-01 — SRCH-01이 공유 컴포넌트(ComplexCard)를 재작업한 뒤 그리드 variant(HOME-01)에 영향이
   // 없는지 확인하는 회귀 테스트. 실 백엔드 필요.
   'home01-card-check',
+  // HOME-01 최상단(GNB·히어로 Figma 대조)과 새로고침 시 세션 복원(무효 토큰 정리, refresh 1회). 실 백엔드+Redis 필요.
+  'home01-header-session-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;
