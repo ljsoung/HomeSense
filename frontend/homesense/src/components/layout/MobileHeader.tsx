@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { HomeIcon } from '../icons/HomeIcon';
+import type { AuthStatus } from '../../features/auth/authContext';
 import { useAuth } from '../../features/auth/useAuth';
+import { assertNever } from '../../lib/assertNever';
 import { UserMenu } from './UserMenu';
 
 /**
@@ -14,7 +16,7 @@ import { UserMenu } from './UserMenu';
  * 완결 필요.
  */
 export function MobileHeader() {
-  const { isAuthenticated, authChecking } = useAuth();
+  const { status } = useAuth();
 
   return (
     <header className="border-b border-[#e5e7eb] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
@@ -26,14 +28,26 @@ export function MobileHeader() {
           <p className="text-[17px] font-extrabold tracking-[-0.4px] text-brand">HomeSense</p>
         </Link>
 
-        {authChecking ? null : isAuthenticated ? (
-          <UserMenu variant="mobile" />
-        ) : (
-          <Link to="/login" className="text-[13.5px] font-semibold text-brand">
-            로그인
-          </Link>
-        )}
+        <MobileAccountArea status={status} />
       </div>
     </header>
   );
+}
+
+/** 우측 계정 영역. 확인 중에는 자리 표시만 둔다(크기는 비로그인 "로그인" 링크 35×20px과 아바타 28px 중 큰 쪽). */
+function MobileAccountArea({ status }: { status: AuthStatus }) {
+  switch (status) {
+    case 'checking':
+      return <span data-testid="account-placeholder" aria-hidden="true" className="block h-7 w-[35px]" />;
+    case 'authenticated':
+      return <UserMenu variant="mobile" />;
+    case 'anonymous':
+      return (
+        <Link to="/login" className="text-[13.5px] font-semibold text-brand">
+          로그인
+        </Link>
+      );
+    default:
+      return assertNever(status);
+  }
 }

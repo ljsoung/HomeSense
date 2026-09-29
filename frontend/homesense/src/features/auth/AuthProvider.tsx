@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AuthContext } from './authContext';
+import { AuthContext, type AuthStatus } from './authContext';
 import { login as loginRequest, signup as signupRequest } from './api';
 import {
   advanceSessionGeneration,
@@ -13,8 +13,6 @@ import { getMe } from '../user/api';
 import type { UserResponse } from '../user/types';
 import { tokenStorage } from '../../lib/tokenStorage';
 import type { LoginRequest, SignupRequest } from './types';
-
-type AuthStatus = 'checking' | 'authenticated' | 'anonymous';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   // 토큰이 localStorage에 있다는 것만으로 로그인 상태로 보지 않는다 — 예전엔 그렇게 해서, 만료되거나
@@ -98,8 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      isAuthenticated: status === 'authenticated',
-      authChecking: status === 'checking',
+      status,
       user,
       login,
       signup,
