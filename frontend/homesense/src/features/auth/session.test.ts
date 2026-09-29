@@ -7,6 +7,7 @@ import {
   __resetSessionStateForTests,
   advanceSessionGeneration,
   currentSessionGeneration,
+  jwtSubject,
   REFRESH_TIMEOUT_MS,
   restoreSession,
   setSessionExpiredListener,
@@ -24,6 +25,12 @@ function respond(config: InternalAxiosRequestConfig, status: number, data: unkno
   const response: AxiosResponse = { data, status, statusText: String(status), headers: {}, config };
   if (status >= 200 && status < 300) return Promise.resolve(response);
   return Promise.reject(new AxiosError(`Request failed with status code ${status}`, 'ERR_BAD_REQUEST', config, null, response));
+}
+
+/** 서명 없는 JWT 모양 토큰(payload에 sub만). 클라이언트는 서명을 검증하지 않으므로 계정 비교 검증에 충분하다. */
+function fakeJwt(sub: string, nonce: string): string {
+  const b64url = (v: object) => btoa(JSON.stringify(v)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `${b64url({ alg: 'HS256' })}.${b64url({ sub, jti: nonce })}.sig`;
 }
 
 function bearer(config: InternalAxiosRequestConfig): string | null {
@@ -315,5 +322,94 @@ describe('오류 문구', () => {
     handler = async (config) => respond(config, 400, { success: false, data: null, error: { code: 'X', message: '서버 문구' }, timestamp: '' });
     const error = await httpClient.get('/api/anything').catch((e: unknown) => e);
     expect(getErrorMessage(error)).toBe('서버 문구');
+  });
+});
+
+describe('다른 계정 토큰으로 재시도하지 않는다(JWT sub 비교)', () => {
+  const A1 = fakeJwt('1', 'a1');
+  const A2 = fakeJwt('1', 'a2');
+  const B = fakeJwt('2', 'b');
+
+  /** 계정 1의 새 토큰(A2)만 통과시키는 서버. 계정 2(B)도 유효한 토큰이지만 원 요청은 계정 1 것이다. */
+  function accountServer(refresh?: Handler): Handler {
+    return async (config) => {
+      if (config.url === '/api/auth/refresh') {
+        refreshCalls.push(body(config));
+        if (refresh) return refresh(config);
+        return respond(config, 200, ok({ accessToken: A2, refreshToken: 'RA2', expiresIn: 1800 }));
+      }
+      protectedCalls.push(bearer(config));
+      if (bearer(config) === A2 || bearer(config) === B) return respond(config, 200, ok([]));
+      return respond(config, 401, unauthorized);
+    };
+  }
+
+  it('jwtSubject는 payload의 sub를 읽고, JWT가 아니면 null', () => {
+    expect(jwtSubject(A1)).toBe('1');
+    expect(jwtSubject(B)).toBe('2');
+    expect(jwtSubject('A1')).toBeNull();
+    expect(jwtSubject('x.@@@.y')).toBeNull();
+  });
+
+  it('[저장소 값으로 바로 재시도하는 경로] 저장소가 다른 계정(B)의 토큰이면 재시도하지 않고 상태도 건드리지 않는다', async () => {
+    tokenStorage.setTokens(A1, 'RA1');
+    const server = accountServer();
+    handler = async (config) => {
+      // 요청이 나간 뒤 다른 탭에서 계정 2로 로그인했다.
+      if (bearer(config) === A1) tokenStorage.setTokens(B, 'RB');
+      return server(config);
+    };
+    const expired = vi.fn();
+    setSessionExpiredListener(expired);
+    const generation = currentSessionGeneration();
+
+    await expect(httpClient.get('/api/favorites/properties')).rejects.toMatchObject({ response: { status: 401 } });
+    expect(protectedCalls).toEqual([A1]); // B로 재시도하지 않음
+    expect(refreshCalls).toHaveLength(0);
+    expect(tokenStorage.getAccessToken()).toBe(B);
+    expect(expired).not.toHaveBeenCalled();
+    expect(currentSessionGeneration()).toBe(generation);
+  });
+
+  it('[저장소 값으로 바로 재시도하는 경로] 같은 계정의 새 토큰이면 재시도한다', async () => {
+    tokenStorage.setTokens(A1, 'RA1');
+    const server = accountServer();
+    handler = async (config) => {
+      if (bearer(config) === A1) tokenStorage.setTokens(A2, 'RA2');
+      return server(config);
+    };
+
+    await httpClient.get('/api/favorites/properties');
+    expect(protectedCalls).toEqual([A1, A2]);
+  });
+
+  it('[재발급 후 재시도하는 경로] 재발급 도중 다른 탭이 다른 계정(B)으로 로그인하면 재시도하지 않는다', async () => {
+    tokenStorage.setTokens(A1, 'RA1');
+    const gate = deferred<void>();
+    handler = accountServer(async (config) => {
+      await gate.promise;
+      return respond(config, 200, ok({ accessToken: A2, refreshToken: 'RA2', expiresIn: 1800 }));
+    });
+    const expired = vi.fn();
+    setSessionExpiredListener(expired);
+
+    const request = httpClient.get('/api/favorites/properties');
+    await vi.waitFor(() => expect(refreshCalls).toHaveLength(1));
+    tokenStorage.setTokens(B, 'RB'); // 다른 탭에서 계정 2로 로그인 — 재발급 결과는 compare-and-set이 버린다
+    gate.resolve();
+
+    await expect(request).rejects.toMatchObject({ response: { status: 401 } });
+    expect(protectedCalls).toEqual([A1]); // B로 재시도하지 않음
+    expect(tokenStorage.getAccessToken()).toBe(B);
+    expect(expired).not.toHaveBeenCalled();
+  });
+
+  it('[재발급 후 재시도하는 경로] 같은 계정으로 재발급되면 새 토큰으로 재시도한다', async () => {
+    tokenStorage.setTokens(A1, 'RA1');
+    handler = accountServer();
+
+    await httpClient.get('/api/favorites/properties');
+    expect(refreshCalls).toHaveLength(1);
+    expect(protectedCalls).toEqual([A1, A2]);
   });
 });

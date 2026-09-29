@@ -107,6 +107,103 @@ async function runScenario(label, { noLocks }) {
 }
 
 await runScenario('Web Locks 있음', { noLocks: false });
+
+// 다른 계정 — 탭 2가 계정 B로 로그인한 직후 탭 1(계정 A 화면)의 요청이 401을 받아도 B 토큰으로 재시도하지 않는다.
+// 저장소(localStorage)는 탭끼리 공유되므로, 재시도가 저장소 값을 그대로 쓰면 A 화면의 요청이 B 계정으로 실행된다.
+// 토큰은 서명 없는 JWT 모양(payload에 sub)으로 흉내 낸다 — 클라이언트는 sub만 읽는다.
+{
+  const jwt = (sub, nonce) => {
+    const b64 = (v) => Buffer.from(JSON.stringify(v)).toString('base64url');
+    return `${b64({ alg: 'HS256' })}.${b64({ sub, jti: nonce })}.sig`;
+  };
+  const A1 = jwt('1', 'a1');
+  const B1 = jwt('2', 'b1');
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await context.addInitScript(([keys, access]) => {
+    if (!localStorage.getItem('__seeded')) {
+      localStorage.setItem(keys[0], access);
+      localStorage.setItem(keys[1], 'RA1');
+      localStorage.setItem('__seeded', '1');
+    }
+  }, [[ACCESS_KEY, REFRESH_KEY], A1]);
+
+  let aExpired = false;
+  // 탭 1의 A 토큰 요청 응답을 붙잡아, 그 사이 탭 2가 로그인하게 한다(요청은 A로 나갔고 401은 로그인 뒤에 도착).
+  let holdTab1 = false;
+  let releaseTab1;
+  const tab1Released = new Promise((r) => { releaseTab1 = r; });
+  let tab1Held;
+  const tab1HeldSeen = new Promise((r) => { tab1Held = r; });
+  const refreshCalls = [];
+  const tab1Protected = [];
+  let tab1;
+  await context.route('**/api/**', async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname;
+    const auth = (req.headers()['authorization'] ?? '').replace('Bearer ', '');
+    const fromTab1 = tab1 && req.frame()?.page() === tab1;
+    if (path === '/api/auth/login') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: okBody({ accessToken: B1, refreshToken: 'RB1', expiresIn: 1800 }) });
+    }
+    if (path === '/api/auth/refresh') {
+      refreshCalls.push(JSON.parse(req.postData() ?? '{}').refreshToken);
+      return route.fulfill({ status: 401, contentType: 'application/json', body: errBody('INVALID_REFRESH_TOKEN', 'x') });
+    }
+    if (path === '/api/users/me') {
+      const who = auth === B1 ? { userId: 2, nickname: '계정B' } : { userId: 1, nickname: '계정A' };
+      return route.fulfill({ status: 200, contentType: 'application/json', body: okBody({ ...who, email: `${who.userId}@test.com`, createdAt: '' }) });
+    }
+    if (path.startsWith('/api/favorites')) {
+      if (fromTab1) tab1Protected.push(auth);
+      if (fromTab1 && holdTab1 && auth === A1) {
+        tab1Held();
+        await tab1Released;
+      }
+      const valid = auth === B1 || (auth === A1 && !aExpired);
+      if (valid) return route.fulfill({ status: 200, contentType: 'application/json', body: okBody([]) });
+      return route.fulfill({ status: 401, contentType: 'application/json', body: errBody('UNAUTHORIZED', '인증이 필요합니다') });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: okBody([]) });
+  });
+
+  tab1 = await context.newPage();
+  const errors = [];
+  tab1.on('pageerror', (e) => errors.push(String(e)));
+  await tab1.goto(`${BASE}/`);
+  await tab1.waitForLoadState('networkidle');
+  const menuA = tab1.locator('header').first().getByRole('button', { name: /계정 메뉴/ });
+  ok('다른 계정: 탭 1이 계정 A로 로그인 상태', (await menuA.waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await menuA.textContent()).includes('계정A'));
+
+  // 서버가 계정 A의 토큰을 만료시킨다. 탭 1이 보호 API를 부르고(A 토큰), 응답이 오기 전에 탭 2가 계정 B로 로그인한다.
+  aExpired = true;
+  holdTab1 = true;
+  tab1Protected.length = 0;
+  const probe = () => import(
+    performance.getEntriesByType('resource').map((e) => e.name).find((n) => n.includes('/src/lib/httpClient.ts')) ?? '/src/lib/httpClient.ts'
+  ).then(({ httpClient }) => httpClient.get('/api/favorites/properties').then((r) => r.status, (e) => e.response?.status ?? 0));
+  const statusPromise = tab1.evaluate(probe);
+  await tab1HeldSeen;
+
+  const tab2 = await context.newPage();
+  await tab2.goto(`${BASE}/login`);
+  await tab2.getByLabel('이메일').fill('b@test.com');
+  await tab2.getByLabel('비밀번호', { exact: true }).fill('Passw0rd!');
+  await tab2.getByRole('button', { name: '로그인', exact: true }).click();
+  await tab2.waitForURL(`${BASE}/`);
+  const storedAfterLogin = await tab1.evaluate((k) => localStorage.getItem(k), ACCESS_KEY);
+  ok('다른 계정: 탭 1 요청 대기 중 공유 저장소가 계정 B의 토큰으로 바뀜', storedAfterLogin === B1);
+
+  releaseTab1(); // 이제 탭 1의 A 토큰 요청에 401이 도착한다.
+  const status = await statusPromise;
+  ok('다른 계정: 탭 1의 원 요청은 A 토큰으로 나갔음', tab1Protected[0] === A1);
+  ok('다른 계정: 탭 1의 요청은 401로 실패(재시도 안 함)', status === 401, `status=${status}`);
+  ok('다른 계정: 탭 1이 계정 B의 토큰으로 보낸 보호 요청이 없음', !tab1Protected.includes(B1), JSON.stringify(tab1Protected.map((t) => (t === A1 ? 'A1' : t === B1 ? 'B1' : t))));
+  ok('다른 계정: 재발급을 보내지 않음(저장소가 이미 다른 값)', refreshCalls.length === 0, JSON.stringify(refreshCalls));
+  ok('다른 계정: 저장소는 계정 B 그대로', (await tab1.evaluate((k) => localStorage.getItem(k), ACCESS_KEY)) === B1);
+  ok('다른 계정: pageerror 없음', errors.length === 0, errors.join(' | '));
+  await context.close();
+}
+
 await browser.close();
 
 console.log(`\n${pass}/${pass + fail} passed`);

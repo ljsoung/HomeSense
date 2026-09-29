@@ -196,13 +196,16 @@ export async function recoverFromUnauthorized(sentAccessToken: string): Promise<
   const generationAtStart = sessionGeneration;
   const storedAccess = tokenStorage.getAccessToken();
   if (storedAccess === null) return { kind: 'fail' };
-  if (storedAccess !== sentAccessToken) return { kind: 'retry' };
+  if (storedAccess !== sentAccessToken) return retryIfSameAccount(sentAccessToken, storedAccess);
 
   const outcome = await refreshSession(tokenStorage.getRefreshToken());
   if (sessionGeneration !== generationAtStart) return { kind: 'fail' };
   switch (outcome.kind) {
-    case 'refreshed':
-      return { kind: 'retry' };
+    case 'refreshed': {
+      const refreshedAccess = tokenStorage.getAccessToken();
+      if (refreshedAccess === null) return { kind: 'fail' };
+      return retryIfSameAccount(sentAccessToken, refreshedAccess);
+    }
     case 'no-session':
     case 'rejected':
       // 세션 종료도 로그인·로그아웃과 같은 증가 함수로 세대를 올린다 — 이 시점 이후에 끝나는 다른 복구·복원
@@ -215,6 +218,35 @@ export async function recoverFromUnauthorized(sentAccessToken: string): Promise<
     default:
       return assertNeverOutcome(outcome);
   }
+}
+
+/**
+ * JWT payload의 `sub`(회원 ID). 서명은 검증하지 않고 payload만 base64url로 읽는다 — 서버가 발급한 토큰끼리
+ * 계정이 같은지 비교하는 용도일 뿐 인증 판단에 쓰지 않는다. JWT 모양이 아니거나 `sub`가 없으면 null.
+ */
+export function jwtSubject(token: string): string | null {
+  const payload = token.split('.')[1];
+  if (!payload) return null;
+  try {
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=');
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const claims = JSON.parse(new TextDecoder().decode(bytes)) as { sub?: unknown };
+    return claims.sub === undefined || claims.sub === null ? null : String(claims.sub);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 재시도에 쓸 토큰이 실패한 요청과 같은 계정일 때만 재시도한다. 저장소 값이 바뀐 이유가 재발급이 아니라 다른
+ * 탭의 **다른 계정 로그인**이면, 원 요청(예: A 화면의 관심 매물 조회·등록)이 B 계정으로 실행된다 — 그래서
+ * 두 토큰의 `sub`가 다르면 재시도하지 않고 원 요청만 실패시킨다(인증 상태는 건드리지 않는다).
+ * 실패한 요청의 토큰에서 `sub`를 읽지 못하면(JWT가 아닌 값) 지킬 계정 정체성이 없으므로 비교하지 않는다.
+ */
+function retryIfSameAccount(sentAccessToken: string, nextAccessToken: string): UnauthorizedRecovery {
+  const sentSubject = jwtSubject(sentAccessToken);
+  if (sentSubject !== null && jwtSubject(nextAccessToken) !== sentSubject) return { kind: 'fail' };
+  return { kind: 'retry', accessToken: nextAccessToken };
 }
 
 function assertNeverOutcome(value: never): never {

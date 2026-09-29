@@ -5,6 +5,8 @@ declare module 'axios' {
   interface AxiosRequestConfig {
     /** 401 → 재발급 → 재시도를 이미 한 번 거친 요청. 두 번째 재발급을 막는다. */
     _authRetried?: boolean;
+    /** 재시도에 실을 Access Token. 복구 단계가 계정 일치를 확인한 바로 그 토큰이다(저장소를 다시 읽지 않는다). */
+    _retryAccessToken?: string;
   }
 }
 
@@ -33,7 +35,7 @@ export const httpClient = axios.create({
  * 비로그인 전용 엔드포인트에도 해가 없다. 재시도 요청도 이 인터셉터를 다시 거쳐 저장소의 새 토큰을 싣는다.
  */
 httpClient.interceptors.request.use((config) => {
-  const accessToken = tokenStorage.getAccessToken();
+  const accessToken = config._retryAccessToken ?? tokenStorage.getAccessToken();
   if (accessToken) {
     config.headers.set('Authorization', `Bearer ${accessToken}`);
   }
@@ -71,7 +73,7 @@ export function refreshableAccessToken(error: AxiosError): string | null {
 }
 
 export type UnauthorizedRecovery =
-  | { kind: 'retry' }
+  | { kind: 'retry'; accessToken: string }
   | { kind: 'fail'; error?: unknown };
 
 let recoverUnauthorized: ((sentAccessToken: string) => Promise<UnauthorizedRecovery>) | null = null;
@@ -95,6 +97,9 @@ httpClient.interceptors.response.use(undefined, async (error: unknown) => {
   if (sentAccessToken === null || !error.config) throw error;
   error.config._authRetried = true;
   const result = await recoverUnauthorized(sentAccessToken);
-  if (result.kind === 'retry') return httpClient.request(error.config);
+  if (result.kind === 'retry') {
+    error.config._retryAccessToken = result.accessToken;
+    return httpClient.request(error.config);
+  }
   throw result.error ?? error;
 });
