@@ -29,17 +29,11 @@ import {
   type SearchFilters,
 } from '../../features/search/searchParams';
 import { useExecuteSearch } from '../../features/search/useExecuteSearch';
-import type { ApiErrorResponse, PageMeta } from '../../types/api';
+import type { PageMeta } from '../../types/api';
+import { getErrorMessage } from '../../lib/apiError';
 import { useFavoriteToggle } from '../home/useFavoriteToggle';
 
-const GENERIC_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
-
-function extractErrorMessage(error: unknown): string {
-  if (axios.isAxiosError<ApiErrorResponse>(error) && error.response?.data?.error?.message) {
-    return error.response.data.error.message;
-  }
-  return GENERIC_ERROR_MESSAGE;
-}
+const extractErrorMessage = getErrorMessage;
 
 /**
  * 뒤로가기 복원용 세션 캐시 — SPA 내비게이션(전체 새로고침 없음) 동안만 살아있는 모듈 스코프

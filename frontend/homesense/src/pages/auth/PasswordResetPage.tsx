@@ -22,8 +22,8 @@ import { TextField } from '../../components/ui/TextField';
 import { requestPasswordReset, resetPassword, validatePasswordResetToken } from '../../features/auth/api';
 import { evaluatePassword, isValidEmailFormat } from '../../features/auth/validation';
 import type { ApiErrorResponse } from '../../types/api';
+import { GENERIC_ERROR_MESSAGE } from '../../lib/apiError';
 
-const GENERIC_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 // InvalidResetTokenException의 기본 메시지와 동일한 문구 — 서버가 이 문구를 그대로 내려주므로
 // 평소엔 노출될 일이 없지만, 응답 본문을 못 읽는 방어적인 경우(네트워크 파싱 실패 등)의 폴백이다.
 const DEFAULT_INVALID_TOKEN_MESSAGE = '유효하지 않거나 만료된 재설정 링크입니다. 다시 요청해주세요';
