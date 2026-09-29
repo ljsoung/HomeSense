@@ -357,21 +357,32 @@ export const privacySections: PrivacySection[] = [
           <li>비밀번호는 BCrypt 알고리즘을 이용한 단방향(복호화 불가능) 암호화 방식으로 저장합니다.</li>
           <li>이용자와의 통신 구간은 HTTPS를 통해 암호화되어 전송됩니다.</li>
           <li>
-            JWT(JSON Web Token) 기반의 인증 체계를 사용하며, 로그아웃 시 해당 Refresh Token을 즉시 폐기하여
-            재사용을 방지합니다. 다만 Access Token 재발급(로그인 상태 유지) 자체는 제출된 Refresh Token을
-            새로 교체하거나 폐기하지 않으므로, 로그아웃하지 않는 한 유효기간이 만료될 때까지 계속 재사용될
-            수 있습니다.
+            JWT(JSON Web Token) 기반의 인증 체계를 사용합니다. 로그인 상태를 유지하기 위해 인증 토큰을
+            재발급할 때마다 새 Refresh Token을 발급하고, 기존 Refresh Token은 즉시 폐기합니다. 로그아웃 시에는
+            해당 기기의 Refresh Token을, 비밀번호를 재설정하면 해당 계정의 모든 Refresh Token을 즉시
+            폐기합니다.
           </li>
-          {/* P2 코드리뷰 대응(2026-09-15) — 원문은 "로그아웃 또는 토큰 재발급 시 기존 Refresh Token을
-              즉시 폐기"라고 적었으나, AuthService.refreshAccessToken()을 직접 확인한 결과 유효한
-              Refresh Token이 제출되면 새 Access Token만 발급할 뿐(jwtTokenProvider.createAccessToken()),
-              stored.revoke()를 호출하지도 않고 새 Refresh Token을 발급하지도 않는다 — 즉 제출한 Refresh
-              Token은 폐기되지 않고 그대로 재사용 가능한 상태로 남는다. revoke()를 실제로 호출하는 곳은
-              logout()뿐이다. "재발급 시에도 폐기된다"는 문장은 모든 토큰 재발급 호출에 대해 거짓인
-              진술이었다 — 로테이션/폐기 로직을 새로 구현하는 대신(백엔드 인증 흐름을 바꾸는 별도 기능
-              결정이라 정책 문구 수정 세션에서 임의로 만들지 않음) 실제 동작(로그아웃 시에만 폐기, 재발급은
-              폐기·교체 없음)에 맞춰 문구를 좁혔다. Refresh Token 로테이션 도입은 완결 필요로
-              CLAUDE.md에 남긴다. */}
+          <li>
+            이미 폐기된 Refresh Token이 다시 사용되면 토큰이 탈취되었을 가능성이 있다고 보고, 해당 계정의 모든
+            Refresh Token을 폐기합니다. 이 경우 모든 기기에서 로그인 상태가 더 이상 연장되지 않으며, 이미
+            발급된 Access Token의 유효기간(최대 30분)이 지나면 다시 로그인해야 합니다.
+          </li>
+          {/* 2026-09-29(fix/frontend/privacy-token-rotation) — 2026-09-15 P2 대응 때 이 항목은 "재발급 시
+              Refresh Token을 교체·폐기하지 않는다"로 좁혀져 있었다(당시 코드가 실제로 그랬다). 2026-09-22
+              Refresh Token Rotation·재사용 탐지(0f5e8a0, 2ae48cb, develop 머지)로 그 서술이 거짓이 되어
+              실제 동작에 맞춰 다시 썼다. 근거(백엔드 코드):
+              - 재발급: RefreshTokenRotator.attempt()가 조건부 UPDATE(revokeIfUnrevoked, revoked_yn·rotated_yn
+                동시 세팅)로 기존 토큰을 폐기한 뒤 새 토큰을 저장한다.
+              - 재사용 탐지: revokeIfUnrevoked()가 0건이면(이미 폐기된 토큰 — rotation·로그아웃·일괄 폐기 모두
+                해당) RefreshTokenReuseHandler가 revokeAllByUserId() 후 401. logout()에 rotation된 토큰이
+                제출돼도 같은 핸들러를 부른다.
+              - 재사용 탐지는 Access Token 컷오프(AccessTokenEpochService)를 걸지 않는다 — 이미 발급된 Access
+                Token은 만료(accessTokenValidity=30분)까지 유효하므로 "즉시 모든 기기에서 로그아웃"이라고
+                쓰지 않았다. 컷오프는 resetPassword()에만 있다. 재사용 탐지에도 컷오프가 추가되면(CLAUDE.md
+                완결 필요 항목) 이 문장을 "즉시 해제"로 바꿀 수 있다.
+              - 로그아웃은 제출된 토큰 하나만 폐기한다(stored.revoke()). 탈퇴 시 일괄 폐기는 2항에 적었다.
+              - 감사 로그(AuditLogger.logRefreshTokenReuseDetected)는 userId만 남긴다 — IP·User-Agent를
+                기록하지 않으므로 3항·9항(수집 항목)은 바꾸지 않았다. */}
           <li>
             서비스 관리자 권한과 일반 회원 권한을 분리(Role 기반 접근 제어)하여, 개인정보에 접근할 수 있는
             인력을 최소화하고 있습니다.

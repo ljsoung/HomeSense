@@ -1,7 +1,7 @@
 # HomeSense 검증 스크립트 (frontend/e2e/)
 
 AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번호 찾기 / SCR-SRCH-01 검색결과
-목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 34개(+스크린샷 전용 2개). 원래 저장소
+목록 / HOME-01 카드 회귀 방지를 검증하는 Playwright 스크립트 35개(+스크린샷 전용 2개). 원래 저장소
 밖 `C:\Users\super\homesense-e2e-scripts\`에 있었으나(캐시 정리 시 유실 위험, CLAUDE.md SCR-LEGAL-01
 백로그가 이 위험을 지적했다) 저장소 안으로 옮겨 커밋했다.
 
@@ -28,7 +28,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 
 ## 실행
     npm install
-    node run-all.mjs                        # run-all.mjs 목록 31개(백엔드+Redis 필요한 것 포함)
+    node run-all.mjs                        # run-all.mjs 목록 32개(백엔드+Redis 필요한 것 포함)
     node run-all.mjs signup-age-check        # 일부만 지정
     node signup-age-check.mjs                # 단독 실행(스크립트별 PASS/FAIL 출력)
     BASE=http://localhost:5183 node srch01-basic-check.mjs   # dev 서버가 기본 포트가 아닐 때
@@ -46,6 +46,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 | signup-policy-newtab-check | 방침 링크 새 탭·폼 상태 보존·체크박스 미토글 |
 | privacy-age-fix-check | 방침 6항 문구(현행: 서버 거부·저장 안 함·한계 고지) |
 | privacy-withdrawal-purge-check | 방침 2항(탈퇴 후 N일 보관 → 자동 파기)·6항 문구, N이 백엔드 `application.properties`의 grace-days 기본값과 같은지, "직접 철회" 허위 안내 부재 — 데스크톱/모바일 |
+| privacy-token-rotation-check | 방침 8항이 Refresh Token Rotation·재사용 탐지(재발급 시 교체·폐기, 재사용 시 계정 전체 폐기, Access Token 잔여 유효기간 고지)를 서술하는지, 옛 "교체·폐기하지 않는다" 문구·"즉시 모든 기기 로그아웃" 과장·내부 용어가 없는지 — 데스크톱/모바일, 백엔드 불필요 |
 | privacy-amendments-check | 방침 13항 시행일/개정 이력(v1.0·v1.1·v1.2 행, v1.2 기준) |
 | auth03-password-reset-check | AUTH-03: 이메일 형식 게이트·발송 완료 화면·독립된 두 번째 요청으로 재현하는 실제 60초 쿨다운(429, role=alert)·무효 토큰 화면과 재요청·유효 토큰 폼(비밀번호 정책 체크리스트·확인값 불일치)·성공 후 로그인 이동·모바일 가로 스크롤 없음 — 실제 백엔드+Redis 필요. 2026-09-27, 저장소 편입 후 실 백엔드로 처음 재실행하며 "재설정 다시 요청" 버튼 문구가 Figma 대조 재작업 때 "재설정 링크 다시 요청"으로 바뀐 채 스크립트만 옛 문구로 남아 있던 걸 발견해 고쳤다(23/23) |
 | auth03-figma-parity-check | AUTH-03: 실제 Figma AUTH-03 프레임과 대조해 찾은 화면 전용 요소 검증 — 진행 스테퍼·아이콘 배지·뒤로가기 링크 색상·이메일 표시 칩·오라클 방지 안내문·60초 재발송 카운트다운·링크 만료 배지+30분 경고박스+동적 서버 메시지 공존. 백엔드 불필요, `run-all.mjs` 목록에는 없음(단독 실행) |
