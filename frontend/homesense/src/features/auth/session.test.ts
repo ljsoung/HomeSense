@@ -6,6 +6,7 @@ import { tokenStorage } from '../../lib/tokenStorage';
 import {
   __resetSessionStateForTests,
   advanceSessionGeneration,
+  currentSessionGeneration,
   REFRESH_TIMEOUT_MS,
   restoreSession,
   setSessionExpiredListener,
@@ -198,6 +199,10 @@ describe('재발급 도중 세션이 바뀐 경우', () => {
     expect(protectedCalls).toEqual(['A1']); // 재시도 없음
   });
 
+  it('테스트마다 세대가 0에서 시작한다(바로 앞 테스트가 올린 값이 남지 않는다)', () => {
+    expect(currentSessionGeneration()).toBe(0);
+  });
+
   it('재발급 도중 다른 탭이 다른 토큰을 저장하면 재발급 응답을 버린다', async () => {
     tokenStorage.setTokens('A1', 'R1');
     const gate = deferred<void>();
@@ -229,6 +234,13 @@ describe('재발급 실패', () => {
     expect(tokenStorage.getAccessToken()).toBeNull();
     expect(tokenStorage.getRefreshToken()).toBeNull();
     expect(expired).toHaveBeenCalledTimes(1);
+  });
+
+  it('재발급 실패(세션 종료)도 로그인·로그아웃과 같은 증가 함수로 세대를 올린다', async () => {
+    tokenStorage.setTokens('A1', 'R-expired');
+    const before = currentSessionGeneration();
+    await httpClient.get('/api/favorites/properties').catch(() => {});
+    expect(currentSessionGeneration()).toBe(before + 1);
   });
 
   it('재발급이 timeout이면 토큰을 유지하고 세션 종료를 알리지 않는다', async () => {

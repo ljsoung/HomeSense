@@ -205,6 +205,9 @@ export async function recoverFromUnauthorized(sentAccessToken: string): Promise<
       return { kind: 'retry' };
     case 'no-session':
     case 'rejected':
+      // 세션 종료도 로그인·로그아웃과 같은 증가 함수로 세대를 올린다 — 이 시점 이후에 끝나는 다른 복구·복원
+      // 결과가 이미 끝난 세션을 되살리지 않게 한다.
+      advanceSessionGeneration();
       sessionExpiredListener?.();
       return { kind: 'fail' };
     case 'unreachable':
