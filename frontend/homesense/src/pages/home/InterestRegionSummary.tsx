@@ -10,7 +10,9 @@ import { TrendingUpIcon } from '../../components/icons/TrendingUpIcon';
 import { getInterestSummary, splitRegionPath } from '../../features/region/api';
 import type { InterestRegionSummaryResponse } from '../../features/region/types';
 import { formatChangeRate, formatKoreanPrice } from '../../lib/format';
+import type { AuthStatus } from '../../features/auth/authContext';
 import { useAuth } from '../../features/auth/useAuth';
+import { assertNever } from '../../lib/assertNever';
 
 /**
  * HOME-01 구성요소 4 앞부분 — 완료 조건: 비로그인은 interest-summary를 호출하지 않고(불필요한
@@ -26,12 +28,14 @@ import { useAuth } from '../../features/auth/useAuth';
  * 맞출 수 있어 이 쪽을 택했다).
  */
 export function InterestRegionSummary() {
-  const { isAuthenticated, authChecking } = useAuth();
+  const { status } = useAuth();
   const [regions, setRegions] = useState<InterestRegionSummaryResponse[] | null>(null);
-  const [loading, setLoading] = useState(isAuthenticated);
+  const [loading, setLoading] = useState(true);
 
+  // 개인화 API는 로그인이 확인된 뒤에만 부른다 — 확인 중(checking)에 부르면 옛 토큰으로 401을 받고, 비로그인에
+  // 부르는 것은 불필요한 401이다.
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (status !== 'authenticated') {
       return;
     }
     let cancelled = false;
@@ -56,11 +60,11 @@ export function InterestRegionSummary() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [status]);
 
   return (
     <div className="flex h-full flex-col rounded-[16px] border border-[#f3f4f6] bg-white p-5 shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.1)]">
-      {isAuthenticated && (
+      {status === 'authenticated' && (
         <div className="flex items-center justify-between pb-4">
           <p className="text-[15px] font-bold text-[#101828]">관심 지역 요약</p>
           <button type="button" disabled className="flex items-center gap-1 text-[12px] font-semibold text-brand disabled:opacity-60">
@@ -70,13 +74,8 @@ export function InterestRegionSummary() {
         </div>
       )}
 
-      {authChecking ? (
-        // 세션 확인 중에는 가입 유도 카드를 먼저 보였다가 뒤집지 않도록 로딩으로 둔다.
-        <div className="flex flex-1 items-center justify-center">
-          <Spinner />
-        </div>
-      ) : !isAuthenticated ? (
-        <SignupInducementCard />
+      {status !== 'authenticated' ? (
+        <SummaryPlaceholder status={status} />
       ) : loading ? (
         <div className="flex flex-1 items-center justify-center">
           <Spinner />
@@ -107,6 +106,25 @@ export function InterestRegionSummary() {
       )}
     </div>
   );
+}
+
+/**
+ * 로그인이 확인되지 않은 두 상태의 본문. 확인 중에는 가입 유도 카드를 먼저 보였다가 뒤집지 않도록 로딩으로
+ * 둔다(비로그인 CTA를 띄우지 않는다).
+ */
+function SummaryPlaceholder({ status }: { status: Exclude<AuthStatus, 'authenticated'> }) {
+  switch (status) {
+    case 'checking':
+      return (
+        <div className="flex flex-1 items-center justify-center">
+          <Spinner />
+        </div>
+      );
+    case 'anonymous':
+      return <SignupInducementCard />;
+    default:
+      return assertNever(status);
+  }
 }
 
 function RegionCard({ region }: { region: InterestRegionSummaryResponse }) {

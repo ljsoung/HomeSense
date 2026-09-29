@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ui/useToast';
 import { addFavoriteProperty, getFavoriteProperties, removeFavoriteProperty } from '../../features/favorite/api';
+import type { AuthStatus } from '../../features/auth/authContext';
 import { useAuth } from '../../features/auth/useAuth';
+import { assertNever } from '../../lib/assertNever';
 import type { ApiErrorResponse } from '../../types/api';
 import { GENERIC_ERROR_MESSAGE } from '../../lib/apiError';
 
@@ -27,7 +29,7 @@ const PENDING_FAVORITE_KEY = 'homesense.pendingFavoriteComplexId';
  * 범용 계약이라, 즐겨찾기 전용 필드를 얹으면 그 계약이 HomeSense의 한 기능에 결합된다).
  */
 export function useFavoriteToggle() {
-  const { isAuthenticated, authChecking } = useAuth();
+  const { status } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -36,25 +38,32 @@ export function useFavoriteToggle() {
   const replayedRef = useRef(false);
   // 하트 상태(favorites)가 어떤 인증 상태 기준으로 채워졌는지 — 로그인 판정 직후 아직 목록을 불러오기
   // 전에 클릭을 처리하면, 이미 찜한 단지도 해제가 아니라 등록으로 시도해 409를 받는다.
-  const [hydratedFor, setHydratedFor] = useState<boolean | null>(null);
-  // 세션 확인(authChecking) 중에 누른 하트. 확인 중에는 로그인 사용자도 isAuthenticated가 false라,
-  // 이때 곧바로 /login으로 보내면 로그인된 사용자가 로그인 화면에 남는다(Codex P2). 클릭을 미뤘다가 판정과
+  const [hydratedFor, setHydratedFor] = useState<Exclude<AuthStatus, 'checking'> | null>(null);
+  // 세션 확인(checking) 중에 누른 하트. 이때 곧바로 /login으로 보내면 로그인된 사용자가 로그인 화면에
+  // 남는다(Codex P2). 클릭을 미뤘다가 판정과
   // 하트 상태 채우기가 끝나면 처리한다. 전역으로 마지막 클릭 하나만 기억한다 — 다른 카드를 누르면 앞 클릭은
   // 버려지고 그 하트의 대기 표시도 풀린다(판단 근거: CLAUDE.md 세션 절 "확인 중 하트 클릭" 행).
   const deferredClickRef = useRef<number | null>(null);
   // 대기 중인 하트를 화면에 알리기 위한 상태(카드가 aria-busy와 시각적 표시를 단다).
   const [pendingFavoriteId, setPendingFavoriteId] = useState<number | null>(null);
 
-  // 로그인 상태에서 마운트되거나(또는 로그인 직후 isAuthenticated가 true로 바뀌면) 실제 등록된
+  // 로그인 상태에서 마운트되거나(또는 로그인 직후 status가 authenticated로 바뀌면) 실제 등록된
   // 관심 매물 목록으로 하트 상태를 하이드레이트한다 — 이게 없으면 이미 등록된 단지도 새로고침 후
   // 빈 하트로 보이고 클릭 시 add만 시도해 중복 등록 에러를 받는다.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      if (!isAuthenticated) {
-        setFavorites(new Map());
-        setHydratedFor(false);
-        return;
+      switch (status) {
+        case 'checking':
+          return; // 판정이 나기 전에는 채우지 않는다.
+        case 'anonymous':
+          setFavorites(new Map());
+          setHydratedFor('anonymous');
+          return;
+        case 'authenticated':
+          break;
+        default:
+          assertNever(status);
       }
       try {
         const result = await getFavoriteProperties();
@@ -65,14 +74,14 @@ export function useFavoriteToggle() {
         // 하이드레이션 실패는 "아직 아무것도 안 찜한 것"과 구분 없이 조용히 빈 상태로 둔다 —
         // 이후 클릭이 add를 시도하고, 이미 등록된 상태였다면 서버가 409로 알려준다(fail-safe).
       } finally {
-        if (!cancelled) setHydratedFor(true);
+        if (!cancelled) setHydratedFor('authenticated');
       }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [status]);
 
   const addFavorite = useCallback(
     async (complexId: number) => {
@@ -119,7 +128,7 @@ export function useFavoriteToggle() {
   // favorites.has() 여부와 무관하게 항상 이 경로를 타지만, 비로그인 사용자는애초에 favorites
   // 맵을 가질 수 없어 이 경로에 들어오는 complexId는 항상 "등록 시도"다).
   useEffect(() => {
-    if (!isAuthenticated || replayedRef.current) {
+    if (status !== 'authenticated' || replayedRef.current) {
       return;
     }
     const pending = sessionStorage.getItem(PENDING_FAVORITE_KEY);
@@ -133,50 +142,48 @@ export function useFavoriteToggle() {
       await addFavorite(pendingComplexId);
     };
     void replay();
-  }, [isAuthenticated, addFavorite]);
-
-  const performToggle = useCallback(
-    (complexId: number) => {
-      if (!isAuthenticated) {
-        sessionStorage.setItem(PENDING_FAVORITE_KEY, String(complexId));
-        navigate('/login', { state: { from: location } });
-        return;
-      }
-      const favoritePropertyId = favorites.get(complexId);
-      if (favoritePropertyId !== undefined) {
-        void removeFavorite(complexId, favoritePropertyId);
-      } else {
-        void addFavorite(complexId);
-      }
-    },
-    [isAuthenticated, navigate, location, favorites, addFavorite, removeFavorite],
-  );
+  }, [status, addFavorite]);
 
   const toggleFavorite = useCallback(
     (complexId: number) => {
-      if (authChecking) {
-        deferredClickRef.current = complexId;
-        setPendingFavoriteId(complexId);
-        return;
+      switch (status) {
+        case 'checking':
+          deferredClickRef.current = complexId;
+          setPendingFavoriteId(complexId);
+          return;
+        case 'anonymous':
+          sessionStorage.setItem(PENDING_FAVORITE_KEY, String(complexId));
+          navigate('/login', { state: { from: location } });
+          return;
+        case 'authenticated': {
+          const favoritePropertyId = favorites.get(complexId);
+          if (favoritePropertyId !== undefined) {
+            void removeFavorite(complexId, favoritePropertyId);
+          } else {
+            void addFavorite(complexId);
+          }
+          return;
+        }
+        default:
+          assertNever(status);
       }
-      performToggle(complexId);
     },
-    [authChecking, performToggle],
+    [status, navigate, location, favorites, addFavorite, removeFavorite],
   );
 
   // 미룬 클릭은 판정이 끝나고, 그 판정 기준으로 하트 상태까지 채워진 뒤에 처리한다 — 비로그인으로
   // 판정되면 원래대로 로그인 화면으로(그 클릭은 로그인 후 재생), 로그인이면 등록/해제를 한다.
   useEffect(() => {
     const deferred = deferredClickRef.current;
-    if (deferred === null || authChecking || hydratedFor !== isAuthenticated) return;
+    if (deferred === null || status === 'checking' || hydratedFor !== status) return;
     deferredClickRef.current = null;
     // 대기 표시를 풀고 처리한다(등록/해제 요청을 보내거나 로그인 화면으로 이동). effect 본문에서 동기로
     // setState하지 않도록 마이크로태스크로 넘긴다(react-hooks/set-state-in-effect).
     queueMicrotask(() => {
       setPendingFavoriteId(null);
-      performToggle(deferred);
+      toggleFavorite(deferred);
     });
-  }, [authChecking, isAuthenticated, hydratedFor, performToggle]);
+  }, [status, hydratedFor, toggleFavorite]);
 
   const favoritedIds = useMemo(() => new Set(favorites.keys()), [favorites]);
 

@@ -7,7 +7,9 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { Spinner } from '../../components/ui/Spinner';
 import { getRecentViews } from '../../features/recentview/api';
 import type { RecentViewResponse } from '../../features/recentview/types';
+import type { AuthStatus } from '../../features/auth/authContext';
 import { useAuth } from '../../features/auth/useAuth';
+import { assertNever } from '../../lib/assertNever';
 import { formatAddress } from '../../lib/format';
 
 const HOUSING_TYPE_LABEL: Record<string, string> = { APT: '아파트', VILLA: '연립다세대' };
@@ -33,14 +35,14 @@ interface RecentViewsProps {
  * 대응 데이터가 없음) 계속 생략한다.
  */
 export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId }: RecentViewsProps) {
-  const { isAuthenticated, authChecking } = useAuth();
+  const { status } = useAuth();
   const [views, setViews] = useState<RecentViewResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
   // 세션 확인 중에는 불러오지 않는다 — 저장소의 옛(만료됐을 수 있는) 토큰으로 불러오면 로그인 사용자에게도
   // 비로그인 기준 목록과 "로그인하면…" 문구가 잠깐 보인다. 판정이 나면 그 기준으로 한 번 불러온다.
   useEffect(() => {
-    if (authChecking) return;
+    if (status === 'checking') return;
     let cancelled = false;
     const load = async () => {
       setLoading(true);
@@ -63,7 +65,7 @@ export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId 
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, authChecking]);
+  }, [status]);
 
   return (
     <div className="flex h-full flex-col rounded-[16px] border border-[#f3f4f6] bg-white p-5 shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.1)]">
@@ -72,7 +74,7 @@ export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId 
         <p className="text-[15px] font-bold text-[#101828]">최근 조회한 단지</p>
       </div>
 
-      {loading || authChecking ? (
+      {loading || status === 'checking' ? (
         <div className="flex flex-1 items-center justify-center">
           <Spinner />
         </div>
@@ -80,21 +82,7 @@ export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId 
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             icon={<ClockIcon className="size-6" />}
-            description={
-              isAuthenticated ? (
-                <>
-                  아직 조회한 단지가 없어요.
-                  <br />
-                  관심있는 단지를 둘러보세요.
-                </>
-              ) : (
-                <>
-                  로그인하면 최근 조회한
-                  <br />
-                  단지가 자동으로 저장돼요
-                </>
-              )
-            }
+            description={<EmptyDescription status={status} />}
           />
         </div>
       ) : (
@@ -134,4 +122,30 @@ export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId 
       )}
     </div>
   );
+}
+
+/** 조회 이력이 없을 때 문구. 확인 중에는 이 분기에 오지 않지만(로딩), 타입상 모든 상태를 다룬다. */
+function EmptyDescription({ status }: { status: AuthStatus }) {
+  switch (status) {
+    case 'authenticated':
+      return (
+        <>
+          아직 조회한 단지가 없어요.
+          <br />
+          관심있는 단지를 둘러보세요.
+        </>
+      );
+    case 'anonymous':
+      return (
+        <>
+          로그인하면 최근 조회한
+          <br />
+          단지가 자동으로 저장돼요
+        </>
+      );
+    case 'checking':
+      return null;
+    default:
+      return assertNever(status);
+  }
 }
