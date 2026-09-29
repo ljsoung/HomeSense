@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 // BAT-USR-01(탈퇴 계정 자동 파기) 반영 후 방침 2항(보유 기간)·6항 문구를 검증한다.
 // 기존 privacy-retention-fix-check.mjs("7일 유예기간 문구가 없다")는 그 배치가 생기면서 전제가 뒤집혀 대체됐다.
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 const REPO = process.env.REPO ?? 'C:/Users/super/IdeaProjects/HomeSense';
 const results = [];
 function log(name, ok, detail = '') {

@@ -6,7 +6,7 @@
 // 실 백엔드(8080)+Redis 필요 — 테스트 계정을 가입 API로 만든다. BASE로 dev 서버 지정.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond) { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}`); } }

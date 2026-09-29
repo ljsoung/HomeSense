@@ -15,8 +15,8 @@ import { getRedirectPath } from '../../features/auth/redirect';
 import { useAuth } from '../../features/auth/useAuth';
 import { loginSchema, type LoginFormValues } from '../../features/auth/loginSchema';
 import type { ApiErrorResponse } from '../../types/api';
+import { GENERIC_ERROR_MESSAGE } from '../../lib/apiError';
 
-const GENERIC_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 const INLINE_ERROR_STATUS_CODES = new Set([401, 403, 429]);
 
 export function LoginPage() {

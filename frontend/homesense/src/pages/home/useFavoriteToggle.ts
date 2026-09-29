@@ -5,9 +5,9 @@ import { useToast } from '../../components/ui/useToast';
 import { addFavoriteProperty, getFavoriteProperties, removeFavoriteProperty } from '../../features/favorite/api';
 import { useAuth } from '../../features/auth/useAuth';
 import type { ApiErrorResponse } from '../../types/api';
+import { GENERIC_ERROR_MESSAGE } from '../../lib/apiError';
 
 const PENDING_FAVORITE_KEY = 'homesense.pendingFavoriteComplexId';
-const GENERIC_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 
 /**
  * 하트 클릭 공용 로직 — 완료 조건: 로그인 시 POST/DELETE /api/favorites/properties로 토글 +

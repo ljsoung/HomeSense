@@ -16,8 +16,8 @@ import { checkEmail } from '../../features/auth/api';
 import { useAuth } from '../../features/auth/useAuth';
 import { evaluatePassword, isValidEmailFormat, isValidNickname } from '../../features/auth/validation';
 import type { ApiErrorResponse } from '../../types/api';
+import { GENERIC_ERROR_MESSAGE } from '../../lib/apiError';
 
-const GENERIC_ERROR_MESSAGE = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 const INVALID_EMAIL_MESSAGE = '올바른 이메일 형식이 아닙니다';
 const EMAIL_CHECK_FAILED_MESSAGE = '이메일 확인 중 오류가 발생했습니다. 다시 시도해주세요.';
 // ValidNickname.message()와 동일한 문구 — 서버가 방어적으로 같은 오류를 돌려줄 때도 문구가 어긋나지 않도록.

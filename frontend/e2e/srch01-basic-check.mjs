@@ -1,7 +1,7 @@
 // SCR-SRCH-01 기본 동작 검증 — 실 백엔드(8080) 필요, 프런트 dev 서버는 BASE로 지정.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5183';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 

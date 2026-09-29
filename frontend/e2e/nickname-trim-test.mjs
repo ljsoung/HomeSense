@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { BASE } from './base.mjs';
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
@@ -8,7 +9,7 @@ await page.route('**/api/auth/check-email*', (route) =>
 
 // Helper to fill everything except nickname to a valid state, then test nickname scenarios.
 async function setupValidBase() {
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'ok@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=사용 가능한 이메일입니다.');
@@ -56,7 +57,7 @@ async function setupValidBase() {
   await page.fill('#nickname', 'abcdefghijkl ');
   await page.waitForFunction(() => !document.querySelector('button[type=submit]').disabled);
   await page.click('button[type=submit]');
-  await page.waitForURL('http://localhost:5173/');
+  await page.waitForURL(`${BASE}/`);
   console.log('Scenario 3: submitted nickname payload:', JSON.stringify(capturedBody?.nickname), '(expect "abcdefghijkl", no trailing space)');
 }
 

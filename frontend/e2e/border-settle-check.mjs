@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { BASE } from './base.mjs';
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 await page.route('**/api/auth/check-email*', (route) =>
@@ -7,7 +8,7 @@ await page.route('**/api/auth/check-email*', (route) =>
 await page.route('**/api/auth/signup', (route) =>
   route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ success: false, data: null, error: { code: 'DUPLICATE_EMAIL', message: '이미 사용 중인 이메일입니다' }, timestamp: new Date().toISOString() }) }),
 );
-await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
 await page.fill('#email', 'taken@example.com');
 await page.click('button:has-text("중복확인")');
 await page.waitForSelector('text=사용 가능한 이메일입니다.');

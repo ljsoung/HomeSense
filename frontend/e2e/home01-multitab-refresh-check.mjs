@@ -6,7 +6,7 @@
 // 실 백엔드(8080)+Redis 필요 — 가입 API로 테스트 계정을 만든다. BASE로 dev 서버 지정.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond) { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}`); } }
@@ -83,7 +83,7 @@ await runScenario(2);
 await runScenario(3);
 
 // 재발급 응답이 무기한 멈춘 경우 — 락을 쥔 탭이 멈춰도 다른 탭의 인증이 영원히 막히지 않아야 한다.
-// 정해진 처리: 기다리던 탭은 락 대기 상한(5초) 뒤, 락을 쥔 탭은 재발급 timeout(10초) 뒤 "판정 불가"로 끝난다
+// 정해진 처리: 기다리던 탭은 락 대기 상한(2초) 뒤, 락을 쥔 탭은 재발급 timeout(5초) 뒤 "판정 불가"로 끝난다
 // (화면은 비로그인, 토큰은 지우지 않음, 같은 토큰으로 재발급을 다시 보내지 않음). 응답이 풀리면 새로고침으로 복구된다.
 {
   const account = await createAccount('h');
@@ -107,7 +107,11 @@ await runScenario(3);
   const loginShown = (p) => p.locator('header').first().getByRole('link', { name: '로그인' }).isVisible();
   const menuShown = (p) => p.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).isVisible();
 
+  // 사용자 대기 예산(CLAUDE.md "401 자동 재발급과 요청 timeout" 절): 동작 1회의 최악 대기 15초 + 측정 여유 1초.
+  // 탭 1(락을 쥔 탭)이 비로그인으로 확정되기까지 이 안에 끝나야 한다 — 예산 초과도 이 테스트가 잡는다.
+  const USER_WAIT_BUDGET_MS = 15_000 + 1_000;
   const tab1 = await context.newPage();
+  const tab1Start = Date.now();
   await tab1.goto(`${BASE}/`);
   const heldArrived = await (async () => { for (let i = 0; i < 50 && held.length === 0; i++) await tab1.waitForTimeout(100); return held.length === 1; })();
   ok('멈춤: 탭 1의 재발급 요청이 붙잡힘(락 보유)', heldArrived);
@@ -115,16 +119,25 @@ await runScenario(3);
   const tab2 = await context.newPage();
   const tab2Start = Date.now();
   await tab2.goto(`${BASE}/`);
-  const tab2Settled = await tab2.locator('header').first().getByRole('link', { name: '로그인' }).waitFor({ timeout: 9000 }).then(() => true, () => false);
+  const tab2Settled = await tab2.locator('header').first().getByRole('link', { name: '로그인' }).waitFor({ timeout: 6000 }).then(() => true, () => false);
   const tab2Elapsed = Date.now() - tab2Start;
-  ok(`멈춤: 탭 2가 락 대기 상한 뒤 비로그인으로 끝남(${tab2Elapsed}ms)`, tab2Settled && tab2Elapsed >= 4500 && tab2Elapsed < 9000);
+  // 락 대기 상한 2초(LOCK_WAIT_TIMEOUT_MS) + 페이지 로드. 탭 1의 재발급 timeout(5초) 전에 포기해야 같은 토큰으로 다시 재발급하지 않는다.
+  ok(`멈춤: 탭 2가 락 대기 상한 뒤 비로그인으로 끝남(${tab2Elapsed}ms)`, tab2Settled && tab2Elapsed >= 2000 && tab2Elapsed < 6000);
   ok('멈춤: 탭 2가 확인 중 상태에 남지 않음(로그인·계정 메뉴 중 하나로 확정)', (await loginShown(tab2)) || (await menuShown(tab2)));
   ok('멈춤: 탭 2는 같은 토큰으로 재발급을 다시 보내지 않음', refreshRequests.length === 1);
   const [a2, r2] = await readTokens(tab2);
   ok('멈춤: 탭 2 종료 후에도 토큰 유지(지우지 않음)', a2 === 'expired.access.token' && r2 === account.refreshToken);
 
-  const tab1Settled = await tab1.locator('header').first().getByRole('link', { name: '로그인' }).waitFor({ timeout: 8000 }).then(() => true, () => false);
+  // 예산이 이미 소진됐으면 기다리지 않고 지금 상태만 본다 — Playwright는 timeout: 0을 "제한 없음"으로 해석해
+  // 예산을 넘긴 바로 그 경우에 무기한 대기하게 된다.
+  const tab1LoginLink = tab1.locator('header').first().getByRole('link', { name: '로그인' });
+  const tab1Remaining = USER_WAIT_BUDGET_MS - (Date.now() - tab1Start);
+  const tab1Settled = tab1Remaining > 0
+    ? await tab1LoginLink.waitFor({ timeout: tab1Remaining }).then(() => true, () => false)
+    : await tab1LoginLink.isVisible();
+  const tab1Elapsed = Date.now() - tab1Start;
   ok('멈춤: 탭 1도 재발급 timeout 뒤 비로그인으로 끝남(락 해제)', tab1Settled);
+  ok(`멈춤: 탭 1이 사용자 대기 예산(15초+1초) 안에 확정(${tab1Elapsed}ms)`, tab1Settled && tab1Elapsed <= USER_WAIT_BUDGET_MS);
   const [a1, r1] = await readTokens(tab1);
   ok('멈춤: 탭 1 종료 후에도 토큰 유지', a1 === 'expired.access.token' && r1 === account.refreshToken);
   ok('멈춤: 전체 재발급 요청은 여전히 1회', refreshRequests.length === 1);

@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5183';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond) { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}`); } }
@@ -27,8 +27,12 @@ const browser = await chromium.launch();
   const page = await context.newPage();
   await page.goto(`${BASE}/search?regionCode=4100000000&regionLabel=%EA%B2%BD%EA%B8%B0%EB%8F%84`);
   await page.waitForSelector('a[href^="/complexes/"]', { timeout: 10000 });
+  // 2페이지 응답이 온 뒤에 목록을 찍는다. 고정 600ms 대기는 경기도 전체 검색(수백 ms)보다 짧아, 1페이지 목록을
+  // "2페이지"로 찍어 뒤로가기 뒤 목록과 달라지는 간헐 실패가 있었다(2026-09-29 확인).
+  const page2Response = page.waitForResponse((r) => r.url().includes('/api/complexes/search') && r.url().includes('page=1'));
   await page.getByRole('button', { name: '2' }).click();
-  await page.waitForTimeout(600);
+  await page2Response;
+  await page.waitForTimeout(300);
   ok('데스크톱 2페이지 이동', page.url().includes('page=2'));
   const namesPage2 = await page.locator('a[href^="/complexes/"] p').allInnerTexts();
 

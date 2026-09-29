@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5183';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond) { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}`); } }

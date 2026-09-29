@@ -5,7 +5,7 @@
 // 넘겨 draft(패널의 현재 선택, 아직 미적용)를 무시했다 — base를 draft로 교체해 수정.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 let pass = 0, fail = 0;
 function ok(name, cond, detail = '') { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}${detail ? ' :: ' + detail : ''}`); } }
 

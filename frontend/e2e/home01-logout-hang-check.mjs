@@ -4,10 +4,10 @@
 // 실 백엔드(8080)+Redis 필요 — 가입 API로 테스트 계정을 만든다. BASE로 dev 서버 지정.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
-function ok(name, cond) { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}`); } }
+function ok(name, cond, detail = '') { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}${detail ? ' :: ' + detail : ''}`); } }
 
 const ACCESS_KEY = 'homesense.accessToken';
 const REFRESH_KEY = 'homesense.refreshToken';
@@ -91,6 +91,9 @@ async function clickLogout(page) {
 {
   const account = await createAccount('r');
   const { context, page, errors, held, stopHolding } = await openLoggedIn(account, { hang: ['refresh'], expireAccessAfterLoad: true });
+  // 클라이언트가 재발급 요청을 스스로 끊었는지(재발급 timeout) 기록한다.
+  const refreshFailedOnClient = [];
+  page.on('requestfailed', (r) => { if (r.url().includes('/api/auth/refresh')) refreshFailedOnClient.push(r.failure()?.errorText ?? ''); });
   const { settled, elapsed } = await clickLogout(page);
   ok('재발급이 붙잡힘(로그아웃 401 뒤)', held.some((h) => h.path === 'refresh'));
   ok(`재발급 멈춤: 제한 시간 안에 로컬 로그아웃 완료(${elapsed}ms)`, settled && elapsed < SETTLE_LIMIT_MS);
@@ -99,9 +102,14 @@ async function clickLogout(page) {
   stopHolding();
   const refreshResponses = [];
   page.on('response', (r) => { if (r.url().includes('/api/auth/refresh')) refreshResponses.push(r.status()); });
-  await Promise.all(held.filter((h) => h.path === 'refresh').map(async (h) => h.route.fulfill({ response: await h.route.fetch() })));
+  // 재발급 timeout(5초)이 로그아웃 상한(5초)과 비슷해, 붙잡힌 요청은 여기서 풀기 전에 클라이언트 timeout으로
+  // 이미 끊겼을 수 있다 — 그때는 늦은 응답이 페이지에 도착할 수 없으니 되살릴 위험도 없다.
+  await Promise.all(held.filter((h) => h.path === 'refresh').map(async (h) =>
+    h.route.fulfill({ response: await h.route.fetch() }).catch(() => {})));
   await page.waitForTimeout(1500);
-  ok('재발급 멈춤: 늦게 온 재발급 응답(200)', refreshResponses.includes(200));
+  ok('재발급 멈춤: 늦게 온 재발급 응답(200)이 도착했거나, 클라이언트가 재발급 요청을 timeout으로 끊음',
+    refreshResponses.includes(200) || refreshFailedOnClient.length > 0,
+    `responses=${JSON.stringify(refreshResponses)} failed=${JSON.stringify(refreshFailedOnClient)}`);
   ok('재발급 멈춤: 늦은 응답이 지운 토큰을 되살리지 않음', (await stored(page)).every((v) => v === null));
   ok('재발급 멈춤: 헤더는 계속 비로그인', await page.locator('header').first().getByRole('link', { name: '로그인' }).isVisible());
   ok('pageerror 없음(재발급 멈춤)', errors.length === 0);

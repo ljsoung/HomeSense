@@ -5,7 +5,7 @@
 // 바로 아래 같은 컬럼, 건축년도·㎡당가격 없음)을 그대로 단정문으로 옮겼다.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5183';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond) { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}`); } }
