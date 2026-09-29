@@ -37,7 +37,7 @@ const v12EffectiveDate = '2026-09-21';
 // v1.3 — 2항(탈퇴 계정 자동 파기·유예)과 8항(토큰 재발급 시 교체·재사용 탐지) 변경. 시행일은 이 변경을 담은
 // PR(feature/backend/reuse-detection-access-cutoff)의 머지일이다. **머지 직전에 'YYYY-MM-DD'를 실제 날짜로
 // 바꿔야 한다** — 플레이스홀더가 남아 있으면 e2e privacy-token-rotation-check가 SKIP으로 알린다.
-const v13EffectiveDate = 'YYYY-MM-DD';
+const v13EffectiveDate = '2026-09-28';
 const currentEffectiveDate = v13EffectiveDate;
 
 export const privacySections: PrivacySection[] = [
