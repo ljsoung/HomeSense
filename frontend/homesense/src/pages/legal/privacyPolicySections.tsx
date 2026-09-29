@@ -34,10 +34,9 @@ const v11EffectiveDate = '2026-09-21';
 // v1.1·v1.2 모두 13항의 7일 사전 고지를 생략했다 — 사유(고지할 기존 가입자 없음, 사용자 확인)·
 // 무효화 조건은 CLAUDE.md SCR-LEGAL-01 "연령 확인 절차" 판단 기록 5·7단계 참고.
 const v12EffectiveDate = '2026-09-21';
-// v1.3 — 2항(탈퇴 계정 자동 파기·유예)과 8항(토큰 재발급 시 교체·재사용 탐지) 변경. 시행일은 이 변경을 담은
-// PR(feature/backend/reuse-detection-access-cutoff)의 머지일이다. **머지 직전에 'YYYY-MM-DD'를 실제 날짜로
-// 바꿔야 한다** — 플레이스홀더가 남아 있으면 e2e privacy-token-rotation-check가 SKIP으로 알린다.
-const v13EffectiveDate = '2026-09-28';
+// v1.3(2026-09-29) — 2항·8항 변경 시행(탈퇴 계정 자동 파기·유예, 토큰 재발급 시 교체·재사용 탐지). 시행일은 PR #55 머지일.
+// 7일 사전 고지 생략 사유·무효화 조건은 CLAUDE.md SCR-LEGAL-01 "Refresh Token 블랙리스트 표현" 행 참고.
+const v13EffectiveDate = '2026-09-29';
 const currentEffectiveDate = v13EffectiveDate;
 
 export const privacySections: PrivacySection[] = [
