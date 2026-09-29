@@ -117,7 +117,8 @@ await runScenario(3);
   await tab2.goto(`${BASE}/`);
   const tab2Settled = await tab2.locator('header').first().getByRole('link', { name: '로그인' }).waitFor({ timeout: 9000 }).then(() => true, () => false);
   const tab2Elapsed = Date.now() - tab2Start;
-  ok(`멈춤: 탭 2가 락 대기 상한 뒤 비로그인으로 끝남(${tab2Elapsed}ms)`, tab2Settled && tab2Elapsed >= 4500 && tab2Elapsed < 9000);
+  // 락 대기 상한 2초(LOCK_WAIT_TIMEOUT_MS) + 페이지 로드. 탭 1의 재발급 timeout(5초) 전에 포기해야 같은 토큰으로 다시 재발급하지 않는다.
+  ok(`멈춤: 탭 2가 락 대기 상한 뒤 비로그인으로 끝남(${tab2Elapsed}ms)`, tab2Settled && tab2Elapsed >= 2000 && tab2Elapsed < 6000);
   ok('멈춤: 탭 2가 확인 중 상태에 남지 않음(로그인·계정 메뉴 중 하나로 확정)', (await loginShown(tab2)) || (await menuShown(tab2)));
   ok('멈춤: 탭 2는 같은 토큰으로 재발급을 다시 보내지 않음', refreshRequests.length === 1);
   const [a2, r2] = await readTokens(tab2);

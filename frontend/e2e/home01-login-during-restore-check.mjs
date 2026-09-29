@@ -128,8 +128,10 @@ async function authRequestsDuringLockWait(label, holdMs) {
   let loginResponseAt = 0;
   page.on('response', async (r) => {
     if (r.url().includes('/api/auth/login') && r.ok()) {
-      loginResponseAt = Date.now();
+      // 토큰을 채운 뒤에 도착 시각을 기록한다 — 반대 순서면 대기 루프가 JSON 파싱 전에 끝나 토큰 단언이 간헐 실패했다.
+      const at = Date.now();
       loginTokensB = (await r.json()).data;
+      loginResponseAt = at;
     }
   });
   // 인증 헤더가 붙은 앱 요청을, 요청 시점의 화면 URL과 함께 기록한다(/api/auth/*는 제외).

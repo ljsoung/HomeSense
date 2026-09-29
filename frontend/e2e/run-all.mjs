@@ -34,6 +34,8 @@ const SCRIPTS = [
   'home01-login-during-restore-check',
   // 세션 확인 중 하트 클릭 등 인증 의존 동작이 판정까지 미뤄지는지. 실 백엔드+Redis 필요.
   'home01-auth-checking-actions-check',
+  // 401 인터셉터 — 사용 중 만료 시 두 탭 동시 재발급이 1회인지. 백엔드 불필요(route로 흉내).
+  'auth-interceptor-multitab-check',
   // 서버 로그아웃이 멈춰도 로컬 로그아웃이 제한 시간 안에 끝나는지. 실 백엔드+Redis 필요.
   'home01-logout-hang-check',
 ];
