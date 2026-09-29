@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { BASE } from './base.mjs';
 
 const outDir = (process.env.OUT_DIR ?? './out');
 const browser = await chromium.launch();
@@ -9,7 +10,7 @@ const browser = await chromium.launch();
   await page.route('**/api/auth/check-email*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { duplicate: true }, error: null, timestamp: new Date().toISOString() }) }),
   );
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'taken@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=이미 사용 중인 이메일입니다');
@@ -33,7 +34,7 @@ const browser = await chromium.launch();
     networkCalled = true;
     route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'not-an-email');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=올바른 이메일 형식이 아닙니다');
@@ -44,7 +45,7 @@ const browser = await chromium.launch();
 // ---- 4. Password mismatch hint ----
 {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#password', 'abcd1234!');
   await page.fill('#passwordConfirm', 'different1!');
   await page.waitForSelector('text=비밀번호가 일치하지 않습니다');
@@ -55,7 +56,7 @@ const browser = await chromium.launch();
 // ---- 5. Nickname invalid (too short) ----
 {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#nickname', 'a');
   await page.waitForSelector('text=닉네임은 2자 이상 12자 이하여야 합니다');
   console.log('5. nickname too-short hint shown: OK');
@@ -71,7 +72,7 @@ const browser = await chromium.launch();
   await page.route('**/api/auth/signup', (route) =>
     route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ success: false, data: null, error: { code: 'DUPLICATE_EMAIL', message: '이미 사용 중인 이메일입니다' }, timestamp: new Date().toISOString() }) }),
   );
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'race@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=사용 가능한 이메일입니다.');
@@ -97,7 +98,7 @@ const browser = await chromium.launch();
   await page.route('**/api/auth/signup', (route) =>
     route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ success: false, data: null, error: { code: 'VALIDATION_FAILED', message: '입력값이 유효하지 않습니다', fieldErrors: [{ field: 'nickname', message: '닉네임에 사용할 수 없는 문자가 포함되어 있습니다' }] }, timestamp: new Date().toISOString() }) }),
   );
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'ok@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=사용 가능한 이메일입니다.');
@@ -121,7 +122,7 @@ const browser = await chromium.launch();
   await page.route('**/api/auth/signup', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { accessToken: 'at', refreshToken: 'rt', expiresIn: 1800, userId: 1, email: 'ok@example.com', nickname: '지성' }, error: null, timestamp: new Date().toISOString() }) }),
   );
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'ok@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=사용 가능한 이메일입니다.');
@@ -131,7 +132,7 @@ const browser = await chromium.launch();
   await page.locator('label[for="confirmedAge14"]').click({ position: { x: 10, y: 9 } }); await page.locator('label[for="agreeToTerms"]').click({ position: { x: 10, y: 9 } });
   await page.waitForFunction(() => !document.querySelector('button[type=submit]').disabled);
   await page.click('button[type=submit]');
-  await page.waitForURL('http://localhost:5173/');
+  await page.waitForURL(`${BASE}/`);
   const stored = await page.evaluate(() => ({ access: localStorage.getItem('homesense.accessToken'), refresh: localStorage.getItem('homesense.refreshToken') }));
   console.log('8. redirected to:', page.url(), ' tokens:', stored);
   await page.close();
@@ -140,9 +141,9 @@ const browser = await chromium.launch();
 // ---- 9. Login link navigates to /login ----
 {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.click('text=로그인');
-  await page.waitForURL('http://localhost:5173/login');
+  await page.waitForURL(`${BASE}/login`);
   console.log('9. login link -> ', page.url());
   await page.close();
 }

@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 
 // 세 "프로젝트"는 실제 @playwright/test project가 아니라(저장소에 커밋된 스위트가 없다) 뷰포트 에뮬레이션이다.
 // Figma 프레임 폭 기준: desktop 1440 / tablet 768 / mobile 392.
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'tablet', width: 768, height: 1024 },

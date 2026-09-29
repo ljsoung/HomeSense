@@ -3,7 +3,7 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'fs';
 
-const BASE = process.env.BASE ?? 'http://localhost:5183';
+import { BASE } from './base.mjs';
 mkdirSync('./out', { recursive: true });
 
 const browser = await chromium.launch();

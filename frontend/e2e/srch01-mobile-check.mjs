@@ -1,7 +1,7 @@
 // SCR-SRCH-01 모바일(392px) — 바텀시트, 무한스크롤, 뒤로가기 복원.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5183';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond) {

@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { BASE } from './base.mjs';
 
 const outDir = (process.env.OUT_DIR ?? './out');
 const browser = await chromium.launch();
@@ -10,7 +11,7 @@ async function shot(page, name) {
 // ---- Desktop base state ----
 {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(300); await shot(page, '01-desktop-base');
   const submitDisabled = await page.locator('button[type=submit]').isDisabled();
   console.log('desktop base: submit disabled?', submitDisabled);
@@ -23,7 +24,7 @@ async function shot(page, name) {
   await page.route('**/api/auth/check-email*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { duplicate: false }, error: null, timestamp: new Date().toISOString() }) }),
   );
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'test@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=사용 가능한 이메일입니다.');
@@ -49,7 +50,7 @@ async function shot(page, name) {
 // ---- Mobile base + hint ----
 {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(300); await shot(page, '04-mobile-base');
   await page.close();
 }
@@ -58,7 +59,7 @@ async function shot(page, name) {
   await page.route('**/api/auth/check-email*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { duplicate: false }, error: null, timestamp: new Date().toISOString() }) }),
   );
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'test@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=사용 가능한 이메일입니다.');
@@ -74,7 +75,7 @@ async function shot(page, name) {
 // ---- Tablet base + hint ----
 {
   const page = await browser.newPage({ viewport: { width: 820, height: 1180 } });
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(300); await shot(page, '06-tablet-base');
   await page.close();
 }
@@ -83,7 +84,7 @@ async function shot(page, name) {
   await page.route('**/api/auth/check-email*', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { duplicate: false }, error: null, timestamp: new Date().toISOString() }) }),
   );
-  await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
   await page.fill('#email', 'test@example.com');
   await page.click('button:has-text("중복확인")');
   await page.waitForSelector('text=사용 가능한 이메일입니다.');

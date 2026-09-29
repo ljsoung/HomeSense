@@ -13,7 +13,7 @@ const SCRIPTS = [
   'password-nickname-server-error-clear-test', 'nickname-trim-test', 'border-settle-check',
   'signup-policy-newtab-check', 'privacy-age-fix-check', 'privacy-amendments-check',
   'privacy-withdrawal-purge-check', 'privacy-token-rotation-check', 'auth03-password-reset-check',
-  // SRCH-01 — 실 백엔드(8080) 필요, dev 서버 기본 포트(5173/5183 등)는 BASE 환경변수로 지정.
+  // SRCH-01 — 실 백엔드(8080) 필요, dev 서버 주소는 base.mjs(기본 5173), 다른 포트면 BASE 환경변수로 덮는다.
   'srch01-basic-check', 'srch01-mobile-check', 'srch01-favorite-and-desktop-back-check',
   'srch01-slider-boundary-and-wolse-check', 'srch01-keyboard-and-error-check', 'srch01-tablet-check',
   'srch01-draft-carryover-check',

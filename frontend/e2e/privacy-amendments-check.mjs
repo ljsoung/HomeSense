@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 const results = [];
 function log(name, ok, detail = '') {
   results.push({ name, ok, detail });

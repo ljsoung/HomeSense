@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { BASE } from './base.mjs';
 
 const outDir = (process.env.OUT_DIR ?? './out');
 const browser = await chromium.launch();
@@ -25,7 +26,7 @@ await page.route('**/api/auth/signup', (route) => {
   });
 });
 
-await page.goto('http://localhost:5173/signup', { waitUntil: 'networkidle' });
+await page.goto(`${BASE}/signup`, { waitUntil: 'networkidle' });
 await page.fill('#email', 'taken@example.com');
 await page.click('button:has-text("중복확인")');
 await page.waitForSelector('text=사용 가능한 이메일입니다.');

@@ -12,7 +12,8 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 - Node 18+ (`node -v`), 이 디렉터리에서 `npm install` 1회 (playwright 1.63.0 고정). 브라우저가 이미
   `%LOCALAPPDATA%\ms-playwright`에 있으면 그걸 그대로 쓰고, 없으면 `npx playwright install chromium`.
 - 프런트 dev 서버가 떠 있어야 한다: `frontend/homesense`에서 `npm run dev`(기본 http://localhost:5173).
-  다른 포트로 띄웠다면 `BASE=http://localhost:5183` 같은 식으로 환경변수를 지정한다.
+  모든 스크립트가 `base.mjs`의 `BASE`(기본 http://localhost:5173)를 쓴다. 다른 포트로 띄웠다면
+  `BASE=http://localhost:5183 node run-all.mjs`처럼 환경변수로 덮는다(스크립트마다 기본값을 따로 두지 않는다).
 - 백엔드 필요 여부는 스크립트마다 다르다:
   - AUTH-02/SCR-LEGAL-01 스크립트 대부분과 `auth03-figma-parity-check`/`auth03-transient-token-error-check`/
     `auth03-form-cooldown-check`는 API를 `page.route()`로 목킹해 백엔드가 필요 없다.

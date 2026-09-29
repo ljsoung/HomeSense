@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 
 // Checkbox 소비처는 SignupPage의 2곳(#confirmedAge14, #agreeToTerms)뿐이다(grep 확인). 3개 뷰포트에서
 // 키보드(Tab) 포커스 시 링 표시 / 마우스 클릭 시 링 미표시 / 레이아웃 불변을 검증한다.
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'tablet', width: 768, height: 1024 },

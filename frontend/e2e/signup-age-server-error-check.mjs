@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 // 서버가 ageConfirmed 필드 오류만 담은 400을 돌려주는 경우(체크박스 게이트를 우회한 요청에서만 발생)에
 // 알 수 없는 필드 키가 조용히 버려지지 않고 기존 폼 단위 에러 경로(formError)로 message가 그대로 보이는지,
 // 그리고 알려진 필드 매핑(email 등)이 그대로 동작하는지 검증한다.
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'tablet', width: 768, height: 1024 },

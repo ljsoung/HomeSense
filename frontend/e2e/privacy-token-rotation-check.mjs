@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 // 옛 "최대 30분" 단서는 없어야 한다. 옛 문구("재발급 시 교체·폐기하지 않는다")가 다시 나타나지 않는지도 본다.
 // v1.3 시행일이 아직 플레이스홀더('YYYY-MM-DD')면 PASS로 세지 않고 SKIP으로 알린다(머지 전 기입 필요).
 // 백엔드 불필요.
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 const results = [];
 function log(name, ok, detail = '') {
   results.push({ name, ok, detail });

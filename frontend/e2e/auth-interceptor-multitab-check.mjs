@@ -9,7 +9,7 @@
 // 재발급 응답을 지연시켜 두 탭의 재발급 시도가 반드시 겹치게 한다. BASE로 dev 서버 지정.
 import { chromium } from 'playwright';
 
-const BASE = process.env.BASE ?? 'http://localhost:5173';
+import { BASE } from './base.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond, detail = '') {
