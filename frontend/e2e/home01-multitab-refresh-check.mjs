@@ -128,8 +128,13 @@ await runScenario(3);
   const [a2, r2] = await readTokens(tab2);
   ok('멈춤: 탭 2 종료 후에도 토큰 유지(지우지 않음)', a2 === 'expired.access.token' && r2 === account.refreshToken);
 
-  const tab1Remaining = Math.max(0, USER_WAIT_BUDGET_MS - (Date.now() - tab1Start));
-  const tab1Settled = await tab1.locator('header').first().getByRole('link', { name: '로그인' }).waitFor({ timeout: tab1Remaining }).then(() => true, () => false);
+  // 예산이 이미 소진됐으면 기다리지 않고 지금 상태만 본다 — Playwright는 timeout: 0을 "제한 없음"으로 해석해
+  // 예산을 넘긴 바로 그 경우에 무기한 대기하게 된다.
+  const tab1LoginLink = tab1.locator('header').first().getByRole('link', { name: '로그인' });
+  const tab1Remaining = USER_WAIT_BUDGET_MS - (Date.now() - tab1Start);
+  const tab1Settled = tab1Remaining > 0
+    ? await tab1LoginLink.waitFor({ timeout: tab1Remaining }).then(() => true, () => false)
+    : await tab1LoginLink.isVisible();
   const tab1Elapsed = Date.now() - tab1Start;
   ok('멈춤: 탭 1도 재발급 timeout 뒤 비로그인으로 끝남(락 해제)', tab1Settled);
   ok(`멈춤: 탭 1이 사용자 대기 예산(15초+1초) 안에 확정(${tab1Elapsed}ms)`, tab1Settled && tab1Elapsed <= USER_WAIT_BUDGET_MS);
