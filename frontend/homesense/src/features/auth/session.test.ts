@@ -8,6 +8,7 @@ import {
   advanceSessionGeneration,
   currentSessionGeneration,
   jwtSubject,
+  markTabAuthenticated,
   REFRESH_TIMEOUT_MS,
   restoreSession,
   setSessionExpiredListener,
@@ -158,6 +159,8 @@ describe('재발급 대상이 아닌 401', () => {
       if (config.url === '/api/auth/refresh') refreshCalls.push(body(config));
       return respond(config, 401, { ...unauthorized, error: { code: 'INVALID_CREDENTIALS', message: '비밀번호가 일치하지 않습니다' } });
     };
+
+    markTabAuthenticated(null); // 로그인 상태로 확정된 탭(회원정보 수정 화면)에서 보낸 요청이다.
 
     await expect(httpClient.put('/api/users/me', {})).rejects.toMatchObject({ response: { status: 401 } });
     expect(refreshCalls).toHaveLength(0);

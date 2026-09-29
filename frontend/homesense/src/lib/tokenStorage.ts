@@ -1,4 +1,5 @@
-const ACCESS_TOKEN_KEY = 'homesense.accessToken';
+/** localStorage 키. 다른 탭의 변경을 `storage` 이벤트로 받을 때 이 키로 거른다. */
+export const ACCESS_TOKEN_KEY = 'homesense.accessToken';
 const REFRESH_TOKEN_KEY = 'homesense.refreshToken';
 
 /**

@@ -1,10 +1,13 @@
-import axios from 'axios';
+import axios, { type InternalAxiosRequestConfig } from 'axios';
 import {
   httpClient,
+  isAuthEndpoint,
   sentAccessTokenOf,
+  setRequestTokenCheck,
   setUnauthorizedRecovery,
   type UnauthorizedRecovery,
 } from '../../lib/httpClient';
+import { SessionAccountChangedError, SessionNotConfirmedError } from '../../lib/apiError';
 import { tokenStorage } from '../../lib/tokenStorage';
 import type { ApiResponse } from '../../types/api';
 import { getMe } from '../user/api';
@@ -42,6 +45,10 @@ let sessionGeneration = 0;
  */
 export function advanceSessionGeneration(): number {
   sessionGeneration += 1;
+  // 세션이 바뀌는 순간(로그인·로그아웃·세션 종료·재확인) 이 탭이 보여 주던 계정은 더는 확정이 아니다 —
+  // 새 계정으로 확정될 때까지(`markTabAuthenticated`) 토큰을 실은 사용자 동작 요청은 보내지 않는다.
+  tabConfirmed = false;
+  tabSubject = null;
   return sessionGeneration;
 }
 
@@ -58,6 +65,126 @@ let sessionExpiredListener: (() => void) | null = null;
 export function setSessionExpiredListener(listener: (() => void) | null): void {
   sessionExpiredListener = listener;
 }
+
+// ---------------------------------------------------------------------------------------------------
+// 탭 계정 — 토큰 저장소(localStorage)는 탭끼리 공유되므로, 이 탭이 보여 주는 계정을 따로 기억한다
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * 이 탭이 지금 보여 주는 로그인 계정(JWT `sub`). 로그인 상태로 확정될 때만 값이 있고, 세대가 바뀌면 null이
+ * 된다. 요청 방어(`checkRequestAccount`)가 이 값과 실을 토큰의 `sub`를 비교한다.
+ */
+let tabSubject: string | null = null;
+
+/**
+ * 이 탭이 로그인 계정을 확정했는지. 확인 중(checking)·비로그인이거나, 로그인·로그아웃·다시 확인으로 세대가 막
+ * 바뀐 직후에는 false다. false인 동안에는 저장소 토큰이 이 탭 화면의 계정인지 알 수 없다.
+ */
+let tabConfirmed = false;
+
+/**
+ * 이 탭이 마지막으로 맞춘 저장소 상태(`accountOf`). 로그인 상태가 아닐 때 `storage` 이벤트를 받으면 이 값과
+ * 비교해 바뀌었을 때만 다시 확인한다 — `setTokens`·`clearTokens`는 키마다 이벤트를 하나씩 내므로 한 번의
+ * 로그인·로그아웃에 이벤트가 여러 번 온다.
+ */
+let observedAccount: string | null = null;
+
+/**
+ * 저장소 토큰이 가리키는 계정. 토큰이 없으면 null, JWT가 아니라 `sub`를 읽을 수 없으면 ''(어떤 계정인지 모름 —
+ * 토큰 값만 바뀐 재발급을 계정 변경으로 오인하지 않게 한다).
+ */
+function accountOf(accessToken: string | null): string | null {
+  if (accessToken === null) return null;
+  return jwtSubject(accessToken) ?? '';
+}
+
+/**
+ * 로그인 상태로 확정할 때 부른다. `userId`는 화면에 보여 줄 사용자(세션 복원의 GET /api/users/me 결과)이고,
+ * 모르면(로그인 직후) null. 저장소 토큰의 계정이 그 사용자와 다르면(복원 도중 다른 탭이 다른 계정으로 로그인)
+ * false를 돌려준다 — 호출자는 확정하지 말고 다시 확인해야 한다.
+ */
+export function markTabAuthenticated(userId: number | null): boolean {
+  const stored = tokenStorage.getAccessToken();
+  const storedSubject = stored === null ? null : jwtSubject(stored);
+  if (stored === null || (storedSubject !== null && userId !== null && storedSubject !== String(userId))) {
+    return false;
+  }
+  tabSubject = storedSubject;
+  tabConfirmed = true;
+  observedAccount = accountOf(stored);
+  return true;
+}
+
+/** 로그인 상태가 아니게 됐을 때(비로그인 확정, 로그아웃, 세션 종료, 확인 시작) 부른다. */
+export function markTabUnauthenticated(): void {
+  tabSubject = null;
+  tabConfirmed = false;
+  observedAccount = accountOf(tokenStorage.getAccessToken());
+}
+
+export type RecheckStart = 'checking' | 'anonymous';
+
+let recheckListener: ((next: RecheckStart) => void) | null = null;
+
+/** 다시 확인이 시작될 때 호출될 함수를 등록한다. AuthProvider가 인증 상태를 `next`로 바꾸고 복원을 다시 돌린다. */
+export function setRecheckListener(listener: typeof recheckListener): void {
+  recheckListener = listener;
+}
+
+/**
+ * 이 탭의 로그인 상태를 다시 확인한다. 세대를 올려 진행 중이던 복원·재발급 결과가 상태를 바꾸지 못하게 하고,
+ * 저장소에 토큰이 있으면 'checking'(기존 세션 복원 경로로 확정), 없으면 곧바로 'anonymous'로 보낸다.
+ * 진행 중인 복원 Promise는 버린다 — 새로 부르는 `restoreSession`이 바뀐 저장소로 다시 확인하게 한다.
+ */
+export function beginRecheck(): void {
+  advanceSessionGeneration();
+  markTabUnauthenticated();
+  inflight = null;
+  recheckListener?.(tokenStorage.getAccessToken() === null ? 'anonymous' : 'checking');
+}
+
+/**
+ * 다른 탭이 저장소 토큰을 바꿨을 때(`storage` 이벤트) 부른다. 로그인 상태면 저장소 계정이 이 탭의 계정과
+ * 다를 때(토큰이 사라졌거나 다른 계정), 그 밖에는 마지막으로 맞춘 저장소 상태와 다를 때 다시 확인한다.
+ * 같은 계정의 재발급(토큰 값만 바뀜)은 무시한다.
+ */
+export function syncWithStoredAccount(): void {
+  const current = accountOf(tokenStorage.getAccessToken());
+  const changed = tabSubject !== null ? current !== tabSubject : current !== observedAccount;
+  if (changed) beginRecheck();
+}
+
+/** 계정을 확정하지 않은 탭에서도 보내는 요청 — 읽기(GET·HEAD), 인증 엔드포인트, 계정과 무관하다고 표시한 요청. */
+function passesWhileUnconfirmed(config: InternalAxiosRequestConfig): boolean {
+  const method = (config.method ?? 'get').toLowerCase();
+  return method === 'get' || method === 'head' || isAuthEndpoint(config.url) || config._accountIndependent === true;
+}
+
+/**
+ * 요청 인터셉터가 토큰을 싣기 직전에 부른다.
+ * 1. 계정을 확정하지 않은 탭(확인 중, 비로그인, 세대가 막 바뀐 직후)은 사용자 동작 요청(POST·PUT·PATCH·DELETE)을
+ *    보내지 않고 `SessionNotConfirmedError`로 거절한다 — 저장소 토큰이 이 탭 화면의 계정인지 아직 모른다.
+ *    세션 복원(GET /api/users/me)·재발급·로그아웃(`/api/auth/**`)과 읽기 요청(GET)은 통과시킨다. 읽기를 막으면
+ *    확인 중에 뜨는 공개 화면(추천 단지·검색 결과)이 비고, 인증이 필요한 읽기는 소비자가 확인 중에 부르지 않는다
+ *    (CLAUDE.md "확인 중 인증 의존 동작은 판정까지 미룬다" 행).
+ * 2. 로그인 계정을 보여 주는 탭이면 실을 토큰의 `sub`를 이 탭의 계정과 비교해, 다르면 보내지 않고
+ *    `SessionAccountChangedError`로 거절하며 다시 확인을 시작한다 — 보냈다면 이 탭 화면(A)에서 시작한 요청이
+ *    다른 탭에서 로그인한 계정(B)으로 실행된다. 토큰의 `sub`를 읽을 수 없으면 비교하지 않는다
+ *    (`retryIfSameAccount`와 같은 규칙).
+ */
+function checkRequestAccount(accessToken: string, config: InternalAxiosRequestConfig): void {
+  if (!tabConfirmed) {
+    if (passesWhileUnconfirmed(config)) return;
+    throw new SessionNotConfirmedError();
+  }
+  if (tabSubject === null) return;
+  const subject = jwtSubject(accessToken);
+  if (subject === null || subject === tabSubject) return;
+  beginRecheck();
+  throw new SessionAccountChangedError();
+}
+
+setRequestTokenCheck(checkRequestAccount);
 
 // ---------------------------------------------------------------------------------------------------
 // 재발급 — 앱의 유일한 재발급 경로
@@ -301,9 +428,11 @@ let inflight: Promise<SessionResult> | null = null;
  */
 export function restoreSession(): Promise<SessionResult> {
   if (!inflight) {
-    inflight = verify().finally(() => {
-      inflight = null;
+    const started: Promise<SessionResult> = verify().finally(() => {
+      // 다시 확인(`beginRecheck`)이 이 Promise를 버리고 새 확인을 시작했으면 그 새 확인을 지우지 않는다.
+      if (inflight === started) inflight = null;
     });
+    inflight = started;
   }
   return inflight;
 }
@@ -379,4 +508,8 @@ export function __resetSessionStateForTests(): void {
   sessionExpiredListener = null;
   refreshInflight = null;
   inflight = null;
+  tabSubject = null;
+  tabConfirmed = false;
+  observedAccount = null;
+  recheckListener = null;
 }

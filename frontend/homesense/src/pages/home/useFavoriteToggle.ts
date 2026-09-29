@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ui/useToast';
@@ -6,8 +5,7 @@ import { addFavoriteProperty, getFavoriteProperties, removeFavoriteProperty } fr
 import type { AuthStatus } from '../../features/auth/authContext';
 import { useAuth } from '../../features/auth/useAuth';
 import { assertNever } from '../../lib/assertNever';
-import type { ApiErrorResponse } from '../../types/api';
-import { GENERIC_ERROR_MESSAGE } from '../../lib/apiError';
+import { getErrorMessage } from '../../lib/apiError';
 
 const PENDING_FAVORITE_KEY = 'homesense.pendingFavoriteComplexId';
 
@@ -90,12 +88,9 @@ export function useFavoriteToggle() {
         setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
         showToast('관심 매물로 등록되었습니다.', 'success');
       } catch (error) {
-        if (axios.isAxiosError<ApiErrorResponse>(error) && error.response?.data?.error?.message) {
-          // 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출한다(AUTH-01 확립 관례).
-          showToast(error.response.data.error.message, 'error');
-        } else {
-          showToast(GENERIC_ERROR_MESSAGE, 'error');
-        }
+        // 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출한다(AUTH-01 확립 관례). 다른 탭의 계정
+        // 변경으로 요청을 보내지 않은 경우도 그 사실을 알린다(getErrorMessage).
+        showToast(getErrorMessage(error), 'error');
       }
     },
     [showToast],
@@ -112,11 +107,7 @@ export function useFavoriteToggle() {
         });
         showToast('관심 매물에서 해제되었습니다.', 'success');
       } catch (error) {
-        if (axios.isAxiosError<ApiErrorResponse>(error) && error.response?.data?.error?.message) {
-          showToast(error.response.data.error.message, 'error');
-        } else {
-          showToast(GENERIC_ERROR_MESSAGE, 'error');
-        }
+        showToast(getErrorMessage(error), 'error');
       }
     },
     [showToast],
