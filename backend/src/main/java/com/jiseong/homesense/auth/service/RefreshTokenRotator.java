@@ -87,6 +87,11 @@ class RefreshTokenRotator {
             return new RefreshRotationResult.ReuseDetected(user.getUserId());
         }
 
+        // 불변 조건: Access Token은 이 트랜잭션이 커밋되기 전에 발급한다. 같은 토큰으로 경쟁하는 요청은 위
+        // revokeIfUnrevoked()에서 이 행의 잠금이 풀릴 때(=커밋)까지 기다렸다가 재사용을 탐지하므로, 여기서 발급한
+        // 토큰의 발급 시각은 항상 그 탐지의 컷오프보다 앞선다. AccessTokenEpochService가 "발급 시각 > 컷오프"만
+        // 통과시켜 같은 밀리초에 발급된 공격자 토큰까지 막을 수 있는 근거가 이 순서다. 발급을 커밋 뒤(호출자 쪽,
+        // 커밋 후 리스너 등)로 옮기면 탐지가 발급보다 먼저 일어날 수 있어 공격자 토큰이 컷오프를 통과한다.
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId(), user.getRole().name());
         String newRefreshToken = jwtTokenProvider.createRefreshToken(user.getUserId());
         LocalDateTime expiresAt = LocalDateTime.now().plus(Duration.ofMillis(jwtProperties.refreshTokenValidity()));

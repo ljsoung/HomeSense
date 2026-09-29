@@ -2,11 +2,17 @@ package com.jiseong.homesense.common.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Date;
 
 import org.junit.jupiter.api.Test;
 
 import com.jiseong.homesense.common.config.JwtProperties;
+
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 
 class JwtTokenProviderTest {
 
@@ -91,15 +97,30 @@ class JwtTokenProviderTest {
     }
 
     @Test
-    void getIssuedAt은_토큰_발급_시각을_추출한다() {
-        // AccessTokenEpochService가 이 값을 무효화 컷오프와 비교한다 — iat이 초 단위로 잘리므로
-        // "지금"과의 오차가 1초 이내여야 한다.
-        Instant before = Instant.now();
+    void getIssuedAt은_토큰_발급_시각을_밀리초_정밀도로_추출한다() {
+        // AccessTokenEpochService가 이 값을 밀리초 컷오프와 비교한다 — 초 단위로 잘리면 컷오프와 같은
+        // 초에 발급된 토큰의 선후를 가리지 못한다(재사용 탐지 코드리뷰 P1).
+        Instant before = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         String token = provider.createAccessToken(1L, "USER");
         Instant after = Instant.now();
 
         Instant issuedAt = provider.getIssuedAt(token);
 
-        assertThat(issuedAt).isBetween(before.minusSeconds(1), after.plusSeconds(1));
+        assertThat(issuedAt).isBetween(before, after);
+    }
+
+    @Test
+    void iatMs_클레임이_없는_토큰은_iat으로_대신한다() {
+        // iatMs 도입 이전에 발급된 토큰 — 초의 시작 시각으로 읽혀 컷오프와 같은 초면 막히는 쪽으로 기운다.
+        Instant issuedAt = Instant.ofEpochSecond(1_700_000_000L);
+        String legacy = Jwts.builder()
+                .subject("1")
+                .claim("type", "ACCESS")
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(Instant.now().plusSeconds(60)))
+                .signWith(Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+
+        assertThat(provider.getIssuedAt(legacy)).isEqualTo(issuedAt);
     }
 }

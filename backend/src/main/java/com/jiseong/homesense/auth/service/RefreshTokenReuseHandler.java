@@ -74,9 +74,11 @@ import lombok.RequiredArgsConstructor;
  * 사용자의 Access Token을 전부 무효화한다(refresh·logout 두 호출부 모두 이 메서드를 거친다). 순서도
  * resetPassword()와 같다 — Refresh Token 폐기 뒤, 이 트랜잭션 안에서(커밋 후 리스너가 아니다) Redis에
  * 쓴다. Redis 쓰기는 DB 롤백에 묶이지 않으므로 DB 커밋이 실패해도 컷오프는 남는데, 그 방향은 과잉
- * 차단(다시 로그인)이라 안전하다. <b>경계:</b> 컷오프와 {@code iat}을 초 단위로 비교하고
- * {@code iat >= cutoff}면 통과시키므로({@link AccessTokenEpochService} javadoc), 탐지와 같은 초 안에
- * 발급된 Access Token은 걸러지지 않는다 — 정당한 재로그인을 막지 않으려고 받아들인 폭이다.
+ * 차단(다시 로그인)이라 안전하다. <b>경계:</b> 발급 시각과 컷오프를 밀리초로 비교하고 발급 시각이
+ * 컷오프보다 엄격히 뒤일 때만 통과시킨다({@link AccessTokenEpochService} javadoc). 공격자의 Access Token은
+ * {@link RefreshTokenRotator}의 트랜잭션 안(커밋 전)에서 발급되고 탐지는 그 커밋 뒤에 일어나므로, 탐지와
+ * 같은 초·같은 밀리초에 발급됐어도 막힌다. 처음엔 초 단위 {@code iat >= cutoff}로 비교해 같은 초에 회전한
+ * 공격자 토큰이 만료까지 통과했다(코드리뷰 P1).
  */
 @Component
 @RequiredArgsConstructor

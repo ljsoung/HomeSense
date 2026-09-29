@@ -2,6 +2,7 @@ package com.jiseong.homesense.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -45,9 +46,10 @@ import com.jayway.jsonpath.JsonPath;
  * 토큰으로 재발급(또는 로그아웃)하면 재사용 탐지가 발동한다. 그 뒤 공격자의 Access Token과 정상 사용자가
  * 쓰던 Access Token 모두 인증이 필요한 API에서 401이어야 하고, 새로 로그인하면 정상 동작해야 한다.
  *
- * <p>컷오프는 초 단위이고 {@code iat >= cutoff}면 통과한다({@code AccessTokenEpochService}). 그래서
- * 탐지 전에 {@code Thread.sleep(1100)}으로 초 경계를 넘긴다 — 타이밍 회피가 아니라, "탐지 이전 초에
- * 발급된 토큰은 막힌다"를 검증하기 위한 전제다. 같은 초에 발급된 토큰은 막히지 않는 것이 의도된 경계다.
+ * <p>공격자 회전과 탐지 사이에 대기를 두지 않는다 — 실제 공격에서 둘은 수 밀리초 안에 연달아 일어나므로
+ * 같은 초 안에서도 막혀야 한다. 처음엔 컷오프를 초 단위({@code iat >= cutoff})로 비교해 이 경우가 통과했고,
+ * 이 IT는 {@code Thread.sleep(1100)}으로 초 경계를 넘겨 그 결함을 가리고 있었다(코드리뷰 P1). 같은 초에
+ * 발급되게 맞추고, 그렇지 못한 실행은 건너뜀으로 표시한다({@code assumeSameSecond}).
  *
  * <p>Redis는 로컬 Redis(localhost:6379)를 쓴다(다른 IT와 같은 알려진 격리 한계, CLAUDE.md 백로그). 다른
  * IT가 같은 userId로 남긴 {@code user:status}/{@code user:tokenEpoch}/{@code login:fail} 키가 결과를
@@ -106,7 +108,7 @@ class RefreshTokenReuseAccessCutoffMariaDbIT {
         seed = new WithdrawalTestSeed(jdbc);
         seed.wipeAll();
         userId = seed.user(EMAIL, passwordEncoder.encode(PASSWORD), "ACTIVE", null);
-        redis.delete(List.of("user:status:" + userId, "user:tokenEpoch:" + userId, "login:fail:" + EMAIL));
+        redis.delete(List.of("user:status:" + userId, "user:tokenEpochMs:" + userId, "login:fail:" + EMAIL));
         originalRefreshToken = jwtTokenProvider.createRefreshToken(userId);
         seed.refreshToken(userId, refreshTokenHasher.hash(originalRefreshToken), false);
     }
@@ -114,18 +116,18 @@ class RefreshTokenReuseAccessCutoffMariaDbIT {
     @Test
     void 재발급_경로의_재사용_탐지_뒤_기존_Access_Token은_401이고_새로_로그인하면_정상이다() throws Exception {
         String victimAccessToken = jwtTokenProvider.createAccessToken(userId, "USER");
-        TokenResponse attacker = authService.refreshAccessToken(originalRefreshToken);
-        expectMe(attacker.accessToken(), 200);
         expectMe(victimAccessToken, 200);
 
-        Thread.sleep(1100);
-        Instant beforeDetection = Instant.now();
+        waitForStartOfNextSecond();
+        TokenResponse attacker = authService.refreshAccessToken(originalRefreshToken);
+        Instant attackerIssuedAt = jwtTokenProvider.getIssuedAt(attacker.accessToken());
+        expectMe(attacker.accessToken(), 200);
         assertThatThrownBy(() -> authService.refreshAccessToken(originalRefreshToken))
                 .isInstanceOf(InvalidRefreshTokenException.class);
+        Instant afterDetection = Instant.now();
         verify(auditLogger).logRefreshTokenReuseDetected(userId);
 
-        // 공격자가 탐지 직전에 회전으로 받은 Access Token과 정상 사용자가 쓰던 토큰 모두 막힌다.
-        assertThat(jwtTokenProvider.getIssuedAt(attacker.accessToken())).isBefore(beforeDetection);
+        // 탐지 직전에 회전으로 받은 공격자의 Access Token과 정상 사용자가 쓰던 토큰 모두 막힌다.
         expectMe(attacker.accessToken(), 401);
         expectMe(victimAccessToken, 401);
         // 공격자의 후속 Refresh Token도 폐기돼 다시 회전할 수 없다.
@@ -133,20 +135,44 @@ class RefreshTokenReuseAccessCutoffMariaDbIT {
                 .isInstanceOf(InvalidRefreshTokenException.class);
 
         expectMe(login(), 200);
+        assumeSameSecond(attackerIssuedAt, afterDetection);
     }
 
     @Test
     void 로그아웃_경로의_재사용_탐지_뒤에도_기존_Access_Token은_401이고_새로_로그인하면_정상이다() throws Exception {
-        TokenResponse attacker = authService.refreshAccessToken(originalRefreshToken);
-        expectMe(attacker.accessToken(), 200);
+        expectMe(jwtTokenProvider.createAccessToken(userId, "USER"), 200);
 
-        Thread.sleep(1100);
+        waitForStartOfNextSecond();
+        TokenResponse attacker = authService.refreshAccessToken(originalRefreshToken);
+        Instant attackerIssuedAt = jwtTokenProvider.getIssuedAt(attacker.accessToken());
+        expectMe(attacker.accessToken(), 200);
         // 정상 사용자가 (이미 rotation된) 원래 토큰으로 로그아웃한다 — 예외 없이 끝나야 한다.
         authService.logout(userId, originalRefreshToken);
+        Instant afterDetection = Instant.now();
         verify(auditLogger).logRefreshTokenReuseDetected(userId);
 
         expectMe(attacker.accessToken(), 401);
         expectMe(login(), 200);
+        assumeSameSecond(attackerIssuedAt, afterDetection);
+    }
+
+    /**
+     * 다음 초가 시작될 때까지 기다린다 — 뒤이은 공격자 회전과 재사용 탐지(수십 밀리초)가 같은 초에 들어오게 해,
+     * "같은 초에 발급된 공격자 토큰도 막힌다"를 우연이 아니라 매번 검증한다. 초 경계를 넘기려는 옛 sleep과
+     * 반대 목적이다.
+     */
+    private static void waitForStartOfNextSecond() throws InterruptedException {
+        Thread.sleep(1000 - Instant.now().toEpochMilli() % 1000 + 5);
+    }
+
+    /**
+     * 공격자 토큰 발급과 탐지가 같은 초였는지 확인한다. 보안 단언(401)은 모두 끝난 뒤 마지막에 두어, 느린 환경에서
+     * 초 경계를 넘긴 실행은 실패가 아니라 건너뜀으로 표시된다 — 그 실행은 "같은 초" 경합을 재현하지 못했을 뿐
+     * 결함은 아니다. 건너뜀이 반복되면 이 테스트가 옛 결함(초 단위 비교)을 더는 잡지 못한다는 신호다.
+     */
+    private static void assumeSameSecond(Instant attackerIssuedAt, Instant afterDetection) {
+        assumeTrue(attackerIssuedAt.getEpochSecond() == afterDetection.getEpochSecond(),
+                "공격자 토큰 발급과 탐지가 초 경계를 넘겨 같은 초 경합을 재현하지 못했다");
     }
 
     private void expectMe(String accessToken, int expectedStatus) throws Exception {
