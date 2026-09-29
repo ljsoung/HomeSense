@@ -1,13 +1,15 @@
 package com.jiseong.homesense.auth.service;
 
+import java.time.Instant;
+
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.logging.AuditLogger;
-
-import lombok.RequiredArgsConstructor;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 
 /**
  * SVC-AUTH-01 재사용 탐지 전용 — 정확한 안전 조건은 "호출자에게 열린 트랜잭션이 전혀 없어야 한다"가
@@ -62,17 +64,57 @@ import lombok.RequiredArgsConstructor;
  * 새로 만든 것이 문제였고(재시도 로직이 필요 없어져야 했는데 남아 있었다), 여기는 재시도가 전혀
  * 없고 "호출자가 이미 트랜잭션을 끝낸 뒤, 최신 커밋을 보는 새 트랜잭션에서 한 번만 실행하고
  * 독립적으로 커밋한다"는 REQUIRES_NEW 본연의 용도다.
+ *
+ * <p>(4) <b>Access Token 컷오프(2026-09-29 추가)</b> — Refresh Token 전체 폐기만으로는 이미 발급된
+ * Access Token이 만료({@code accessTokenValidity}, 기본 30분)까지 그대로 통용된다. 탈취한 Refresh
+ * Token으로 먼저 회전한 공격자는 그 회전에서 Access Token도 함께 받았으므로, 탐지 이후에도 최대 30분간
+ * 인증된 요청을 보낼 수 있었다. {@link AuthService#resetPassword}와 같은 방식으로
+ * {@link AccessTokenEpochService#invalidateTokensIssuedBefore}를 호출해 탐지 시각 이전에 발급된 이
+ * 사용자의 Access Token을 전부 무효화한다(refresh·logout 두 호출부 모두 이 메서드를 거친다).
+ * Refresh Token 폐기가 <b>커밋된 뒤에</b> Redis에 쓴다(2026-09-29 코드리뷰 P2). 처음엔 {@code resetPassword()}처럼
+ * 같은 트랜잭션 안에서 썼는데, 그러면 Redis 장애로 SET이 예외를 던질 때 앞선 {@code revokeAllByUserId()}까지
+ * 롤백돼, Redis가 복구된 뒤에도 공격자가 회전으로 받은 Refresh Token이 계속 유효했다. 그래서 폐기와 감사 로그만
+ * {@code REQUIRES_NEW} 트랜잭션({@link TransactionTemplate})으로 먼저 커밋하고, 컷오프는 그 뒤에 쓴다. 컷오프
+ * 쓰기가 실패하면 예외를 그대로 던진다(삼키지 않는다) — 재발급 경로의 클라이언트는 5xx를 일시 장애로 보고 토큰을
+ * 지우지 않아 다음에 같은(이미 폐기된) 토큰으로 다시 재발급하고, 그 요청이 재사용 탐지를 다시 거쳐 컷오프 쓰기를
+ * 재시도한다. 로그아웃 경로는 클라이언트가 응답과 무관하게 로컬 로그아웃하므로 이런 재시도가 없고, 그때는 Access
+ * Token이 만료까지 남는다(Refresh Token 폐기는 커밋돼 있다). 반대로 커밋 전에 Redis에 썼다가 DB 커밋이 실패하는 경우는 이제 없다 — 컷오프는 폐기가 확정된
+ * 뒤에만 남는다. 폐기 커밋과 컷오프 쓰기 사이의 짧은 틈에는 공격자의 Access Token이 아직 통과하지만, 새 토큰은
+ * 더 발급받을 수 없다.
+ *
+ * <p>{@code @Transactional(REQUIRES_NEW)} 대신 {@link TransactionTemplate}을 쓰는 이유: 컷오프를 트랜잭션 밖에
+ * 두려면 한 메서드 안에서 트랜잭션 경계를 끝내야 하는데, 같은 클래스의 다른 {@code @Transactional} 메서드를
+ * 부르면 프록시를 거치지 않아(self-invocation) 트랜잭션이 걸리지 않는다. 위 (1)(2)(3)의 이유는 그대로다 —
+ * 템플릿의 전파 속성이 {@code REQUIRES_NEW}다.
+ *
+ * <p><b>경계:</b> 발급 시각과 컷오프를 밀리초로 비교하고 발급 시각이
+ * 컷오프보다 엄격히 뒤일 때만 통과시킨다({@link AccessTokenEpochService} javadoc). 공격자의 Access Token은
+ * {@link RefreshTokenRotator}의 트랜잭션 안(커밋 전)에서 발급되고 탐지는 그 커밋 뒤에 일어나므로, 탐지와
+ * 같은 초·같은 밀리초에 발급됐어도 막힌다. 처음엔 초 단위 {@code iat >= cutoff}로 비교해 같은 초에 회전한
+ * 공격자 토큰이 만료까지 통과했다(코드리뷰 P1).
  */
 @Component
-@RequiredArgsConstructor
 class RefreshTokenReuseHandler {
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuditLogger auditLogger;
+    private final AccessTokenEpochService accessTokenEpochService;
+    private final TransactionTemplate requiresNewTransaction;
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    RefreshTokenReuseHandler(RefreshTokenRepository refreshTokenRepository, AuditLogger auditLogger,
+            AccessTokenEpochService accessTokenEpochService, PlatformTransactionManager transactionManager) {
+        this.refreshTokenRepository = refreshTokenRepository;
+        this.auditLogger = auditLogger;
+        this.accessTokenEpochService = accessTokenEpochService;
+        this.requiresNewTransaction = new TransactionTemplate(transactionManager);
+        this.requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     void handle(Long userId) {
-        refreshTokenRepository.revokeAllByUserId(userId);
-        auditLogger.logRefreshTokenReuseDetected(userId);
+        requiresNewTransaction.executeWithoutResult(status -> {
+            refreshTokenRepository.revokeAllByUserId(userId);
+            auditLogger.logRefreshTokenReuseDetected(userId);
+        });
+        accessTokenEpochService.invalidateTokensIssuedBefore(userId, Instant.now());
     }
 }

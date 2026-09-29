@@ -33,7 +33,12 @@ const v11EffectiveDate = '2026-09-21';
 // v1.2(2026-09-21) — 6항 연령 확인 문구 갱신 시행(서버 검증 도입 반영). v1.1과 시행일이 같다.
 // v1.1·v1.2 모두 13항의 7일 사전 고지를 생략했다 — 사유(고지할 기존 가입자 없음, 사용자 확인)·
 // 무효화 조건은 CLAUDE.md SCR-LEGAL-01 "연령 확인 절차" 판단 기록 5·7단계 참고.
-const currentEffectiveDate = '2026-09-21';
+const v12EffectiveDate = '2026-09-21';
+// v1.3 — 2항(탈퇴 계정 자동 파기·유예)과 8항(토큰 재발급 시 교체·재사용 탐지) 변경. 시행일은 이 변경을 담은
+// PR(feature/backend/reuse-detection-access-cutoff)의 머지일이다. **머지 직전에 'YYYY-MM-DD'를 실제 날짜로
+// 바꿔야 한다** — 플레이스홀더가 남아 있으면 e2e privacy-token-rotation-check가 SKIP으로 알린다.
+const v13EffectiveDate = '2026-09-28';
+const currentEffectiveDate = v13EffectiveDate;
 
 export const privacySections: PrivacySection[] = [
   {
@@ -357,21 +362,34 @@ export const privacySections: PrivacySection[] = [
           <li>비밀번호는 BCrypt 알고리즘을 이용한 단방향(복호화 불가능) 암호화 방식으로 저장합니다.</li>
           <li>이용자와의 통신 구간은 HTTPS를 통해 암호화되어 전송됩니다.</li>
           <li>
-            JWT(JSON Web Token) 기반의 인증 체계를 사용하며, 로그아웃 시 해당 Refresh Token을 즉시 폐기하여
-            재사용을 방지합니다. 다만 Access Token 재발급(로그인 상태 유지) 자체는 제출된 Refresh Token을
-            새로 교체하거나 폐기하지 않으므로, 로그아웃하지 않는 한 유효기간이 만료될 때까지 계속 재사용될
-            수 있습니다.
+            JWT(JSON Web Token) 기반의 인증 체계를 사용합니다. 로그인 상태를 유지하기 위해 인증 토큰을
+            재발급할 때마다 새 Refresh Token을 발급하고, 기존 Refresh Token은 즉시 폐기합니다. 로그아웃 시에는
+            해당 기기의 Refresh Token을, 비밀번호를 재설정하면 해당 계정의 모든 Refresh Token을 즉시
+            폐기합니다.
           </li>
-          {/* P2 코드리뷰 대응(2026-09-15) — 원문은 "로그아웃 또는 토큰 재발급 시 기존 Refresh Token을
-              즉시 폐기"라고 적었으나, AuthService.refreshAccessToken()을 직접 확인한 결과 유효한
-              Refresh Token이 제출되면 새 Access Token만 발급할 뿐(jwtTokenProvider.createAccessToken()),
-              stored.revoke()를 호출하지도 않고 새 Refresh Token을 발급하지도 않는다 — 즉 제출한 Refresh
-              Token은 폐기되지 않고 그대로 재사용 가능한 상태로 남는다. revoke()를 실제로 호출하는 곳은
-              logout()뿐이다. "재발급 시에도 폐기된다"는 문장은 모든 토큰 재발급 호출에 대해 거짓인
-              진술이었다 — 로테이션/폐기 로직을 새로 구현하는 대신(백엔드 인증 흐름을 바꾸는 별도 기능
-              결정이라 정책 문구 수정 세션에서 임의로 만들지 않음) 실제 동작(로그아웃 시에만 폐기, 재발급은
-              폐기·교체 없음)에 맞춰 문구를 좁혔다. Refresh Token 로테이션 도입은 완결 필요로
-              CLAUDE.md에 남긴다. */}
+          <li>
+            이미 폐기된 Refresh Token이 다시 사용되면 토큰이 탈취되었을 가능성이 있다고 보고, 해당 계정의 모든
+            Refresh Token을 폐기하고 이미 발급된 Access Token도 무효화합니다. 이 경우 모든 기기에서 즉시 로그인
+            상태가 해제되며, 다시 로그인해야 합니다.
+          </li>
+          {/* 2026-09-29(fix/frontend/privacy-token-rotation) — 2026-09-15 P2 대응 때 이 항목은 "재발급 시
+              Refresh Token을 교체·폐기하지 않는다"로 좁혀져 있었다(당시 코드가 실제로 그랬다). 2026-09-22
+              Refresh Token Rotation·재사용 탐지(0f5e8a0, 2ae48cb, develop 머지)로 그 서술이 거짓이 되어
+              실제 동작에 맞춰 다시 썼다. 근거(백엔드 코드):
+              - 재발급: RefreshTokenRotator.attempt()가 조건부 UPDATE(revokeIfUnrevoked, revoked_yn·rotated_yn
+                동시 세팅)로 기존 토큰을 폐기한 뒤 새 토큰을 저장한다.
+              - 재사용 탐지: revokeIfUnrevoked()가 0건이면(이미 폐기된 토큰 — rotation·로그아웃·일괄 폐기 모두
+                해당) RefreshTokenReuseHandler가 revokeAllByUserId() 후 401. logout()에 rotation된 토큰이
+                제출돼도 같은 핸들러를 부른다.
+              - [2026-09-29 갱신] 재사용 탐지도 Access Token 컷오프(AccessTokenEpochService)를 건다 —
+                RefreshTokenReuseHandler.handle()이 폐기 직후 invalidateTokensIssuedBefore(userId, now)를
+                호출하고 JwtAuthenticationFilter가 컷오프 이전 iat 토큰을 인증하지 않는다(refresh·logout 두 경로,
+                검증: RefreshTokenReuseAccessCutoffMariaDbIT). 그래서 "30분" 단서를 빼고 "즉시 해제"로 썼다.
+                경계: 컷오프는 초 단위이고 iat >= cutoff면 통과하므로 탐지와 같은 초에 발급된 토큰만 예외다 —
+                정당한 재로그인을 막지 않으려고 받아들인 1초 미만의 폭이라 이용자 문구에는 적지 않았다.
+              - 로그아웃은 제출된 토큰 하나만 폐기한다(stored.revoke()). 탈퇴 시 일괄 폐기는 2항에 적었다.
+              - 감사 로그(AuditLogger.logRefreshTokenReuseDetected)는 userId만 남긴다 — IP·User-Agent를
+                기록하지 않으므로 3항·9항(수집 항목)은 바꾸지 않았다. */}
           <li>
             서비스 관리자 권한과 일반 회원 권한을 분리(Role 기반 접근 제어)하여, 개인정보에 접근할 수 있는
             인력을 최소화하고 있습니다.
@@ -494,8 +512,13 @@ export const privacySections: PrivacySection[] = [
             ],
             [
               'v1.2',
-              currentEffectiveDate,
+              v12EffectiveDate,
               '6항 연령 확인 관련 문구 수정: 가입 시 서버에서도 연령 확인 항목을 검증하도록 변경 반영',
+            ],
+            [
+              'v1.3',
+              v13EffectiveDate,
+              '2항·8항 관련 문구 수정: 탈퇴 계정 자동 파기 및 유예 기간, 토큰 재발급 시 교체와 재사용 탐지 반영',
             ],
           ]}
         />

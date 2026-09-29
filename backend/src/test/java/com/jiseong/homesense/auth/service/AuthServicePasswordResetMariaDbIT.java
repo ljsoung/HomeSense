@@ -145,15 +145,11 @@ class AuthServicePasswordResetMariaDbIT {
      * 새 Access Token은 그대로 통과하는지 확인한다 — Mockito로는 "실제 Redis에 컷오프가 기록되고
      * 그 값을 다시 읽어 정확히 비교되는지" 자체를 증명할 수 없다.
      *
-     * <p>{@code Thread.sleep(1100)}는 타이밍을 피해 가는 임시방편이 아니라 이 테스트가 검증하려는
-     * 것 자체의 전제조건이다 — JWT {@code iat}(NumericDate)는 초 단위로 잘리므로(COM-SEC-02
-     * {@code jti} 도입 배경과 같은 특성), stale 토큰과 컷오프가 같은 초 안에서 발급되면(디스크·네트워크
-     * 지연이 없는 이 테스트 환경에서는 그러기가 오히려 쉽다) {@link AccessTokenEpochService}가 의도적으로
-     * "같은 초는 통과시킨다"는 트레이드오프를 택하고 있어(그 클래스 javadoc 참고, 실사용자 로그인을
-     * 최대 30분 막는 반대 방향 오탐을 피하기 위함) stale 토큰이 걸러지지 않는 게 오히려 설계대로다.
-     * 최초 이 테스트를 sleep 없이 작성했다가 정확히 이 이유로 실패해서(실 Redis 위에서 실제로
-     * 재현됨) sleep을 추가했다 — 실 운영에서는 재설정 요청과 그 이전 로그인 사이에 최소 수 초~수 분이
-     * 있어 이 창이 사실상 문제되지 않는다.
+     * <p>stale 토큰 발급과 재설정 사이에 대기를 두지 않는다 — 컷오프는 밀리초 단위이고 컷오프보다 엄격히 뒤에
+     * 발급된 토큰만 통과하므로({@link AccessTokenEpochService} javadoc) 같은 초 안에서도 stale 토큰은 막혀야
+     * 한다. 예전 초 단위 비교에서는 같은 초면 통과해 여기에 {@code Thread.sleep(1100)}이 있었다(재사용 탐지
+     * 코드리뷰 P1로 비교 방식을 바꾸며 제거). fresh 토큰 앞의 2ms 대기는 "재설정 뒤의 로그인"을 모델링한다 —
+     * 컷오프와 같은 밀리초에 발급된 토큰은 의도적으로 막히므로 그 경우를 배제한다.
      */
     @Test
     void 재설정_이전에_발급된_AccessToken은_재설정_이후_컷오프에_걸리고_이후에_발급된_토큰은_통과한다() throws InterruptedException {
@@ -165,9 +161,9 @@ class AuthServicePasswordResetMariaDbIT {
         String staleAccessToken = jwtTokenProvider.createAccessToken(userId, "USER");
         Instant staleIssuedAt = jwtTokenProvider.getIssuedAt(staleAccessToken);
 
-        Thread.sleep(1100);
         authService.resetPassword(rawToken, "NewAbcd1234!");
 
+        Thread.sleep(2);
         String freshAccessToken = jwtTokenProvider.createAccessToken(userId, "USER");
         Instant freshIssuedAt = jwtTokenProvider.getIssuedAt(freshAccessToken);
 

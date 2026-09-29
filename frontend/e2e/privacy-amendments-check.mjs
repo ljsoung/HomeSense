@@ -16,12 +16,14 @@ const rows = await page.locator('#amendments tbody tr').evaluateAll((trs) =>
 );
 const row = (v) => rows.find((r) => r[0] === v);
 
-log('applies-from date is 2026-09-21 (current = v1.2)', section.includes('2026-09-21') && /2026-09-21[^\n]*부터 적용/.test(section));
-log('exactly three revision rows: v1.0, v1.1, v1.2 in order', rows.map((r) => r[0]).join(',') === 'v1.0,v1.1,v1.2', rows.map((r) => r[0]).join(','));
+// v1.3(2항·8항) 추가 후: 적용일은 v1.3 행을 따르고, 앞선 세 행은 그대로여야 한다. v1.3 내용은
+// privacy-token-rotation-check가 본다.
+log('applies-from date follows the latest row (v1.3)', !!row('v1.3') && section.includes(`${row('v1.3')[1]}부터 적용`), row('v1.3')?.[1]);
+log('exactly four revision rows: v1.0, v1.1, v1.2, v1.3 in order', rows.map((r) => r[0]).join(',') === 'v1.0,v1.1,v1.2,v1.3', rows.map((r) => r[0]).join(','));
 log('v1.0 row keeps 2026-09-15 and 최초 제정', row('v1.0')?.[1] === '2026-09-15' && row('v1.0')?.[2] === '최초 제정');
 log('v1.1 row keeps its own date 2026-09-21', row('v1.1')?.[1] === '2026-09-21');
 log('v1.1 note unchanged (자기 확인 항목 도입 반영)', row('v1.1')?.[2] === '6항 연령 확인 관련 문구 수정: 회원가입 시 만 14세 이상 자기 확인 항목 도입 반영', row('v1.1')?.[2]);
-log('v1.2 row date is 2026-09-21', row('v1.2')?.[1] === '2026-09-21');
+log('v1.2 row keeps its own date 2026-09-21', row('v1.2')?.[1] === '2026-09-21');
 log('v1.2 note reads server-side verification', row('v1.2')?.[2] === '6항 연령 확인 관련 문구 수정: 가입 시 서버에서도 연령 확인 항목을 검증하도록 변경 반영', row('v1.2')?.[2]);
 log('7-day notice sentence still present', section.includes('최소 7일'));
 await browser.close();

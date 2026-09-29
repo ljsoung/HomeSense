@@ -32,24 +32,33 @@ import com.jiseong.homesense.common.config.JwtProperties;
  * 복구할 진실의 원천이 필요 없다) — 그래서 {@link UserStatusResolver}에 대응하는 복구용 컴포넌트도
  * 두지 않았다.
  *
- * <p><b>컷오프·비교 모두 초 단위로 자른다(밀리초 정밀도로 저장하지 않는다) — 실 Redis로 실행한 IT가
- * 잡아낸 결함이다.</b> JWT의 {@code iat}(RFC 7519 NumericDate)는 라이브러리가 직렬화 시점에 초
- * 단위로 자른다({@link JwtTokenProvider}의 {@code jti} 도입 배경과 같은 특성). 처음 구현은 컷오프를
- * 밀리초 정밀도(`Instant.now()`)로 그대로 저장하고 초 단위로 잘린 {@code iat}과 직접 비교했는데,
- * 이러면 재설정 직후 같은 초 안에 새로 로그인해 발급된(따라서 정당한) Access Token의 {@code iat}이
- * 컷오프보다 초 단위로는 같아도 밀리초로는 여전히 이전으로 비교돼 즉시 걸러지는 오탐이 났다 — 그
- * 토큰은 컷오프 TTL({@code accessTokenValidity}, 최대 30분) 동안 계속 거부되는, 실사용자 로그인이
- * 막히는 회귀였다({@code AuthServicePasswordResetMariaDbIT}의 실 Redis 테스트가 실제로 이 실패를
- * 재현했다 — Mockito 목만으로는 두 쪽 다 자유롭게 밀리초를 넣을 수 있어 이 정밀도 불일치 자체가
- * 드러나지 않았다). 양쪽을 {@link java.time.temporal.ChronoUnit#SECONDS}로 잘라 비교하면 이 오탐이
- * 사라진다 — 대신 컷오프 발생 직전 같은 초 안에 발급된 진짜 stale 토큰이 최대 1초간 걸러지지 않을
- * 수 있는 반대 방향의 작은 여지가 생기는데, "정당한 로그인을 최대 30분 차단"과 "탈취된 토큰을 최대
- * 1초 늦게 차단" 중 후자가 명백히 더 안전한 트레이드오프라 이 폭을 그대로 받아들인다.
+ * <p><b>정밀도와 경계 — 밀리초 단위, 발급 시각이 컷오프보다 엄격히 뒤일 때만 통과한다.</b> 이 비교는
+ * 두 번 고쳐졌다. (1) 처음엔 컷오프를 밀리초로 저장하고 초 단위로 잘린 JWT {@code iat}과 비교해, 재설정
+ * 직후 같은 초에 정당하게 발급된 토큰이 "이전"으로 비교돼 거부됐다({@code AuthServicePasswordResetMariaDbIT}
+ * 실 Redis 테스트가 잡음). (2) 그래서 양쪽을 초로 자르고 {@code iat >= cutoff}면 통과시켰는데, 이러면
+ * 재사용 탐지와 같은 초에 회전으로 발급된 공격자의 Access Token도 통과해 만료(최대 30분)까지 그대로
+ * 쓰였다(코드리뷰 P1) — 공격자 회전과 정상 사용자의 재사용 탐지는 수 밀리초 안에 연달아 일어나는 것이
+ * 보통이라 흔한 경우였다. 지금은 {@link JwtTokenProvider#getIssuedAt}이 주는 밀리초 발급 시각
+ * ({@code iatMs} 클레임)과 밀리초 컷오프를 비교하고 {@code issuedAt > cutoff}일 때만 통과시킨다.
+ *
+ * <p>엄격 비교가 안전한 근거: 막아야 할 토큰은 컷오프보다 <i>먼저</i> 발급됐다. 재사용 탐지에서 공격자의
+ * Access Token은 {@code RefreshTokenRotator}의 트랜잭션 안(커밋 전)에서 만들어지고, 탐지는 그 커밋 뒤에야
+ * 일어난다(패자는 승자의 행 잠금이 풀릴 때까지 기다린다). 그래서 같은 밀리초여도 막힌다. 반대로 컷오프와
+ * 같은 밀리초에 정당하게 발급된 토큰도 막히지만, 그 토큰 하나만 거부될 뿐 다음 로그인은 통과한다 — 로그인은
+ * 비밀번호 검증(BCrypt)을 거쳐 탐지·재설정보다 한참 뒤에 일어나므로 실제로 겹칠 일도 거의 없다.
+ *
+ * <p><b>알려진 한계:</b> 발급과 컷오프가 같은 벽시계를 쓴다는 전제다. 여러 인스턴스 사이 시계가 어긋나거나
+ * (NTP 보정 등으로) 시계가 뒤로 가면, 컷오프보다 먼저 발급된 토큰의 {@code iatMs}가 컷오프보다 뒤로 기록될 수
+ * 있다. 지금은 단일 인스턴스라 해당하지 않는다 — 다중 인스턴스로 가면 발급 세대(generation) 방식이나 공통 시간
+ * 소스를 검토하라.
+ *
+ * <p>키 이름을 {@code user:tokenEpoch:}(초 단위 값)에서 {@code user:tokenEpochMs:}로 바꿨다 — 배포 전
+ * 남아 있던 초 단위 값을 밀리초로 잘못 읽으면(1970년 1월) 모든 토큰이 통과한다. 옛 키는 TTL로 사라진다.
  */
 @Component
 public class AccessTokenEpochService {
 
-    private static final String KEY_PREFIX = "user:tokenEpoch:";
+    private static final String KEY_PREFIX = "user:tokenEpochMs:";
 
     private final StringRedisTemplate redisTemplate;
     private final Duration ttl;
@@ -61,21 +70,21 @@ public class AccessTokenEpochService {
 
     /** 호출 시점 이전에 발급된 이 사용자의 모든 Access Token을 무효화한다. */
     public void invalidateTokensIssuedBefore(Long userId, Instant cutoff) {
-        redisTemplate.opsForValue().set(key(userId), String.valueOf(cutoff.getEpochSecond()), ttl);
+        redisTemplate.opsForValue().set(key(userId), String.valueOf(cutoff.toEpochMilli()), ttl);
     }
 
     /**
      * 컷오프가 없으면(무효화된 적 없음) 항상 true다 — {@link JwtAuthenticationFilter}가 이 결과를
      * {@link UserStatusResolver#isActive}와 AND로 묶어 SecurityContext 설정 여부를 결정한다. 비교는
-     * 초 단위다(클래스 javadoc의 정밀도 불일치 설명 참고) — {@code issuedAt}은 항상
-     * {@link JwtTokenProvider#getIssuedAt}에서 나온, 이미 초 단위로 잘린 값이다.
+     * 밀리초 단위이고 컷오프와 같은 밀리초는 막는다(클래스 javadoc 참고) — {@code issuedAt}은
+     * {@link JwtTokenProvider#getIssuedAt}에서 나온 값이다.
      */
     public boolean isIssuedAfterCutoff(Long userId, Instant issuedAt) {
         String value = redisTemplate.opsForValue().get(key(userId));
         if (value == null) {
             return true;
         }
-        return issuedAt.getEpochSecond() >= Long.parseLong(value);
+        return issuedAt.toEpochMilli() > Long.parseLong(value);
     }
 
     private String key(Long userId) {

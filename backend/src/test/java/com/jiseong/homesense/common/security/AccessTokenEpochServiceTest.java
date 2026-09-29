@@ -36,54 +36,47 @@ class AccessTokenEpochServiceTest {
     }
 
     @Test
-    void invalidateTokensIssuedBefore는_user_tokenEpoch_접두어_키로_초_단위_컷오프를_accessTokenValidity와_같은_TTL로_저장한다() {
-        // 초 단위로 저장한다 — JWT iat도 초 단위로 잘리므로 양쪽 정밀도를 맞춰야 한다(클래스
-        // javadoc의 정밀도 불일치 설명 참고, 밀리초로 저장했다가 실 Redis IT로 잡아낸 회귀).
+    void invalidateTokensIssuedBefore는_user_tokenEpochMs_접두어_키로_밀리초_컷오프를_accessTokenValidity와_같은_TTL로_저장한다() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         Instant cutoff = Instant.ofEpochMilli(1_700_000_000_734L);
 
         service.invalidateTokensIssuedBefore(1L, cutoff);
 
-        verify(valueOperations).set("user:tokenEpoch:1", "1700000000", Duration.ofMillis(1_800_000L));
+        verify(valueOperations).set("user:tokenEpochMs:1", "1700000000734", Duration.ofMillis(1_800_000L));
     }
 
     @Test
     void isIssuedAfterCutoff는_컷오프가_없으면_true다() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("user:tokenEpoch:1")).thenReturn(null);
+        when(valueOperations.get("user:tokenEpochMs:1")).thenReturn(null);
 
         assertThat(service.isIssuedAfterCutoff(1L, Instant.now())).isTrue();
     }
 
     @Test
-    void isIssuedAfterCutoff는_토큰_발급시각이_컷오프보다_이전_초이면_false다() {
+    void isIssuedAfterCutoff는_컷오프와_같은_초라도_그보다_먼저_발급됐으면_false다() {
+        // 코드리뷰 P1 — 재사용 탐지와 같은 초에 회전으로 발급된 공격자 토큰. 초 단위 비교에서는 통과했다.
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("user:tokenEpoch:1")).thenReturn("1700000000");
+        when(valueOperations.get("user:tokenEpochMs:1")).thenReturn("1700000000734");
 
-        Instant issuedBeforeCutoff = Instant.ofEpochSecond(1_699_999_999L);
-
-        assertThat(service.isIssuedAfterCutoff(1L, issuedBeforeCutoff)).isFalse();
+        assertThat(service.isIssuedAfterCutoff(1L, Instant.ofEpochMilli(1_700_000_000_120L))).isFalse();
     }
 
     @Test
-    void isIssuedAfterCutoff는_토큰_발급시각이_컷오프_이후_초면_true다() {
+    void isIssuedAfterCutoff는_컷오프와_같은_밀리초면_false다() {
+        // 막아야 할 토큰은 컷오프보다 먼저 발급되므로 같은 밀리초도 막는 쪽이 안전하다(클래스 javadoc).
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("user:tokenEpoch:1")).thenReturn("1700000000");
+        when(valueOperations.get("user:tokenEpochMs:1")).thenReturn("1700000000734");
 
-        Instant issuedAfterCutoff = Instant.ofEpochSecond(1_700_000_001L);
-
-        assertThat(service.isIssuedAfterCutoff(1L, issuedAfterCutoff)).isTrue();
+        assertThat(service.isIssuedAfterCutoff(1L, Instant.ofEpochMilli(1_700_000_000_734L))).isFalse();
     }
 
     @Test
-    void isIssuedAfterCutoff는_토큰_발급시각이_컷오프와_같은_초이면_true다() {
-        // 컷오프가 세팅된 것과 같은 초 안에(밀리초 단위로는 그 직후에) 정당하게 재발급된 토큰까지
-        // 걷어내지 않는다 — 과잉 차단(실사용자 로그인 실패) 방지가 이 서비스의 핵심 트레이드오프다.
+    void isIssuedAfterCutoff는_컷오프와_같은_초라도_그보다_뒤에_발급됐으면_true다() {
+        // 컷오프 직후 같은 초에 정당하게 발급된 토큰은 통과한다(초 단위 절삭 때의 오탐 회귀 방지).
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("user:tokenEpoch:1")).thenReturn("1700000000");
+        when(valueOperations.get("user:tokenEpochMs:1")).thenReturn("1700000000734");
 
-        Instant issuedSameSecondAsCutoff = Instant.ofEpochSecond(1_700_000_000L);
-
-        assertThat(service.isIssuedAfterCutoff(1L, issuedSameSecondAsCutoff)).isTrue();
+        assertThat(service.isIssuedAfterCutoff(1L, Instant.ofEpochMilli(1_700_000_000_735L))).isTrue();
     }
 }

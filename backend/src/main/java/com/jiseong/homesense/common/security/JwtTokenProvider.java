@@ -31,6 +31,8 @@ public class JwtTokenProvider {
 
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_TYPE = "type";
+    /** 밀리초 단위 발급 시각. 표준 {@code iat}은 초 단위라 컷오프와 같은 초에 발급된 토큰을 구분하지 못한다. */
+    private static final String CLAIM_ISSUED_AT_MILLIS = "iatMs";
     private static final String TOKEN_TYPE_ACCESS = "ACCESS";
     private static final String TOKEN_TYPE_REFRESH = "REFRESH";
 
@@ -84,12 +86,22 @@ public class JwtTokenProvider {
     }
 
     /**
-     * {@code iat}(RFC 7519 §4.1.6) 클레임 — {@link AccessTokenEpochService}가 "이 시각 이전에 발급된
-     * Access Token은 무효"를 판단하는 데 쓴다(비밀번호 재설정 등으로 이미 발급된 Access Token을
-     * 만료 전에 선제 무효화해야 하는 경우).
+     * 밀리초 정밀도의 발급 시각 — {@link AccessTokenEpochService}가 "컷오프 이전에 발급된 Access Token은
+     * 무효"를 판단하는 데 쓴다(비밀번호 재설정·Refresh Token 재사용 탐지). 표준 {@code iat}(RFC 7519
+     * §4.1.6, NumericDate)은 초 단위라 컷오프와 같은 초에 발급된 토큰의 선후를 가릴 수 없어
+     * {@code iatMs} 클레임을 따로 둔다. 이 클레임이 없는 토큰(도입 이전 발급분)은 {@code iat}(초의
+     * 시작 시각)으로 대신한다 — 컷오프와 같은 초면 막히는 쪽으로 기운다.
+     *
+     * <p>{@code Number}로 읽는다 — 이 프로젝트의 JSON 역직렬화기는 숫자 클레임을 {@code Double}로 돌려줘
+     * {@code get(name, Long.class)}가 {@code RequiredTypeException}을 던진다(단위 테스트로 확인). epoch
+     * 밀리초(약 1.7×10^12)는 2^53보다 작아 double로 정확히 표현된다.
      */
     public Instant getIssuedAt(String token) {
-        return parseClaims(token).getIssuedAt().toInstant();
+        Claims claims = parseClaims(token);
+        Number issuedAtMillis = claims.get(CLAIM_ISSUED_AT_MILLIS, Number.class);
+        return issuedAtMillis != null
+                ? Instant.ofEpochMilli(issuedAtMillis.longValue())
+                : claims.getIssuedAt().toInstant();
     }
 
     /**
@@ -110,6 +122,7 @@ public class JwtTokenProvider {
                 .claim(CLAIM_TYPE, type)
                 .id(UUID.randomUUID().toString())
                 .issuedAt(Date.from(now))
+                .claim(CLAIM_ISSUED_AT_MILLIS, now.toEpochMilli())
                 .expiration(Date.from(now.plusMillis(validityMillis)))
                 .signWith(secretKey);
         if (role != null) {
