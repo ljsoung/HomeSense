@@ -33,7 +33,12 @@ const v11EffectiveDate = '2026-09-21';
 // v1.2(2026-09-21) — 6항 연령 확인 문구 갱신 시행(서버 검증 도입 반영). v1.1과 시행일이 같다.
 // v1.1·v1.2 모두 13항의 7일 사전 고지를 생략했다 — 사유(고지할 기존 가입자 없음, 사용자 확인)·
 // 무효화 조건은 CLAUDE.md SCR-LEGAL-01 "연령 확인 절차" 판단 기록 5·7단계 참고.
-const currentEffectiveDate = '2026-09-21';
+const v12EffectiveDate = '2026-09-21';
+// v1.3 — 2항(탈퇴 계정 자동 파기·유예)과 8항(토큰 재발급 시 교체·재사용 탐지) 변경. 시행일은 이 변경을 담은
+// PR(feature/backend/reuse-detection-access-cutoff)의 머지일이다. **머지 직전에 'YYYY-MM-DD'를 실제 날짜로
+// 바꿔야 한다** — 플레이스홀더가 남아 있으면 e2e privacy-token-rotation-check가 SKIP으로 알린다.
+const v13EffectiveDate = 'YYYY-MM-DD';
+const currentEffectiveDate = v13EffectiveDate;
 
 export const privacySections: PrivacySection[] = [
   {
@@ -364,8 +369,8 @@ export const privacySections: PrivacySection[] = [
           </li>
           <li>
             이미 폐기된 Refresh Token이 다시 사용되면 토큰이 탈취되었을 가능성이 있다고 보고, 해당 계정의 모든
-            Refresh Token을 폐기합니다. 이 경우 모든 기기에서 로그인 상태가 더 이상 연장되지 않으며, 이미
-            발급된 Access Token의 유효기간(최대 30분)이 지나면 다시 로그인해야 합니다.
+            Refresh Token을 폐기하고 이미 발급된 Access Token도 무효화합니다. 이 경우 모든 기기에서 즉시 로그인
+            상태가 해제되며, 다시 로그인해야 합니다.
           </li>
           {/* 2026-09-29(fix/frontend/privacy-token-rotation) — 2026-09-15 P2 대응 때 이 항목은 "재발급 시
               Refresh Token을 교체·폐기하지 않는다"로 좁혀져 있었다(당시 코드가 실제로 그랬다). 2026-09-22
@@ -376,10 +381,12 @@ export const privacySections: PrivacySection[] = [
               - 재사용 탐지: revokeIfUnrevoked()가 0건이면(이미 폐기된 토큰 — rotation·로그아웃·일괄 폐기 모두
                 해당) RefreshTokenReuseHandler가 revokeAllByUserId() 후 401. logout()에 rotation된 토큰이
                 제출돼도 같은 핸들러를 부른다.
-              - 재사용 탐지는 Access Token 컷오프(AccessTokenEpochService)를 걸지 않는다 — 이미 발급된 Access
-                Token은 만료(accessTokenValidity=30분)까지 유효하므로 "즉시 모든 기기에서 로그아웃"이라고
-                쓰지 않았다. 컷오프는 resetPassword()에만 있다. 재사용 탐지에도 컷오프가 추가되면(CLAUDE.md
-                완결 필요 항목) 이 문장을 "즉시 해제"로 바꿀 수 있다.
+              - [2026-09-29 갱신] 재사용 탐지도 Access Token 컷오프(AccessTokenEpochService)를 건다 —
+                RefreshTokenReuseHandler.handle()이 폐기 직후 invalidateTokensIssuedBefore(userId, now)를
+                호출하고 JwtAuthenticationFilter가 컷오프 이전 iat 토큰을 인증하지 않는다(refresh·logout 두 경로,
+                검증: RefreshTokenReuseAccessCutoffMariaDbIT). 그래서 "30분" 단서를 빼고 "즉시 해제"로 썼다.
+                경계: 컷오프는 초 단위이고 iat >= cutoff면 통과하므로 탐지와 같은 초에 발급된 토큰만 예외다 —
+                정당한 재로그인을 막지 않으려고 받아들인 1초 미만의 폭이라 이용자 문구에는 적지 않았다.
               - 로그아웃은 제출된 토큰 하나만 폐기한다(stored.revoke()). 탈퇴 시 일괄 폐기는 2항에 적었다.
               - 감사 로그(AuditLogger.logRefreshTokenReuseDetected)는 userId만 남긴다 — IP·User-Agent를
                 기록하지 않으므로 3항·9항(수집 항목)은 바꾸지 않았다. */}
@@ -505,8 +512,13 @@ export const privacySections: PrivacySection[] = [
             ],
             [
               'v1.2',
-              currentEffectiveDate,
+              v12EffectiveDate,
               '6항 연령 확인 관련 문구 수정: 가입 시 서버에서도 연령 확인 항목을 검증하도록 변경 반영',
+            ],
+            [
+              'v1.3',
+              v13EffectiveDate,
+              '2항·8항 관련 문구 수정: 탈퇴 계정 자동 파기 및 유예 기간, 토큰 재발급 시 교체와 재사용 탐지 반영',
             ],
           ]}
         />

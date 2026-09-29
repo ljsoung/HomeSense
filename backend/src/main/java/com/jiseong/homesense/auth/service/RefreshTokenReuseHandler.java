@@ -1,11 +1,14 @@
 package com.jiseong.homesense.auth.service;
 
+import java.time.Instant;
+
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.common.logging.AuditLogger;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -62,6 +65,18 @@ import lombok.RequiredArgsConstructor;
  * 새로 만든 것이 문제였고(재시도 로직이 필요 없어져야 했는데 남아 있었다), 여기는 재시도가 전혀
  * 없고 "호출자가 이미 트랜잭션을 끝낸 뒤, 최신 커밋을 보는 새 트랜잭션에서 한 번만 실행하고
  * 독립적으로 커밋한다"는 REQUIRES_NEW 본연의 용도다.
+ *
+ * <p>(4) <b>Access Token 컷오프(2026-09-29 추가)</b> — Refresh Token 전체 폐기만으로는 이미 발급된
+ * Access Token이 만료({@code accessTokenValidity}, 기본 30분)까지 그대로 통용된다. 탈취한 Refresh
+ * Token으로 먼저 회전한 공격자는 그 회전에서 Access Token도 함께 받았으므로, 탐지 이후에도 최대 30분간
+ * 인증된 요청을 보낼 수 있었다. {@link AuthService#resetPassword}와 같은 방식으로
+ * {@link AccessTokenEpochService#invalidateTokensIssuedBefore}를 호출해 탐지 시각 이전에 발급된 이
+ * 사용자의 Access Token을 전부 무효화한다(refresh·logout 두 호출부 모두 이 메서드를 거친다). 순서도
+ * resetPassword()와 같다 — Refresh Token 폐기 뒤, 이 트랜잭션 안에서(커밋 후 리스너가 아니다) Redis에
+ * 쓴다. Redis 쓰기는 DB 롤백에 묶이지 않으므로 DB 커밋이 실패해도 컷오프는 남는데, 그 방향은 과잉
+ * 차단(다시 로그인)이라 안전하다. <b>경계:</b> 컷오프와 {@code iat}을 초 단위로 비교하고
+ * {@code iat >= cutoff}면 통과시키므로({@link AccessTokenEpochService} javadoc), 탐지와 같은 초 안에
+ * 발급된 Access Token은 걸러지지 않는다 — 정당한 재로그인을 막지 않으려고 받아들인 폭이다.
  */
 @Component
 @RequiredArgsConstructor
@@ -69,10 +84,12 @@ class RefreshTokenReuseHandler {
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuditLogger auditLogger;
+    private final AccessTokenEpochService accessTokenEpochService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     void handle(Long userId) {
         refreshTokenRepository.revokeAllByUserId(userId);
+        accessTokenEpochService.invalidateTokensIssuedBefore(userId, Instant.now());
         auditLogger.logRefreshTokenReuseDetected(userId);
     }
 }
