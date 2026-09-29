@@ -3,6 +3,10 @@ package com.jiseong.homesense.auth.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,6 +30,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -33,6 +39,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.jiseong.homesense.auth.dto.TokenResponse;
 import com.jiseong.homesense.auth.exception.InvalidRefreshTokenException;
 import com.jiseong.homesense.common.logging.AuditLogger;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.service.WithdrawalTestSeed;
 import com.jayway.jsonpath.JsonPath;
@@ -83,6 +90,9 @@ class RefreshTokenReuseAccessCutoffMariaDbIT {
 
     @MockitoBean
     private AuditLogger auditLogger;
+    /** 실제 동작 그대로 쓰되, Redis 장애 테스트에서만 컷오프 쓰기가 실패하게 만든다. */
+    @MockitoSpyBean
+    private AccessTokenEpochService accessTokenEpochService;
 
     @Autowired
     private MockMvc mockMvc;
@@ -154,6 +164,32 @@ class RefreshTokenReuseAccessCutoffMariaDbIT {
         expectMe(attacker.accessToken(), 401);
         expectMe(login(), 200);
         assumeSameSecond(attackerIssuedAt, afterDetection);
+    }
+
+    /**
+     * 코드리뷰 P2 — 컷오프(Redis) 쓰기가 폐기와 같은 트랜잭션 안에 있으면, Redis 장애 시 폐기까지 롤백돼
+     * 공격자가 회전으로 받은 Refresh Token이 살아남았다. 지금은 폐기가 먼저 커밋되므로 Redis가 실패해도 이
+     * 사용자의 Refresh Token은 전부 폐기돼 있어야 한다. 재발급 요청은 오류로 끝나고, 클라이언트가 같은 토큰으로
+     * 다시 시도하면 재사용 탐지를 다시 거쳐 컷오프가 써진다.
+     */
+    @Test
+    void Redis_장애로_컷오프_쓰기가_실패해도_Refresh_Token_폐기는_커밋되고_재시도하면_컷오프가_써진다() throws Exception {
+        TokenResponse attacker = authService.refreshAccessToken(originalRefreshToken);
+        doThrow(new RedisConnectionFailureException("redis down"))
+                .when(accessTokenEpochService).invalidateTokensIssuedBefore(eq(userId), any());
+
+        assertThatThrownBy(() -> authService.refreshAccessToken(originalRefreshToken))
+                .isInstanceOf(RedisConnectionFailureException.class);
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM refresh_token WHERE user_id = ? AND revoked_yn = FALSE", Integer.class, userId))
+                .isZero();
+        expectMe(attacker.accessToken(), 200); // 컷오프가 아직 없다
+
+        doCallRealMethod().when(accessTokenEpochService).invalidateTokensIssuedBefore(eq(userId), any());
+        assertThatThrownBy(() -> authService.refreshAccessToken(originalRefreshToken))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+        expectMe(attacker.accessToken(), 401);
     }
 
     /**
