@@ -118,7 +118,7 @@ await loginDuringRestore('Web Locks', false);
 await loginDuringRestore('Web Locks 없음(compare-and-set만)', true);
 
 // 3) 로그인 저장이 재발급 락을 기다리는 구간 — "화면은 B, API 요청은 A 토큰"이 되지 않는지.
-//    holdMs 동안 A 재발급을 붙잡는다. 1500ms면 로그인 저장이 락 안에서 끝나고, 7000ms면 락 대기 상한(5초)을
+//    holdMs 동안 A 재발급을 붙잡는다. 1500ms면 로그인 저장이 락 안에서 끝나고, 7000ms면 락 대기 상한(2초, `LOCK_WAIT_TIMEOUT_MS`)을
 //    넘겨 storeTokens의 대체 경로(락 없이 저장)로 끝난다 — 그때 A 재발급은 아직 진행 중이다.
 async function authRequestsDuringLockWait(label, holdMs) {
   const accountA = await createAccount(`w${holdMs}`);
@@ -151,18 +151,26 @@ async function authRequestsDuringLockWait(label, holdMs) {
   for (let i = 0; i < 50 && !loginResponseAt; i++) await page.waitForTimeout(100);
   ok(`${label}: B 로그인 응답을 받음`, Boolean(loginTokensB?.accessToken));
   await page.waitForTimeout(500);
-  const stillWaiting = holdMs > 5000 ? Date.now() - startedAt < 4500 : true;
+  let probeResult = null;
+  const stillWaiting = holdMs > 5000 ? Date.now() - startedAt < 1800 : true;
   if (stillWaiting) {
     ok(`${label}: 저장 전에는 화면이 로그인 화면 그대로(B로 전환 안 됨)`, new URL(page.url()).pathname === '/login');
     const storedBefore = await page.evaluate((k) => localStorage.getItem(k), ACCESS_KEY);
     ok(`${label}: 저장 전 저장소에는 아직 B 토큰이 없음`, storedBefore !== loginTokensB?.accessToken);
-    // 앱 자신의 httpClient(같은 모듈 인스턴스·같은 인터셉터)로 인증 요청을 보낸다.
-    const probe = await page.evaluate(async () => {
-      const { httpClient } = await import('/src/lib/httpClient.ts');
-      return httpClient.get('/api/users/me').then((r) => ({ status: r.status, email: r.data?.data?.email }), (e) => ({ status: e.response?.status ?? 0 }));
-    });
-    const probeReq = authedRequests.filter((r) => r.url.endsWith('/api/users/me')).at(-1);
-    ok(`${label}: 저장 전 인증 요청은 B 토큰이 아님(B로 인증되지 않음, ${probe.status})`, probeReq?.token !== loginTokensB?.accessToken && probe.email !== accountB.email);
+    // 앱 자신의 httpClient(같은 모듈 인스턴스·같은 인터셉터)로 인증 요청을 보낸다. 앱이 실제로 불러온 URL을
+    // 그대로 import한다 — dev 서버 실행 중 파일이 바뀌면 앱은 `httpClient.ts?t=…`를 쓰므로, 경로만으로 import하면
+    // 인터셉터가 연결되지 않은 별도 인스턴스가 되어 검증이 무의미해진다(예전엔 그 인스턴스로 곧바로 401을 받아 통과했다).
+    // 앱 인스턴스의 요청은 401 → 붙잡힌 A 재발급에 합류하므로, 결과는 재발급을 풀어 준 뒤에 받는다.
+    const probeTag = `probe-${holdMs}`;
+    probeResult = page.evaluate(async (tag) => {
+      const loaded = performance.getEntriesByType('resource').map((e) => new URL(e.name)).find((u) => u.pathname === '/src/lib/httpClient.ts');
+      const { httpClient } = await import(loaded ? loaded.pathname + loaded.search : '/src/lib/httpClient.ts');
+      return httpClient.get('/api/users/me', { params: { probe: tag } }).then((r) => ({ status: r.status, email: r.data?.data?.email }), (e) => ({ status: e.response?.status ?? 0 }));
+    }, probeTag);
+    for (let i = 0; i < 30 && !authedRequests.some((r) => r.url.includes(probeTag)); i++) await page.waitForTimeout(100);
+    const probeReq = authedRequests.find((r) => r.url.includes(probeTag));
+    ok(`${label}: 저장 전 인증 요청이 나감`, Boolean(probeReq));
+    ok(`${label}: 저장 전 인증 요청은 B 토큰이 아님`, Boolean(probeReq) && probeReq.token !== loginTokensB?.accessToken);
     ok(`${label}: 그 시점 화면도 B가 아님(로그인 화면)`, probeReq?.screen === '/login');
   }
 
@@ -187,6 +195,10 @@ async function authRequestsDuringLockWait(label, holdMs) {
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(800);
 
+  if (probeResult) {
+    const probe = await probeResult;
+    ok(`${label}: 저장 전 인증 요청은 B로 인증되지 않음(${probe.status})`, probe.email !== accountB.email);
+  }
   ok(`${label}: A 재발급 응답 도착(200)`, JSON.stringify(refreshStatuses) === '[200]');
   const afterSwitch = authedRequests.filter((r) => r.screen !== '/login');
   ok(`${label}: 화면이 B로 바뀐 뒤의 인증 요청이 있음(${afterSwitch.length}건)`, afterSwitch.length > 0);
