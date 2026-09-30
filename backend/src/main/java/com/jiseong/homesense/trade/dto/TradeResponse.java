@@ -14,6 +14,10 @@ import com.jiseong.homesense.trade.entity.Trade;
  * <p>isCancelled는 cancel_yn을 그대로 노출한다 — 해제된 거래도 결과에서 빼지 않고 이 플래그로
  * 프론트가 취소선 처리하게 한다(DTL-01 예외 처리 "해제된 거래" 대응). isRegistered는
  * registration_date가 NULL이 아니면 true다("등기 전" 라벨 대응).
+ *
+ * <p>cancelDate는 해제사유발생일(cancel_date, 원천 cdealDay)이다 — UI정의서 v2.1.1 5.3절 예외 처리표가 이력
+ * 테이블 행에 "해제" 라벨과 해제사유발생일을 함께 요구한다. 해제되지 않았거나 전월세 거래(원천 데이터에 해제
+ * 정보가 없다)는 null이다. 이력 조회는 캐시를 적용하지 않아 필드 추가에 따른 캐시 버전업이 필요 없다.
  */
 public record TradeResponse(
         Long tradeId,
@@ -26,6 +30,7 @@ public record TradeResponse(
         Long depositAmount,
         Long monthlyRentAmount,
         boolean isCancelled,
+        LocalDate cancelDate,
         boolean isRegistered) {
 
     public static TradeResponse of(Trade t) {
@@ -40,6 +45,7 @@ public record TradeResponse(
                 t.getDepositAmount(),
                 t.getMonthlyRentAmount(),
                 t.isCancelYn(),
+                t.getCancelDate(),
                 t.getRegistrationDate() != null);
     }
 }

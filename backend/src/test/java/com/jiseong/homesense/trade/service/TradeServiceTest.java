@@ -119,6 +119,7 @@ class TradeServiceTest {
                 .dealDate(LocalDate.of(2026, 1, 5))
                 .dealAmount(50000L)
                 .cancelYn(true)
+                .cancelDate(LocalDate.of(2026, 2, 3))
                 .dedupHash("hash-cancelled")
                 .build();
         when(tradeRepository.findHistory(eq(1L), isNull(), eq(DealTypeFilter.ALL))).thenReturn(List.of(cancelled));
@@ -126,6 +127,7 @@ class TradeServiceTest {
         List<TradeResponse> result = tradeService.getHistory(1L, null, DealTypeFilter.ALL);
 
         assertThat(result.get(0).isCancelled()).isTrue();
+        assertThat(result.get(0).cancelDate()).isEqualTo(LocalDate.of(2026, 2, 3));
     }
 
     @Test
@@ -135,6 +137,7 @@ class TradeServiceTest {
         List<TradeResponse> result = tradeService.getHistory(1L, null, DealTypeFilter.ALL);
 
         assertThat(result.get(0).isRegistered()).isFalse();
+        assertThat(result.get(0).cancelDate()).isNull();
     }
 
     @Test
