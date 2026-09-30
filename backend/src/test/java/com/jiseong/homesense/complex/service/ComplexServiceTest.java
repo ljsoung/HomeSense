@@ -180,7 +180,7 @@ class ComplexServiceTest {
                 (short) 0, (short) 0, (short) 0, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null);
         return new ComplexDetailResponse(complexId, "테스트단지" + complexId, "아파트", housingType,
-                null, null, null, null, null, null, null, false, basicInfo, extendedInfo);
+                null, null, null, null, null, null, null, null, false, null, basicInfo, extendedInfo);
     }
 
     @Test

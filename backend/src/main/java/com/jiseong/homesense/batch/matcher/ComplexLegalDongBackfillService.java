@@ -43,7 +43,7 @@ public class ComplexLegalDongBackfillService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /**
-     * 백필 후 비우는 캐시. complexDetailV2는 matchPending이 legal_dong_cd로 계산되고, popularComplexesV3와
+     * 백필 후 비우는 캐시. complexDetailV3는 legalDongCd를 그대로 담고 matchPending도 legal_dong_cd로 계산되며, popularComplexesV3와
      * regionAutocomplete는 지역 정보를 담는 DTO라 함께 비운다(regionAutocomplete는 이 백필로 값이 바뀌지
      * 않지만 "지역 정보를 담는 캐시 전부"라는 운영 절차를 단순하게 유지하려고 포함했다).
      */
@@ -96,17 +96,22 @@ public class ComplexLegalDongBackfillService {
         LocalDateTime now = LocalDateTime.now(KST);
         List<Map.Entry<Long, String>> entries = new ArrayList<>(resolved.entrySet());
         int updated = 0;
-        for (int from = 0; from < entries.size(); from += WRITE_CHUNK) {
-            List<Map.Entry<Long, String>> chunk = entries.subList(from, Math.min(from + WRITE_CHUNK, entries.size()));
-            Integer chunkUpdated = transactionTemplate.execute(status -> chunk.stream()
-                    .mapToInt(e -> complexRepository.fillLegalDongCdIfNull(e.getKey(), e.getValue(), now))
-                    .sum());
-            updated += chunkUpdated == null ? 0 : chunkUpdated;
+        try {
+            for (int from = 0; from < entries.size(); from += WRITE_CHUNK) {
+                List<Map.Entry<Long, String>> chunk =
+                        entries.subList(from, Math.min(from + WRITE_CHUNK, entries.size()));
+                Integer chunkUpdated = transactionTemplate.execute(status -> chunk.stream()
+                        .mapToInt(e -> complexRepository.fillLegalDongCdIfNull(e.getKey(), e.getValue(), now))
+                        .sum());
+                updated += chunkUpdated == null ? 0 : chunkUpdated;
+            }
+            log.info("[backfill apply] strategy={} 대상 {}건, 매칭 {}건, 실제 갱신 {}건, 미매칭 {}건", strategy,
+                    targets.size(), resolved.size(), updated, targets.size() - resolved.size());
+        } finally {
+            // 청크마다 커밋되므로, 중간 청크가 실패해도 앞 청크의 갱신은 이미 DB에 있다 — 그 단지들의 캐시도 비워야 한다.
+            // 일괄 작업이라 단지별 evict 대신 전체 clear한다.
+            clearCaches();
         }
-        log.info("[backfill apply] strategy={} 대상 {}건, 매칭 {}건, 실제 갱신 {}건, 미매칭 {}건", strategy,
-                targets.size(), resolved.size(), updated, targets.size() - resolved.size());
-
-        clearCaches();
     }
 
     /**
@@ -118,7 +123,9 @@ public class ComplexLegalDongBackfillService {
             try {
                 Cache cache = cacheManager.getCache(name);
                 if (cache != null) {
-                    cache.clear();
+                    // clear()는 Lettuce에서 비동기라 이 러너가 곧바로 System.exit하면 삭제가 사라진다(2026-09-30 재현).
+                    // invalidate()는 삭제가 끝날 때까지 기다린다.
+                    cache.invalidate();
                     log.info("[backfill apply] 캐시 비움: {}", name);
                 }
             } catch (RuntimeException e) {

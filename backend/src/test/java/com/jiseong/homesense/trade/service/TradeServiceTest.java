@@ -32,6 +32,7 @@ import com.jiseong.homesense.trade.dto.TradeSortCondition;
 import com.jiseong.homesense.trade.dto.TradeSummaryResponse;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.RentType;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.exception.MissingComplexIdException;
 import com.jiseong.homesense.trade.exception.TradeNotFoundException;
@@ -108,6 +109,20 @@ class TradeServiceTest {
     }
 
     @Test
+    void getHistory_매매_거래의_거래유형을_담고_전월세는_null이다() {
+        Trade sale = Trade.builder().tradeId(30L).dealCategory(DealCategory.SALE).dealDate(LocalDate.of(2026, 3, 1))
+                .dealingType("DIRECT").build();
+        Trade rent = Trade.builder().tradeId(31L).dealCategory(DealCategory.RENT).rentType(RentType.JEONSE)
+                .dealDate(LocalDate.of(2026, 3, 2)).build();
+        when(tradeRepository.findHistory(eq(1L), isNull(), eq(DealTypeFilter.ALL))).thenReturn(List.of(sale, rent));
+
+        List<TradeResponse> result = tradeService.getHistory(1L, null, DealTypeFilter.ALL);
+
+        assertThat(result.get(0).dealingType()).isEqualTo("DIRECT");
+        assertThat(result.get(1).dealingType()).isNull();
+    }
+
+    @Test
     void getHistory_취소된_거래도_isCancelled_플래그와_함께_그대로_포함한다() {
         Trade cancelled = Trade.builder()
                 .tradeId(20L)
@@ -119,6 +134,7 @@ class TradeServiceTest {
                 .dealDate(LocalDate.of(2026, 1, 5))
                 .dealAmount(50000L)
                 .cancelYn(true)
+                .cancelDate(LocalDate.of(2026, 2, 3))
                 .dedupHash("hash-cancelled")
                 .build();
         when(tradeRepository.findHistory(eq(1L), isNull(), eq(DealTypeFilter.ALL))).thenReturn(List.of(cancelled));
@@ -126,6 +142,7 @@ class TradeServiceTest {
         List<TradeResponse> result = tradeService.getHistory(1L, null, DealTypeFilter.ALL);
 
         assertThat(result.get(0).isCancelled()).isTrue();
+        assertThat(result.get(0).cancelDate()).isEqualTo(LocalDate.of(2026, 2, 3));
     }
 
     @Test
@@ -135,6 +152,7 @@ class TradeServiceTest {
         List<TradeResponse> result = tradeService.getHistory(1L, null, DealTypeFilter.ALL);
 
         assertThat(result.get(0).isRegistered()).isFalse();
+        assertThat(result.get(0).cancelDate()).isNull();
     }
 
     @Test

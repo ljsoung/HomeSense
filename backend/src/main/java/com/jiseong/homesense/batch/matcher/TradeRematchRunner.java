@@ -1,10 +1,13 @@
 package com.jiseong.homesense.batch.matcher;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 import java.util.function.Function;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
+import com.jiseong.homesense.batch.loader.TradeCacheEvictionEvent;
 import com.jiseong.homesense.batch.matcher.TradeRematchBatchProcessor.BatchOutcome;
 
 import lombok.RequiredArgsConstructor;
@@ -35,6 +38,13 @@ import lombok.extern.slf4j.Slf4j;
  * DB의 MAX(updated_at)이 전혀 갱신되지 않았다) — {@link TradeRematchBatchProcessor}로 배치(500건) 단위
  * 커밋으로 쪼개 이 문제를 해결했다.
  *
+ * <p><b>배치가 커밋될 때마다 {@link TradeCacheEvictionEvent}를 발행한다.</b> 재매칭은 거래를 다른 단지로 옮기거나
+ * 매칭 방식을 바꿔 단지의 대표 거래를 바꿀 수 있는데, 단지 상세(complexDetailV3)는 대표 거래의 matchMethod를,
+ * 인기 단지(popularComplexesV3)는 대표 거래 금액·배지를 함께 캐시한다. 이벤트 없이 끝나면 TTL(24h) 동안 옛 배지가
+ * 남는다(Codex 코드리뷰 P2). 적재(BAT-LOD-01)와 같은 이벤트라 {@code CacheEvictionListener}가 그대로 처리한다.
+ * 전체 실행이 끝난 뒤 한 번이 아니라 배치마다 발행하는 이유: 배치마다 커밋되므로, 중간에 실패해도 이미 커밋된
+ * 배치의 캐시는 비워져 있어야 한다. 이 클래스는 트랜잭션이 없어 리스너는 발행 즉시 실행된다(fallbackExecution).
+ *
  * <p>매일 도는 BAT-SCH-01 파이프라인에는 배선하지 않는다 — 매처 로직이 바뀔 때만 수동으로 트리거하는
  * 유지보수용 경로다({@code rematch} 프로필로만 활성화되는 {@code TradeRematchCommandLineRunner} 참고).
  */
@@ -44,6 +54,7 @@ import lombok.extern.slf4j.Slf4j;
 public class TradeRematchRunner {
 
     private final TradeRematchBatchProcessor batchProcessor;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 재매칭 결과 요약. {@code unchanged}는 매처를 다시 돌려도 이전과 완전히 같은 결과(같은 complexId,
@@ -103,10 +114,17 @@ public class TradeRematchRunner {
         while (outcome.hasMore()) {
             unchanged += outcome.unchanged();
             changed += outcome.changed();
+            publishCacheEviction(outcome.touchedComplexIds());
             cursor = outcome.lastTradeId();
             outcome = nextBatch.apply(cursor);
         }
 
         return new RematchSummary(unchanged, changed);
+    }
+
+    private void publishCacheEviction(Set<Long> touchedComplexIds) {
+        if (!touchedComplexIds.isEmpty()) {
+            eventPublisher.publishEvent(new TradeCacheEvictionEvent(touchedComplexIds, Set.of()));
+        }
     }
 }

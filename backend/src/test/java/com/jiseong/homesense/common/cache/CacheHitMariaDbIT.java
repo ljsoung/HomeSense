@@ -191,6 +191,6 @@ class CacheHitMariaDbIT {
     }
 
     private void clearCaches() {
-        CACHES.forEach(name -> cacheManager.getCache(name).clear());
+        CACHES.forEach(name -> cacheManager.getCache(name).invalidate());
     }
 }

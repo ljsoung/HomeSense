@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
  * 하는 안전장치다(활성 트랜잭션이 없으면 조용히 유실되는 게 기본 동작이므로).
  *
  * <ul>
- *   <li>TradeCacheEvictionEvent(BAT-LOD-01, 일 1회 이상) — complexDetailV2::{complexId}를 건별로
+ *   <li>TradeCacheEvictionEvent(BAT-LOD-01, 일 1회 이상) — complexDetailV3::{complexId}를 건별로
  *       evict하고, complexId가 하나라도 있으면 popularComplexesV3(인기 단지 순위) 전체를 evict한다.
  *       complexId 하나만으로 "어떤 limit으로 캐시된 popularComplexesV3 항목이 영향받는지"를 역산할 수
  *       없어 전체 clear()로 처리한다.</li>
@@ -38,11 +38,18 @@ import lombok.extern.slf4j.Slf4j;
  *       TTL을 길게 가져가려는 설계 의도가 깨지므로 반드시 이 이벤트에만 반응해야 한다.</li>
  * </ul>
  *
- * <p>{@code COMPLEX_DETAIL_CACHE}가 {@code complexDetail}이 아니라 {@code complexDetailV2}인 이유는
- * {@link com.jiseong.homesense.complex.service.ComplexDetailCache} 참고 — housingType 필드 추가로
- * 캐시 이름을 버전업했다. {@code POPULAR_COMPLEXES_CACHE}가 {@code popularComplexesV3}인 이유도 같다 —
+ * <p>{@code COMPLEX_DETAIL_CACHE}가 {@code complexDetail}이 아니라 {@code complexDetailV3}인 이유는
+ * {@link com.jiseong.homesense.complex.service.ComplexDetailCache} 참고 — housingType(V2), matchMethod(V3,
+ * DTL-01 정밀/근사 배지) 필드 추가로 캐시 이름을 버전업했다. {@code POPULAR_COMPLEXES_CACHE}가 {@code popularComplexesV3}인 이유도 같다 —
  * {@code ComplexSummaryResponse}에 matchMethod/floor(V2, CPX-RCV-RGN 카드 표시 필드 보강 작업),
  * rentType/monthlyRentAmount(V3, 2026-09-23 단지 검색 거래유형 구분) 필드가 추가되며 버전업했다.
+ *
+ * <p><b>{@code evict()}/{@code clear()} 대신 {@code evictIfPresent()}/{@code invalidate()}를 쓴다.</b> Spring Data
+ * Redis 4.1.1은 Lettuce 연결에서 {@code evict()}/{@code clear()}를 비동기로 보내고 결과를 기다리지 않는다
+ * ({@code DefaultRedisCacheWriter.writeAsynchronously()}). 그래서 (1) 이 리스너를 발행한 프로세스가 곧바로 끝나면
+ * (법정동코드 재적재 러너처럼 {@code System.exit}로 끝나는 1회성 러너) 삭제가 Redis에 닿기 전에 사라질 수 있고,
+ * (2) Redis 오류가 아래 try-catch에 잡히지 않는다. 두 메서드는 Spring {@code Cache} 계약상 즉시 실행이다 —
+ * 2026-09-30 백필 러너로 재현(clear 직후 exit한 뒤 popularComplexesV3 키가 남음).
  */
 @Slf4j
 @Component
@@ -99,7 +106,7 @@ public class CacheEvictionListener {
                     COMPLEX_DETAIL_CACHE, complexId);
             return;
         }
-        cache.evict(complexId);
+        cache.evictIfPresent(complexId);
     }
 
     private void clearCache(String cacheName) {
@@ -108,6 +115,6 @@ public class CacheEvictionListener {
             log.warn("COM-CACHE-01 '{}' 캐시를 찾을 수 없어 clear를 건너뛴다.", cacheName);
             return;
         }
-        cache.clear();
+        cache.invalidate();
     }
 }

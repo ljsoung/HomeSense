@@ -94,6 +94,7 @@ class TradeRematchBatchProcessorTest {
         assertThat(outcome.lastTradeId()).isEqualTo(2L);
         assertThat(outcome.changed()).isEqualTo(1);
         assertThat(outcome.unchanged()).isEqualTo(1);
+        assertThat(outcome.touchedComplexIds()).containsExactly(99L);
         verify(tradeRepository).applyRematch(eq(1L), eq(99L), eq(MatchMethod.EXACT.name()),
                 eq(new BigDecimal("1.000")), eq("new-matched-hash-1"), any());
         verify(tradeRepository, never()).applyRematch(eq(2L), anyLong(), any(), any(), any(), any());
@@ -135,6 +136,8 @@ class TradeRematchBatchProcessorTest {
 
         assertThat(outcome.changed()).isEqualTo(1);
         assertThat(outcome.unchanged()).isZero();
+        // 옛 단지(5)는 거래를 잃고 새 단지(7)는 얻어, 둘 다 대표 거래가 바뀔 수 있다.
+        assertThat(outcome.touchedComplexIds()).containsExactlyInAnyOrder(5L, 7L);
         verify(tradeRepository).applyRematch(eq(3L), eq(7L), eq(MatchMethod.EXACT.name()),
                 eq(new BigDecimal("1.000")), eq("hash-for-complex-7"), any());
     }
@@ -157,6 +160,7 @@ class TradeRematchBatchProcessorTest {
 
         assertThat(outcome.unchanged()).isEqualTo(1);
         assertThat(outcome.changed()).isZero();
+        assertThat(outcome.touchedComplexIds()).isEmpty();
         verify(tradeRepository, never()).applyRematch(any(), any(), any(), any(), any(), any());
         verify(dedupHashCalculator, never()).calculate(any());
     }
@@ -198,6 +202,8 @@ class TradeRematchBatchProcessorTest {
 
         assertThat(outcome.changed()).isEqualTo(1);
         assertThat(outcome.unchanged()).isZero();
+        // 해시만 고치면 매칭 필드가 그대로라 대표 거래도 그대로다.
+        assertThat(outcome.touchedComplexIds()).isEmpty();
         verify(complexMasterMatcher, never()).matchComplex(any(), any());
         verify(tradeRepository).applyRematch(eq(9L), eq(7L), eq(MatchMethod.EXACT.name()), any(),
                 eq("correct-hash"), any());
@@ -239,7 +245,24 @@ class TradeRematchBatchProcessorTest {
         BatchOutcome outcome = processor.processUnmatchedBatch(0L);
 
         assertThat(outcome.changed()).isEqualTo(1);
+        assertThat(outcome.touchedComplexIds()).containsExactly(99L);
         verify(tradeRepository).deleteById(8L);
         verify(tradeRepository, never()).applyRematch(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 복구_배치가_중복_행을_지우면_그_단지를_영향받은_단지로_보고한다() {
+        Complex complex = Complex.builder().complexId(7L).build();
+        Trade duplicate = trade(11L, complex, MatchMethod.SIMILAR, new BigDecimal("0.850"), "stale-hash");
+        Trade target = trade(30L, complex, MatchMethod.EXACT, new BigDecimal("1.000"), "shared-hash");
+        when(tradeRepository.findByTradeIdGreaterThanOrderByTradeIdAsc(eq(0L), any()))
+                .thenReturn(List.of(duplicate));
+        when(dedupHashCalculator.calculate(any())).thenReturn("shared-hash");
+        when(tradeRepository.findByDedupHash("shared-hash")).thenReturn(Optional.of(target));
+
+        BatchOutcome outcome = processor.repairDedupHashBatch(0L);
+
+        assertThat(outcome.touchedComplexIds()).containsExactly(7L);
+        verify(tradeRepository).deleteById(11L);
     }
 }
