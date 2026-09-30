@@ -137,7 +137,9 @@ echo "exit=$?"   # 0이어야 한다
 - `legal_dong_cd IS NULL`인 행만 갱신한다. 중간에 실패해도 다시 실행하면 남은 행만 채운다(idempotent).
   500건 단위로 커밋한다.
 - 로그 `[backfill apply] strategy=COMBINED 대상 N건, 매칭 N건, 실제 갱신 N건, 미매칭 0건`을 확인한다.
-- 이어서 `캐시 비움: complexDetailV2 / popularComplexesV3 / regionAutocomplete` 3줄이 나와야 한다.
+- **캐시 비우기는 자동으로 수행된다.** apply가 끝나면(중간 청크가 실패해 비정상 종료해도) 러너가
+  `complexDetailV3`·`popularComplexesV3`·`regionAutocomplete`를 전체 비운다. 로그에
+  `캐시 비움: complexDetailV3 / popularComplexesV3 / regionAutocomplete` 3줄이 나와야 한다.
   `캐시 비우기 실패` WARN이 있으면 6단계를 수동으로 실행한다.
 
 ## 5. 검증 쿼리
@@ -164,13 +166,13 @@ JOIN (SELECT complex_id, legal_dong_cd, ROW_NUMBER() OVER (PARTITION BY complex_
 WHERE m.legal_dong_cd <> c.legal_dong_cd;
 ```
 
-## 6. 캐시 비우기 (4단계 로그에 WARN이 있었거나, 재확인이 필요할 때)
+## 6. 캐시 비우기 (수동 — 4단계 로그에 WARN이 있었거나, 재확인이 필요할 때)
 
-`legal_dong_cd`가 바뀌면 `ComplexDetailResponse.matchPending` 값이 달라진다. 지역 정보를 담는 캐시는
+`legal_dong_cd`가 바뀌면 `ComplexDetailResponse`의 `legalDongCd`·`matchPending` 값이 달라진다. 지역 정보를 담는 캐시는
 전부 비운다.
 
 ```bash
-for c in complexDetailV2 popularComplexesV3 regionAutocomplete; do
+for c in complexDetailV3 popularComplexesV3 regionAutocomplete; do
   redis-cli -h "$REDIS_HOST" --scan --pattern "${c}::*" | xargs -r redis-cli -h "$REDIS_HOST" del
 done
 ```
@@ -196,7 +198,8 @@ done
 
 단지 기본정보(K-apt xlsx) 적재는 **이 저장소 밖에서 수동으로** 한다(재현 가능한 적재기가 없다 —
 CLAUDE.md "알려진 공백"). 새 단지를 넣거나 재적재한 뒤에는 **반드시 3~6단계(dry-run → apply → 검증 →
-캐시)를 다시 실행**한다. 러너는 NULL인 행만 채우므로 기존 행은 건드리지 않는다.
+캐시)를 다시 실행**한다. 러너는 NULL인 행만 채우므로 기존 행은 건드리지 않는다. 캐시 비우기는 4단계
+apply가 자동으로 하므로 6단계는 WARN이 있을 때만 한다.
 
 재적재로 기존 단지의 **주소가 바뀐** 경우는 러너가 다시 계산하지 않는다(값이 이미 있음). 그 행의
 `legal_dong_cd`를 NULL로 되돌린 뒤 러너를 실행한다.
