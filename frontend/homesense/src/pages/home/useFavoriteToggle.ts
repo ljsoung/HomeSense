@@ -9,6 +9,12 @@ import { getErrorMessage } from '../../lib/apiError';
 
 const PENDING_FAVORITE_KEY = 'homesense.pendingFavoriteComplexId';
 
+/** 확인 중에 미룬 하트 클릭 — 클릭 순간 보이던 하트 상태로 정한 의도(빈 하트 → add, 채워진 하트 → remove). */
+interface DeferredClick {
+  complexId: number;
+  intent: 'add' | 'remove';
+}
+
 /**
  * 하트 클릭 공용 로직 — 완료 조건: 로그인 시 POST/DELETE /api/favorites/properties로 토글 +
  * 성공 토스트, 비로그인 시 AUTH-01로 리다이렉트 후 로그인 성공 시 원래 하트 클릭을 자동 재생.
@@ -41,7 +47,10 @@ export function useFavoriteToggle() {
   // 남는다(Codex P2). 클릭을 미뤘다가 판정과
   // 하트 상태 채우기가 끝나면 처리한다. 전역으로 마지막 클릭 하나만 기억한다 — 다른 카드를 누르면 앞 클릭은
   // 버려지고 그 하트의 대기 표시도 풀린다(판단 근거: CLAUDE.md 세션 절 "확인 중 하트 클릭" 행).
-  const deferredClickRef = useRef<number | null>(null);
+  // 클릭은 "토글"이 아니라 클릭 순간 화면에 보이던 하트 기준의 의도로 기억한다 — 빈 하트면 등록, 채워진
+  // 하트면 해제. 목록이 도착한 뒤 이미 그 상태면 요청을 보내지 않는다(빈 하트를 눌렀는데 이미 등록된 단지를
+  // 해제하지 않는다).
+  const deferredClickRef = useRef<DeferredClick | null>(null);
   // 대기 중인 하트를 화면에 알리기 위한 상태(카드가 aria-busy와 시각적 표시를 단다).
   const [pendingFavoriteId, setPendingFavoriteId] = useState<number | null>(null);
 
@@ -144,7 +153,7 @@ export function useFavoriteToggle() {
     (complexId: number) => {
       switch (status) {
         case 'checking':
-          deferredClickRef.current = complexId;
+          deferredClickRef.current = { complexId, intent: favorites.has(complexId) ? 'remove' : 'add' };
           setPendingFavoriteId(complexId);
           return;
         case 'anonymous':
@@ -167,8 +176,37 @@ export function useFavoriteToggle() {
     [status, navigate, location, favorites, addFavorite, removeFavorite],
   );
 
-  // 미룬 클릭은 판정이 끝나고, 그 판정 기준으로 하트 상태까지 채워진 뒤에 처리한다 — 비로그인으로
-  // 판정되면 원래대로 로그인 화면으로(그 클릭은 로그인 후 재생), 로그인이면 등록/해제를 한다.
+  // 미룬 클릭의 의도를 판정 결과에 맞춰 처리한다. 로그인이면 채워진 하트 상태와 의도가 다를 때만 등록/해제
+  // 요청을 보낸다. 비로그인이면 등록 의도만 로그인 화면으로 넘겨 로그인 후 재생한다(비로그인에게 해제할 관심
+  // 매물은 없다).
+  const resolveDeferredClick = useCallback(
+    ({ complexId, intent }: DeferredClick) => {
+      switch (status) {
+        case 'checking':
+          return; // 호출부가 판정 뒤에만 부른다.
+        case 'anonymous':
+          if (intent === 'add') {
+            sessionStorage.setItem(PENDING_FAVORITE_KEY, String(complexId));
+            navigate('/login', { state: { from: location } });
+          }
+          return;
+        case 'authenticated': {
+          const favoritePropertyId = favorites.get(complexId);
+          if (intent === 'add' && favoritePropertyId === undefined) {
+            void addFavorite(complexId);
+          } else if (intent === 'remove' && favoritePropertyId !== undefined) {
+            void removeFavorite(complexId, favoritePropertyId);
+          }
+          return; // 이미 의도한 상태면 요청하지 않는다.
+        }
+        default:
+          assertNever(status);
+      }
+    },
+    [status, navigate, location, favorites, addFavorite, removeFavorite],
+  );
+
+  // 미룬 클릭은 판정이 끝나고, 그 판정 기준으로 하트 상태까지 채워진 뒤에 처리한다.
   useEffect(() => {
     const deferred = deferredClickRef.current;
     if (deferred === null || status === 'checking' || hydratedFor !== status) return;
@@ -177,9 +215,9 @@ export function useFavoriteToggle() {
     // setState하지 않도록 마이크로태스크로 넘긴다(react-hooks/set-state-in-effect).
     queueMicrotask(() => {
       setPendingFavoriteId(null);
-      toggleFavorite(deferred);
+      resolveDeferredClick(deferred);
     });
-  }, [status, hydratedFor, toggleFavorite]);
+  }, [status, hydratedFor, resolveDeferredClick]);
 
   const favoritedIds = useMemo(() => new Set(favorites.keys()), [favorites]);
 

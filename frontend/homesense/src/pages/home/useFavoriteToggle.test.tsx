@@ -115,3 +115,54 @@ describe('useFavoriteToggle — 다른 계정으로 다시 확인', () => {
     expect(view.result.current.pendingFavoriteId).toBeNull();
   });
 });
+
+// 확인 중 클릭은 "토글"이 아니라 클릭 순간 보이던 하트 기준의 의도로 재생한다. 빈 하트를 눌렀는데 목록을 받아
+// 보니 이미 등록돼 있으면 요청을 보내지 않는다(토글이었다면 해제 요청이 나갔다).
+describe('useFavoriteToggle — 확인 중 클릭은 의도로 재생', () => {
+  async function clickDuringCheckingThenConfirm(
+    view: ReturnType<typeof renderWithStatus>,
+    listB: FavoritePropertySummaryResponse[],
+  ) {
+    expect(view.result.current.favoritedIds.has(10)).toBe(false); // 클릭 순간 빈 하트
+    act(() => view.result.current.toggleFavorite(10));
+    expect(view.result.current.pendingFavoriteId).toBe(10);
+    api.getFavoriteProperties.mockResolvedValueOnce(listB);
+    act(() => view.setStatus('authenticated'));
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(true));
+    await waitFor(() => expect(view.result.current.pendingFavoriteId).toBeNull());
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it('계정 전환 뒤 확인 중: B가 이미 등록한 단지를 빈 하트로 누르면 목록 도착 후 요청 0건', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(10, 100)]); // 계정 A
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(true));
+    act(() => view.setStatus('checking'));
+
+    await clickDuringCheckingThenConfirm(view, [favorite(10, 300)]); // 계정 B도 단지 10을 등록해 둠
+
+    expect(api.addFavoriteProperty).not.toHaveBeenCalled();
+    expect(api.removeFavoriteProperty).not.toHaveBeenCalled();
+  });
+
+  it('첫 로딩 확인 중: 이미 등록한 단지를 빈 하트로 누르면 목록 도착 후 요청 0건', async () => {
+    const view = renderWithStatus('checking');
+
+    await clickDuringCheckingThenConfirm(view, [favorite(10, 300)]);
+
+    expect(api.addFavoriteProperty).not.toHaveBeenCalled();
+    expect(api.removeFavoriteProperty).not.toHaveBeenCalled();
+  });
+
+  it('첫 로딩 확인 중: 등록되지 않은 단지를 빈 하트로 누르면 목록 도착 후 등록 1회', async () => {
+    const view = renderWithStatus('checking');
+
+    await clickDuringCheckingThenConfirm(view, []);
+
+    expect(api.addFavoriteProperty).toHaveBeenCalledTimes(1);
+    expect(api.addFavoriteProperty).toHaveBeenCalledWith(10);
+    expect(api.removeFavoriteProperty).not.toHaveBeenCalled();
+  });
+});
