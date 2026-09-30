@@ -32,6 +32,7 @@ import com.jiseong.homesense.trade.dto.TradeSortCondition;
 import com.jiseong.homesense.trade.dto.TradeSummaryResponse;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.RentType;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.exception.MissingComplexIdException;
 import com.jiseong.homesense.trade.exception.TradeNotFoundException;
@@ -105,6 +106,20 @@ class TradeServiceTest {
         List<TradeResponse> result = tradeService.getHistory(1L, HousingType.APT, DealTypeFilter.JEONSE);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void getHistory_매매_거래의_거래유형을_담고_전월세는_null이다() {
+        Trade sale = Trade.builder().tradeId(30L).dealCategory(DealCategory.SALE).dealDate(LocalDate.of(2026, 3, 1))
+                .dealingType("DIRECT").build();
+        Trade rent = Trade.builder().tradeId(31L).dealCategory(DealCategory.RENT).rentType(RentType.JEONSE)
+                .dealDate(LocalDate.of(2026, 3, 2)).build();
+        when(tradeRepository.findHistory(eq(1L), isNull(), eq(DealTypeFilter.ALL))).thenReturn(List.of(sale, rent));
+
+        List<TradeResponse> result = tradeService.getHistory(1L, null, DealTypeFilter.ALL);
+
+        assertThat(result.get(0).dealingType()).isEqualTo("DIRECT");
+        assertThat(result.get(1).dealingType()).isNull();
     }
 
     @Test

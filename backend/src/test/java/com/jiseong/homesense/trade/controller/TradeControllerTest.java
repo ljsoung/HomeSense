@@ -62,7 +62,7 @@ class TradeControllerTest {
 
     private static TradeResponse history(Long id, boolean cancelled) {
         return new TradeResponse(id, LocalDate.of(2026, 1, 10), DealCategory.SALE, null,
-                new BigDecimal("84.90"), (short) 5, 80000L, null, null, cancelled,
+                new BigDecimal("84.90"), (short) 5, 80000L, null, null, "AGENT", cancelled,
                 cancelled ? LocalDate.of(2026, 2, 3) : null, false);
     }
 
@@ -93,6 +93,7 @@ class TradeControllerTest {
         mockMvc.perform(get("/api/trades").param("complexId", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].tradeId").value(10))
+                .andExpect(jsonPath("$.data[0].dealingType").value("AGENT"))
                 .andExpect(jsonPath("$.data[0].isCancelled").value(false));
     }
 

@@ -17,7 +17,9 @@ import com.jiseong.homesense.trade.entity.Trade;
  *
  * <p>cancelDate는 해제사유발생일(cancel_date, 원천 cdealDay)이다 — UI정의서 v2.1.1 5.3절 예외 처리표가 이력
  * 테이블 행에 "해제" 라벨과 해제사유발생일을 함께 요구한다. 해제되지 않았거나 전월세 거래(원천 데이터에 해제
- * 정보가 없다)는 null이다. 이력 조회는 캐시를 적용하지 않아 필드 추가에 따른 캐시 버전업이 필요 없다.
+ * 정보가 없다)는 null이다. dealingType은 거래유형(dealing_type, 원천 dealingGbn)으로 매매 이력 테이블의 거래유형 열에
+ * 쓴다. 값은 BAT-PRS-01(TradeFieldMapper)이 정규화한 코드 {@code AGENT}(중개거래)/{@code DIRECT}(직거래)다. 전월세 원천 데이터에는 없어 null이다. 둘 다 non_null 직렬화라 null이면 JSON에서 키가
+ * 빠진다. 이력 조회는 캐시를 적용하지 않아 필드 추가에 따른 캐시 버전업이 필요 없다.
  */
 public record TradeResponse(
         Long tradeId,
@@ -29,6 +31,7 @@ public record TradeResponse(
         Long dealAmount,
         Long depositAmount,
         Long monthlyRentAmount,
+        String dealingType,
         boolean isCancelled,
         LocalDate cancelDate,
         boolean isRegistered) {
@@ -44,6 +47,7 @@ public record TradeResponse(
                 t.getDealAmount(),
                 t.getDepositAmount(),
                 t.getMonthlyRentAmount(),
+                t.getDealingType(),
                 t.isCancelYn(),
                 t.getCancelDate(),
                 t.getRegistrationDate() != null);
