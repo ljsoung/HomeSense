@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +19,9 @@ import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.trade.entity.MatchMethod;
+import com.jiseong.homesense.trade.entity.Trade;
+import com.jiseong.homesense.trade.repository.TradeRepository;
 
 @ExtendWith(MockitoExtension.class)
 class ComplexDetailCacheTest {
@@ -24,11 +29,14 @@ class ComplexDetailCacheTest {
     @Mock
     private ComplexRepository complexRepository;
 
+    @Mock
+    private TradeRepository tradeRepository;
+
     private ComplexDetailCache complexDetailCache;
 
     @BeforeEach
     void setUp() {
-        complexDetailCache = new ComplexDetailCache(complexRepository);
+        complexDetailCache = new ComplexDetailCache(complexRepository, tradeRepository);
     }
 
     private static Complex complex(Long id) {
@@ -68,5 +76,26 @@ class ComplexDetailCacheTest {
         ComplexDetailResponse response = complexDetailCache.get(1L);
 
         assertThat(response.matchPending()).isTrue();
+    }
+
+    @Test
+    void get_대표_거래의_matchMethod를_정밀도로_담는다() {
+        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex(1L)));
+        Trade representative = Trade.builder().tradeId(10L).matchMethod(MatchMethod.SIMILAR).build();
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of(1L, representative));
+
+        ComplexDetailResponse response = complexDetailCache.get(1L);
+
+        assertThat(response.matchMethod()).isEqualTo(MatchMethod.SIMILAR);
+    }
+
+    @Test
+    void get_대표_거래가_없으면_matchMethod는_null이다() {
+        when(complexRepository.findById(1L)).thenReturn(Optional.of(complex(1L)));
+        when(tradeRepository.findRecentTradesByComplexIds(List.of(1L))).thenReturn(Map.of());
+
+        ComplexDetailResponse response = complexDetailCache.get(1L);
+
+        assertThat(response.matchMethod()).isNull();
     }
 }

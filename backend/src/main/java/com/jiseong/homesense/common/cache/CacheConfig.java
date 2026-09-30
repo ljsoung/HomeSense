@@ -30,7 +30,7 @@ import tools.jackson.databind.type.TypeFactory;
 /**
  * COM-CACHE-01. {@code @Cacheable}/{@code @CacheEvict}만으로 서비스 계층이 캐시를 적용할 수 있도록
  * RedisCacheManager를 구성한다(FR-7.3). 캐시 키는 RedisCache의 기본 규칙(cacheName + "::" + 생성된 키)을
- * 그대로 따르므로 CLAUDE.md가 정의한 "도메인::파라미터" 형식(complexDetailV2::{complexId} 등)이 별도
+ * 그대로 따르므로 CLAUDE.md가 정의한 "도메인::파라미터" 형식(complexDetailV3::{complexId} 등)이 별도
  * 커스터마이징 없이 성립한다.
  *
  * <p>값 직렬화는 캐시마다 값 타입을 명시한 Jackson 3 {@link JacksonJsonRedisSerializer}를 쓴다(2026-09-27
@@ -56,7 +56,7 @@ import tools.jackson.databind.type.TypeFactory;
  * 아니라 "null을 캐시에 저장하려는 시도 자체를 IllegalArgumentException으로 거부한다"로 동작한다
  * (AbstractValueAdaptingCache.toStoreValue()). 즉 캐시 설정에서 막아버리면, {@code unless} 조건 없이
  * null을 정상 반환하는 {@code @Cacheable} 메서드가 생기는 순간 그 호출이 예외로 깨진다 — "없음"을
- * TTL 동안 캐싱하지 않으려는 의도보다 훨씬 위험한 부작용이다. 이 세 캐시(complexDetailV2/
+ * TTL 동안 캐싱하지 않으려는 의도보다 훨씬 위험한 부작용이다. 이 세 캐시(complexDetailV3/
  * popularComplexesV3/regionAutocomplete)의 실제 조회 서비스는 "없음"을 null이 아니라 예외(404)나 빈
  * 컬렉션으로 표현할 가능성이 높아 null 캐싱 자체가 사실상 일어나지 않을 것으로 보이지만, 혹시라도
  * null을 정말 반환해야 하는 캐시 메서드가 생기면 이 설정을 건드리지 말고 그 {@code @Cacheable}

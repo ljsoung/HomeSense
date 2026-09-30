@@ -110,7 +110,7 @@ class CacheConfigTest {
 
     @Test
     void 단지_상세가_왕복된다() {
-        ComplexDetailResponse value = ComplexDetailResponse.from(complex());
+        ComplexDetailResponse value = ComplexDetailResponse.from(complex(), MatchMethod.SIMILAR);
 
         assertThat(roundTrip(CacheNames.COMPLEX_DETAIL, value)).isEqualTo(value);
     }

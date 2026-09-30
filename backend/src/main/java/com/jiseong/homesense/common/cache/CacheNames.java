@@ -7,7 +7,7 @@ package com.jiseong.homesense.common.cache;
 public final class CacheNames {
 
     /** SVC-CPX-01.getDetail() — ComplexDetailResponse(matchPending, 주소 포함). */
-    public static final String COMPLEX_DETAIL = "complexDetailV2";
+    public static final String COMPLEX_DETAIL = "complexDetailV3";
     /**
      * SVC-CPX-01.getPopular() — ComplexSummaryResponse(sido/sigungu/dongRi 포함). V3: rentType·monthlyRentAmount
      * 추가(2026-09-23) — 옛 V2 엔트리를 읽으면 두 필드가 조용히 null이 되므로 이름을 올렸다.

@@ -45,6 +45,7 @@ import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
 import com.jiseong.homesense.complex.service.ComplexService;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.trade.entity.RentType;
 
 @WebMvcTest(controllers = ComplexController.class)
@@ -235,13 +236,14 @@ class ComplexControllerTest {
                 "커뮤니티", "편의시설", (short) 20, (short) 2, "서울시 강남구", "02-1234-5678");
         ComplexDetailResponse response = new ComplexDetailResponse(1L, "테스트단지", "아파트", HousingType.APT,
                 "서울특별시", "강남구", "역삼동", "서울특별시 강남구 역삼동 123", new java.math.BigDecimal("37.5"),
-                new java.math.BigDecimal("127.0"), "PRECISE", false, basicInfo, extendedInfo);
+                new java.math.BigDecimal("127.0"), "PRECISE", false, MatchMethod.EXACT, basicInfo, extendedInfo);
         when(complexService.getDetail(eq(1L), any(), any())).thenReturn(response);
 
         mockMvc.perform(get("/api/complexes/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.complexId").value(1))
                 .andExpect(jsonPath("$.data.matchPending").value(false))
+                .andExpect(jsonPath("$.data.matchMethod").value("EXACT"))
                 .andExpect(jsonPath("$.data.basicInfo.householdCount").value(500))
                 .andExpect(jsonPath("$.data.extendedInfo.managementType").value("위탁관리"));
     }
@@ -276,7 +278,7 @@ class ComplexControllerTest {
                 "커뮤니티", "편의시설", (short) 20, (short) 2, "서울시 강남구", "02-1234-5678");
         return new ComplexDetailResponse(1L, "테스트단지", "아파트", HousingType.APT,
                 "서울특별시", "강남구", "역삼동", "서울특별시 강남구 역삼동 123", new java.math.BigDecimal("37.5"),
-                new java.math.BigDecimal("127.0"), "PRECISE", false, basicInfo, extendedInfo);
+                new java.math.BigDecimal("127.0"), "PRECISE", false, MatchMethod.EXACT, basicInfo, extendedInfo);
     }
 
     @Test
