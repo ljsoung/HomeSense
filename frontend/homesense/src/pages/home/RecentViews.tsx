@@ -42,9 +42,15 @@ export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId 
   // 세션 확인 중에는 불러오지 않는다 — 저장소의 옛(만료됐을 수 있는) 토큰으로 불러오면 로그인 사용자에게도
   // 비로그인 기준 목록과 "로그인하면…" 문구가 잠깐 보인다. 판정이 나면 그 기준으로 한 번 불러온다.
   useEffect(() => {
-    if (status === 'checking') return;
     let cancelled = false;
     const load = async () => {
+      if (status === 'checking') {
+        // 이전 판정 기준의 목록을 버린다. 다른 탭의 계정 변경으로 authenticated(A) → checking → authenticated(B)가
+        // 되면, B로 확정된 첫 렌더에 A의 최근 조회 목록이 잠깐 보였다(loading이 false로 남아 있었다).
+        setViews([]);
+        setLoading(true);
+        return;
+      }
       setLoading(true);
       try {
         const result = await getRecentViews(3);
