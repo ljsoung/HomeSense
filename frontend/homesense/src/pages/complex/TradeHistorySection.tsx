@@ -90,9 +90,9 @@ export function TradeHistorySection({ dealType, onChangeDealType, history, onRet
             <p className="mt-0.5 text-[12px] text-[#6a7282]">계약일 기준 · 최근 거래 순</p>
           </div>
           {dealType === 'SALE' && (
-            <div className="flex items-center gap-2 text-[11px] text-[#6a7282]" aria-label="범례">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#6a7282]" aria-label="범례">
               <span className="flex items-center gap-1">
-                <RegistrationPendingBadge /> 등기 신고 전
+                <RegistrationPendingBadge /> 소유권 이전등기가 아직 확인되지 않은 거래
               </span>
               <span className="flex items-center gap-1">
                 <CancelledBadge /> 계약 해제

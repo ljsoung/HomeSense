@@ -250,6 +250,11 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
   const rows = page.locator('tbody tr');
   ok('표: 처음 20행', (await rows.count()) === 20);
   ok('표: 범례(매매 탭)', await page.getByLabel('범례').isVisible());
+  ok(
+    '표: 범례 문구(소유권 이전등기, 계약 해제)',
+    (await page.getByLabel('범례').textContent()).includes('소유권 이전등기가 아직 확인되지 않은 거래') &&
+      (await page.getByLabel('범례').textContent()).includes('계약 해제'),
+  );
   ok('표: 첫 행 등기 완료', (await rows.nth(0).textContent()).includes('완료'));
   ok('표: 해제 행 표시·해제일', (await rows.nth(1).getAttribute('data-cancelled')) === 'true' && (await rows.nth(1).textContent()).includes('해제'));
   ok('표: 직거래 매핑', (await rows.nth(2).textContent()).includes('직거래'));
@@ -382,10 +387,44 @@ for (const [width, height] of [[360, 780], [768, 1024], [1280, 900]]) {
     const p = new URL(r.url()).pathname;
     if (p.startsWith('/api/complexes/') || p === '/api/trades') responses.push(r.status());
   });
+  // 상세 요청이 비로그인 조회 이력용 X-Session-Id를 싣는지(SVC-RCV-01) — 요청 헤더를 그대로 본다.
+  const detailRequestHeaders = [];
+  page.on('request', (r) => {
+    if (new URL(r.url()).pathname === `/api/complexes/${REAL_ID}`) detailRequestHeaders.push(r.headers());
+  });
   await page.goto(`${BASE}/complexes/${REAL_ID}`);
   await page.locator('h1#complex-name').waitFor({ timeout: 15000 });
   await page.locator('tbody tr').first().waitFor({ timeout: 15000 });
   ok(`실백엔드 ${width}: 단지·이력 200`, responses.length >= 2 && responses.every((s) => s === 200));
+  const storedSessionId = await page.evaluate(() => localStorage.getItem('homesense.sessionId'));
+  ok(
+    `실백엔드 ${width}: 상세 요청에 X-Session-Id(저장된 세션 ID, UUID)가 실림`,
+    detailRequestHeaders.length > 0 &&
+      detailRequestHeaders.every((h) => h['x-session-id'] === storedSessionId) &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(storedSessionId ?? ''),
+  );
+  ok(`실백엔드 ${width}: 비로그인이라 Authorization 없음`, detailRequestHeaders.every((h) => !h.authorization));
+  if (width === 360) {
+    // 서버가 그 세션 ID로 조회 이력을 남겼는지(record()는 @Async라 잠시 기다린다).
+    let recorded = false;
+    for (let i = 0; i < 10 && !recorded; i++) {
+      const res = await page.request.get(`${BASE}/api/recent-views?limit=20`, { headers: { 'X-Session-Id': storedSessionId } });
+      const body = await res.json();
+      recorded = (body.data ?? []).some((v) => v.complexId === REAL_ID);
+      if (!recorded) await page.waitForTimeout(300);
+    }
+    ok('실백엔드: 그 세션 ID의 최근 조회에 이 단지가 기록됨', recorded);
+    // 공용 푸터의 데이터 출처 문구가 고정 하단 탭에 가려지지 않는지 — 맨 아래까지 내린 뒤 위치를 비교한다.
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(300);
+    const footerText = page.getByText('본 서비스는 참고용 데이터를 제공하며', { exact: false }).last();
+    const footerBox = await footerText.boundingBox();
+    const navBox = await page.locator('nav.fixed').boundingBox();
+    ok(
+      `실백엔드 360: 푸터 출처 문구(하단 ${Math.round(footerBox?.y + footerBox?.height)})가 하단 탭(상단 ${Math.round(navBox?.y)})에 가려지지 않음`,
+      footerBox !== null && navBox !== null && footerBox.y + footerBox.height <= navBox.y,
+    );
+  }
   ok(`실백엔드 ${width}: 가로 스크롤 없음`, (await page.evaluate(() => document.documentElement.scrollWidth)) <= width);
   const y = async (loc) => (await loc.boundingBox())?.y ?? -1;
   const header = await y(page.locator('h1#complex-name'));
