@@ -1,9 +1,12 @@
 import type { ComplexDetailResponse } from '../../features/complex/types';
 
-/** 홈 카드와 같은 카드 외곽(radius 16, 옅은 테두리·그림자). 안쪽 여백은 CARD_CLASS에만 있다. */
+/** 홈 카드와 같은 카드 외곽(radius 16, 옅은 테두리·그림자). 안쪽 여백은 CARD_CLASS·SIDE_CARD_CLASS에만 있다. */
 export const CARD_SHELL_CLASS =
   'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.1)]';
-export const CARD_CLASS = `${CARD_SHELL_CLASS} p-5`;
+/** 본문 카드(헤더·요약) — Figma: 모바일 20px, 태블릿·데스크톱 24px. */
+export const CARD_CLASS = `${CARD_SHELL_CLASS} p-5 md:p-6`;
+/** 사이드 카드(가격 추이·위치) — Figma: 모든 폭에서 20px. */
+export const SIDE_CARD_CLASS = `${CARD_SHELL_CLASS} p-5`;
 
 /** "2026-07-12" → "2026.07.12". */
 export function formatFullDate(isoDate: string): string {

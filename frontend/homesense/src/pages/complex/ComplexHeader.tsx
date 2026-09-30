@@ -1,9 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangleIcon } from '../../components/icons/AlertTriangleIcon';
-import { ChevronLeftIcon } from '../../components/icons/ChevronLeftIcon';
-import { ChevronRightIcon } from '../../components/icons/ChevronRightIcon';
+import { ArrowLeftIcon } from '../../components/icons/ArrowLeftIcon';
 import { HeartIcon } from '../../components/icons/HeartIcon';
-import { MapPinIcon } from '../../components/icons/MapPinIcon';
 import { ShareIcon } from '../../components/icons/ShareIcon';
 import { DataTrustBadge } from '../../components/ui/DataTrustBadge';
 import { favoritePendingClass } from '../../components/ui/favoritePending';
@@ -22,15 +20,11 @@ function searchHref(regionCode: string, regionLabel: string): string {
   return `/search?${serializeSearchParams({ ...defaultFilters(), regionCode, regionLabel }).toString()}`;
 }
 
-interface BackButtonProps {
-  className?: string;
-}
-
 /**
  * 뒤로가기 — 앱 안에서 들어왔으면 이전 화면으로, 링크로 바로 들어왔으면(이 탭의 첫 화면) 홈으로 간다.
- * react-router는 첫 진입 위치의 key를 'default'로 둔다.
+ * react-router는 첫 진입 위치의 key를 'default'로 둔다. 모양은 Figma 4:3018(화살표 14px + "뒤로").
  */
-function BackButton({ className = '' }: BackButtonProps) {
+function BackButton() {
   const navigate = useNavigate();
   const location = useLocation();
   return (
@@ -38,9 +32,10 @@ function BackButton({ className = '' }: BackButtonProps) {
       type="button"
       aria-label="뒤로 가기"
       onClick={() => (location.key === 'default' ? navigate('/') : navigate(-1))}
-      className={`flex size-8 shrink-0 items-center justify-center rounded-full text-[#4a5565] hover:bg-[#eef0f3] ${className}`}
+      className="flex shrink-0 items-center gap-1 rounded-[6px] text-[16px] font-medium leading-6 text-[#6a7282] hover:text-[#101828]"
     >
-      <ChevronLeftIcon className="size-5" />
+      <ArrowLeftIcon className="size-3.5" aria-hidden="true" />
+      뒤로
     </button>
   );
 }
@@ -49,7 +44,7 @@ interface BreadcrumbProps {
   detail: ComplexDetailResponse | null;
 }
 
-/** 시도 › 시군구 › 단지명. 법정동코드가 있으면 시도·시군구를 SRCH-01 지역 검색으로 잇는다. */
+/** 뒤로 | 시도 › 시군구 › 단지명(Figma 4:3017). 법정동코드가 있으면 시도·시군구를 SRCH-01 지역 검색으로 잇는다. */
 export function ComplexBreadcrumb({ detail }: BreadcrumbProps) {
   const crumbs: { label: string; href?: string }[] = [];
   if (detail) {
@@ -63,25 +58,32 @@ export function ComplexBreadcrumb({ detail }: BreadcrumbProps) {
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-1">
-      <BackButton className="-ml-1.5" />
+    <div className="flex min-w-0 items-center gap-2">
+      <BackButton />
+      <span aria-hidden="true" className="text-[12.5px] leading-[18.75px] text-[#d1d5dc]">
+        |
+      </span>
       {detail ? (
         <nav aria-label="위치 경로" className="min-w-0">
-          <ol className="flex min-w-0 items-center gap-1 text-[12.5px] text-[#6a7282]">
+          <ol className="flex min-w-0 items-center gap-1.5 text-[12.5px] leading-[18.75px] text-[#6a7282]">
             {crumbs.map((crumb, index) => {
               const last = index === crumbs.length - 1;
               return (
-                <li key={`${crumb.label}-${index}`} className={`flex min-w-0 items-center gap-1 ${last ? 'min-w-0' : 'shrink-0'}`}>
+                <li key={`${crumb.label}-${index}`} className={`flex min-w-0 items-center gap-1.5 ${last ? '' : 'shrink-0'}`}>
                   {crumb.href ? (
                     <Link to={crumb.href} className="hover:text-brand hover:underline">
                       {crumb.label}
                     </Link>
                   ) : (
-                    <span className={last ? 'truncate font-semibold text-[#101828]' : ''} aria-current={last ? 'page' : undefined}>
+                    <span className={last ? 'truncate font-semibold text-[#1e2939]' : ''} aria-current={last ? 'page' : undefined}>
                       {crumb.label}
                     </span>
                   )}
-                  {!last && <ChevronRightIcon className="size-3.5 shrink-0 text-[#c4c9d1]" aria-hidden="true" />}
+                  {!last && (
+                    <span aria-hidden="true" className="text-[#d1d5dc]">
+                      ›
+                    </span>
+                  )}
                 </li>
               );
             })}
@@ -103,9 +105,9 @@ interface ComplexHeaderProps {
 }
 
 /**
- * DTL-01 구성요소 2 — 단지 헤더. 유형 배지와 정밀/근사 배지(matchMethod가 null이면 그리지 않는다, 결정 5),
- * 근사 매칭이면 주황 안내 상자, 단지명(h1)·주소, 관심·공유 버튼. 버튼은 데스크톱·태블릿에서 아이콘+글자,
- * 모바일에서 아이콘만 보인다(글자는 sr-only가 아니라 aria-label로 이름을 준다).
+ * DTL-01 구성요소 2 — 단지 헤더(Figma 4:3045, 근사 6:3612). 근사 매칭이면 카드 맨 위에 주황 안내 상자, 그 아래
+ * 유형 배지와 정밀/근사 배지(matchMethod가 null이면 그리지 않는다, 결정 5), 단지명(h1)·주소, 관심·공유 버튼.
+ * 버튼은 태블릿·데스크톱에서 아이콘+글자, 모바일에서 아이콘만 보인다(이름은 aria-label로 준다).
  */
 export function ComplexHeader({ detail, favorited, favoritePending, favoriteProcessing, onToggleFavorite }: ComplexHeaderProps) {
   const { showToast } = useToast();
@@ -130,27 +132,42 @@ export function ComplexHeader({ detail, favorited, favoritePending, favoriteProc
   }
 
   const address = displayAddress(detail);
+  const similar = detail.matchMethod === 'SIMILAR';
   const buttonBase =
-    'flex h-9 items-center justify-center gap-1.5 rounded-[10px] border text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 w-9 md:w-auto md:px-3';
+    'flex items-center justify-center gap-1.5 rounded-[14px] border px-[15px] py-[9px] text-[12.5px] font-semibold leading-[18.75px] transition-colors disabled:cursor-not-allowed disabled:opacity-60 md:px-3.5 md:py-2';
 
   return (
     <section className={CARD_CLASS} aria-labelledby="complex-name">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      {similar && (
+        <div
+          role="note"
+          className="flex items-start gap-2.5 rounded-[14px] border border-[#fee685] bg-[#fffbeb] px-4 py-3"
+          data-testid="similar-match-notice"
+        >
+          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-[#fe9a00]" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="text-[12.5px] font-semibold leading-[18.75px] text-[#973c00]">유사 매칭 결과</p>
+            <p className="pt-0.5 text-[11.5px] leading-[17.25px] text-[#bb4d00]">
+              지번 등 일부 정보가 정확히 일치하지 않아 유사도 기준으로 추정 매칭된 단지입니다. 참고용 정보로 확인해 주세요.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className={`flex items-start gap-4 ${similar ? 'pt-4' : ''}`}>
+        <div className="min-w-0 flex-1">
           {(detail.housingType || detail.matchMethod) && (
-            <DataTrustBadge housingType={detail.housingType} matchMethod={detail.matchMethod} />
+            <DataTrustBadge housingType={detail.housingType} matchMethod={detail.matchMethod} size="md" />
           )}
-          <h1 id="complex-name" className="mt-2 break-keep text-[20px] font-extrabold leading-tight text-[#101828] md:text-[24px]">
+          <h1
+            id="complex-name"
+            className="break-keep pt-2.5 text-[24px] font-extrabold leading-[30px] tracking-[-0.5px] text-[#101828] md:text-[28px] md:leading-[35px]"
+          >
             {detail.complexName}
           </h1>
-          {address && (
-            <p className="mt-1.5 flex items-start gap-1 text-[13px] leading-[1.5] text-[#6a7282]">
-              <MapPinIcon className="mt-0.5 size-3.5 shrink-0 text-[#99a1af]" />
-              <span className="min-w-0 break-words">{address}</span>
-            </p>
-          )}
+          {address && <p className="break-words pt-1.5 text-[13px] leading-[19.5px] text-[#99a1af]">{address}</p>}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 pt-1">
           <button
             type="button"
             onClick={onToggleFavorite}
@@ -163,7 +180,7 @@ export function ComplexHeader({ detail, favorited, favoritePending, favoriteProc
             } ${favoritePendingClass(favoritePending)}`}
           >
             <HeartIcon filled={favorited} className="size-4" aria-hidden="true" />
-            <span className="hidden md:inline">{favorited ? '관심 등록됨' : '관심 등록'}</span>
+            <span className="hidden md:inline">{favorited ? '관심등록됨' : '관심등록'}</span>
           </button>
           <button
             type="button"
@@ -176,22 +193,6 @@ export function ComplexHeader({ detail, favorited, favoritePending, favoriteProc
           </button>
         </div>
       </div>
-
-      {detail.matchMethod === 'SIMILAR' && (
-        <div
-          role="note"
-          className="mt-4 flex items-start gap-2 rounded-[12px] border border-[#fde68a] bg-[#fffbeb] px-3.5 py-3"
-          data-testid="similar-match-notice"
-        >
-          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-[#d97706]" />
-          <div className="text-[12.5px] leading-[1.55] text-[#92400e]">
-            <p className="font-bold">유사 매칭 결과</p>
-            <p className="mt-0.5">
-              지번 등 일부 정보가 정확히 일치하지 않아 유사도 기준으로 추정 매칭된 단지입니다. 참고용 정보로 확인해 주세요.
-            </p>
-          </div>
-        </div>
-      )}
     </section>
   );
 }

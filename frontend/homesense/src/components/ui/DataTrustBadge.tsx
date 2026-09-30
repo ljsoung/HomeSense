@@ -14,24 +14,32 @@ interface DataTrustBadgeProps {
    * null을 옵셔널 prop 관례로 넘기기 편하게 하기 위함이다(둘 다 동일하게 "배지 없음"으로 처리).
    */
   matchMethod?: MatchMethod | null;
+  /** sm: 카드(HOME-01·SRCH-01). md: 단지 상세 헤더(DTL-01 Figma 4:3048 — 11px 굵게, 좌우 10px). */
+  size?: 'sm' | 'md';
 }
 
 /** UIC-09. */
-export function DataTrustBadge({ housingType, matchMethod }: DataTrustBadgeProps) {
+export function DataTrustBadge({ housingType, matchMethod, size = 'sm' }: DataTrustBadgeProps) {
+  const md = size === 'md';
+  const pill = md ? 'px-2.5 py-1 text-[11px] font-bold leading-[16.5px]' : 'px-2 py-0.5 text-[10px] font-semibold';
   return (
-    <div className="flex items-center gap-1">
+    <div className={`flex items-center ${md ? 'gap-1.5' : 'gap-1'}`}>
       {housingType && (
-        <span className="rounded-full bg-[#d1eae6] px-2 py-0.5 text-[10px] font-semibold tracking-[0.25px] text-[#0b4a43]">
+        <span className={`rounded-full bg-[#d1eae6] text-[#0b4a43] ${pill} ${md ? '' : 'tracking-[0.25px]'}`}>
           {HOUSING_TYPE_LABEL[housingType]}
         </span>
       )}
       {matchMethod && (
         <span
-          className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+          className={`flex items-center gap-1 rounded-full ${pill} ${
             matchMethod === 'EXACT' ? 'bg-[#dcfce7] text-[#016630]' : 'bg-[#fef3c6] text-[#973c00]'
           }`}
         >
-          <span className={`size-1.5 rounded-full ${matchMethod === 'EXACT' ? 'bg-[#00c950]' : 'bg-[#fe9a00]'}`} />
+          <span
+            className={`size-1.5 rounded-full ${
+              matchMethod === 'EXACT' ? 'bg-[#00c950]' : md ? 'bg-[#ffb900]' : 'bg-[#fe9a00]'
+            }`}
+          />
           {matchMethod === 'EXACT' ? '정밀' : '근사'}
         </span>
       )}

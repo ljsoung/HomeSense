@@ -209,7 +209,7 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
   const detailBefore = counts.detail;
   const saleBefore = counts.trades.SALE;
   healed = true;
-  await page.locator('section[aria-labelledby="trade-history-title"]').getByRole('button', { name: '다시 시도' }).click();
+  await page.locator('#trade-history-panel').getByRole('button', { name: '다시 시도' }).click();
   await page.locator('tbody tr').first().waitFor();
   ok('이력 500: 다시 시도는 이력만 다시 부름', counts.trades.SALE === saleBefore + 1 && counts.detail === detailBefore);
   await context.close();
@@ -224,6 +224,7 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
   ok('제목: {단지명} | HomeSense', (await page.title()) === '모킹테스트아파트 | HomeSense');
   ok('정밀 배지', await page.getByText('정밀', { exact: true }).isVisible());
   ok('EXACT면 근사 안내 없음', (await page.getByTestId('similar-match-notice').count()) === 0);
+  ok('데스크톱: 관심등록·공유 글자 표시', (await page.getByText('관심등록', { exact: true }).isVisible()) && (await page.getByText('공유', { exact: true }).isVisible()));
   ok(
     '경로: 시도 링크 regionCode 앞 2자리',
     (await page.getByRole('link', { name: '경기도' }).getAttribute('href'))?.includes('regionCode=4100000000'),
@@ -333,7 +334,7 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
   await page.locator('h1#complex-name').waitFor();
   ok('SIMILAR: 근사 배지·유사 매칭 결과 안내', (await page.getByText('근사', { exact: true }).isVisible()) && (await page.getByText('유사 매칭 결과').isVisible()));
   ok('잘못된 deal: 매매 탭 선택·URL 정리', (await page.getByRole('tab', { name: '매매', selected: true }).count()) === 1 && !page.url().includes('deal='));
-  ok('모바일: 관심·공유는 아이콘만(글자 숨김)', !(await page.getByText('관심 등록', { exact: true }).isVisible()) && (await page.getByRole('button', { name: '관심 매물 등록' }).isVisible()));
+  ok('모바일: 관심·공유는 아이콘만(글자 숨김)', !(await page.getByText('관심등록', { exact: true }).isVisible()) && (await page.getByRole('button', { name: '관심 매물 등록' }).isVisible()));
   await context.close();
 }
 {

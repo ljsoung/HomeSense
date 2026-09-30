@@ -113,10 +113,11 @@ function ComplexDetailPage({ rawId }: { rawId: string | undefined }) {
   return (
     <MainLayout>
       <div
-        className="mx-auto grid max-w-[1280px] grid-cols-1 gap-4 px-4 py-5 [grid-template-areas:'crumb'_'header'_'info'_'side'_'history'] md:px-8 md:py-6 xl:grid-cols-[minmax(0,1fr)_300px] xl:grid-rows-[auto_auto_auto_1fr] xl:gap-x-6 xl:[grid-template-areas:'crumb_crumb'_'header_side'_'info_side'_'history_side']"
+        className="mx-auto grid max-w-[1280px] grid-cols-1 gap-4 px-4 pb-10 pt-5 [grid-template-areas:'crumb'_'header'_'info'_'side'_'history'] xl:grid-cols-[minmax(0,1fr)_300px] xl:grid-rows-[auto_auto_auto_1fr] xl:gap-x-5 xl:px-8 xl:[grid-template-areas:'crumb_crumb'_'header_side'_'info_side'_'history_side']"
         data-testid="complex-detail-grid"
       >
-        <div className="min-w-0 [grid-area:crumb]">
+        {/* Figma: 경로 줄과 첫 카드 사이 20px(카드끼리는 16px). */}
+        <div className="mb-1 min-w-0 [grid-area:crumb]">
           <ComplexBreadcrumb detail={data} />
         </div>
 

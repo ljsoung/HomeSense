@@ -1,22 +1,37 @@
 import type { SVGProps } from 'react';
 
-/** 기본정보 요약 — 세대수. Figma 자산을 받지 못해(DTL-01 작업 시 Figma 커넥터 미인가) 선 두께 2의 24px 선 아이콘으로 직접 그렸다. */
+/** 세대수 — DTL-01 Figma(4:3089)의 실제 SVG. */
 export function UsersIcon(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      {...props}
-    >
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+    <svg width="17" height="17" viewBox="0 0 17 17" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" {...props}>
+      <path
+        d="M11.3333 14.875V13.4583C11.3333 12.7069 11.0348 11.9862 10.5035 11.4549C9.97212 10.9235 9.25145 10.625 8.5 10.625H4.25C3.49855 10.625 2.77788 10.9235 2.24653 11.4549C1.71518 11.9862 1.41667 12.7069 1.41667 13.4583V14.875"
+        stroke="currentColor"
+        strokeWidth="1.41667"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.375 7.79167C7.93981 7.79167 9.20833 6.52314 9.20833 4.95833C9.20833 3.39353 7.93981 2.125 6.375 2.125C4.81019 2.125 3.54167 3.39353 3.54167 4.95833C3.54167 6.52314 4.81019 7.79167 6.375 7.79167Z"
+        stroke="currentColor"
+        strokeWidth="1.41667"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15.5833 14.875V13.4583C15.5829 12.8306 15.3739 12.2207 14.9893 11.7246C14.6047 11.2284 14.0662 10.874 13.4583 10.7171"
+        stroke="currentColor"
+        strokeWidth="1.41667"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M11.3333 2.21708C11.9428 2.37313 12.483 2.72758 12.8687 3.22455C13.2545 3.72153 13.4639 4.33275 13.4639 4.96188C13.4639 5.591 13.2545 6.20222 12.8687 6.6992C12.483 7.19617 11.9428 7.55062 11.3333 7.70667"
+        stroke="currentColor"
+        strokeWidth="1.41667"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
