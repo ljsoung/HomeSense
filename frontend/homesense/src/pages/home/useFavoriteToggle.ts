@@ -53,6 +53,14 @@ export function useFavoriteToggle() {
   const deferredClickRef = useRef<DeferredClick | null>(null);
   // 대기 중인 하트를 화면에 알리기 위한 상태(카드가 aria-busy와 시각적 표시를 단다).
   const [pendingFavoriteId, setPendingFavoriteId] = useState<number | null>(null);
+  // 등록/해제 요청이 진행 중인 단지. 같은 단지에 요청이 겹쳐 나가지 않게 막고(ref, 동기 판정), 버튼을 비활성으로
+  // 그릴 수 있게 알린다(state).
+  const inFlightRef = useRef<Set<number>>(new Set());
+  const [processingIds, setProcessingIds] = useState<ReadonlySet<number>>(new Set());
+  const statusRef = useRef(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   // 로그인 상태에서 마운트되거나(또는 로그인 직후 status가 authenticated로 바뀌면) 실제 등록된
   // 관심 매물 목록으로 하트 상태를 하이드레이트한다 — 이게 없으면 이미 등록된 단지도 새로고침 후
@@ -95,36 +103,66 @@ export function useFavoriteToggle() {
     };
   }, [status]);
 
-  const addFavorite = useCallback(
-    async (complexId: number) => {
-      try {
-        const result = await addFavoriteProperty(complexId);
-        setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
-        showToast('관심 매물로 등록되었습니다.', 'success');
-      } catch (error) {
-        // 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출한다(AUTH-01 확립 관례). 다른 탭의 계정
-        // 변경으로 요청을 보내지 않은 경우도 그 사실을 알린다(getErrorMessage).
-        showToast(getErrorMessage(error), 'error');
+  // 등록/해제가 실패하면 서버의 실제 관심 목록으로 하트 상태를 다시 맞춘다. 409(이미 등록)나 다른 곳에서 이미
+  // 해제된 경우처럼 화면과 서버가 어긋난 채 남지 않게 한다. 실패 원인(상태 코드)은 가리지 않는다.
+  const resyncFavorites = useCallback(async () => {
+    if (statusRef.current !== 'authenticated') return;
+    try {
+      const result = await getFavoriteProperties();
+      if (statusRef.current === 'authenticated') {
+        setFavorites(new Map(result.map((item) => [item.complexId, item.favoritePropertyId])));
       }
-    },
-    [showToast],
+    } catch {
+      // 재조회도 실패하면 지금 상태를 그대로 둔다 — 다음 로드에서 다시 맞춰진다.
+    }
+  }, []);
+
+  const runExclusive = useCallback(async (complexId: number, task: () => Promise<void>) => {
+    if (inFlightRef.current.has(complexId)) return;
+    inFlightRef.current.add(complexId);
+    setProcessingIds(new Set(inFlightRef.current));
+    try {
+      await task();
+    } finally {
+      inFlightRef.current.delete(complexId);
+      setProcessingIds(new Set(inFlightRef.current));
+    }
+  }, []);
+
+  const addFavorite = useCallback(
+    (complexId: number) =>
+      runExclusive(complexId, async () => {
+        try {
+          const result = await addFavoriteProperty(complexId);
+          setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
+          showToast('관심 매물로 등록되었습니다.', 'success');
+        } catch (error) {
+          // 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출한다(AUTH-01 확립 관례). 다른 탭의 계정
+          // 변경으로 요청을 보내지 않은 경우도 그 사실을 알린다(getErrorMessage). 이어서 서버 상태로 다시 맞춘다.
+          showToast(getErrorMessage(error), 'error');
+          await resyncFavorites();
+        }
+      }),
+    [showToast, runExclusive, resyncFavorites],
   );
 
   const removeFavorite = useCallback(
-    async (complexId: number, favoritePropertyId: number) => {
-      try {
-        await removeFavoriteProperty(favoritePropertyId);
-        setFavorites((prev) => {
-          const next = new Map(prev);
-          next.delete(complexId);
-          return next;
-        });
-        showToast('관심 매물에서 해제되었습니다.', 'success');
-      } catch (error) {
-        showToast(getErrorMessage(error), 'error');
-      }
-    },
-    [showToast],
+    (complexId: number, favoritePropertyId: number) =>
+      runExclusive(complexId, async () => {
+        try {
+          await removeFavoriteProperty(favoritePropertyId);
+          setFavorites((prev) => {
+            const next = new Map(prev);
+            next.delete(complexId);
+            return next;
+          });
+          showToast('관심 매물에서 해제되었습니다.', 'success');
+        } catch (error) {
+          showToast(getErrorMessage(error), 'error');
+          await resyncFavorites();
+        }
+      }),
+    [showToast, runExclusive, resyncFavorites],
   );
 
   // 로그인 성공 후 이 페이지로 돌아왔을 때 대기 중인 하트 클릭을 정확히 한 번만 재생한다.
@@ -221,5 +259,5 @@ export function useFavoriteToggle() {
 
   const favoritedIds = useMemo(() => new Set(favorites.keys()), [favorites]);
 
-  return { favoritedIds, toggleFavorite, pendingFavoriteId };
+  return { favoritedIds, toggleFavorite, pendingFavoriteId, processingIds };
 }

@@ -1,4 +1,5 @@
-import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, screen, waitFor } from '@testing-library/react';
+import { AxiosError, AxiosHeaders } from 'axios';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -164,5 +165,65 @@ describe('useFavoriteToggle — 확인 중 클릭은 의도로 재생', () => {
     expect(api.addFavoriteProperty).toHaveBeenCalledTimes(1);
     expect(api.addFavoriteProperty).toHaveBeenCalledWith(10);
     expect(api.removeFavoriteProperty).not.toHaveBeenCalled();
+  });
+});
+
+function serverError(status: number, code: string, message: string) {
+  const config = { headers: new AxiosHeaders() };
+  return new AxiosError('Request failed', 'ERR_BAD_REQUEST', config, null, {
+    status,
+    statusText: '',
+    headers: {},
+    config,
+    data: { success: false, data: null, error: { code, message }, timestamp: '' },
+  });
+}
+
+// DTL-01 결정 4 — 등록/해제가 실패하면 상태 코드와 무관하게 서버 문구를 보이고, 서버의 관심 목록으로 하트를
+// 다시 맞춘다(409를 따로 분기하지 않는다). 요청이 진행 중인 단지는 두 번째 클릭을 보내지 않는다.
+describe('useFavoriteToggle — 실패 시 서버 문구와 재동기화', () => {
+  it('등록이 409로 실패하면 서버 문구를 보이고 목록을 다시 받아 채워진 하트로 맞춘다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
+    api.addFavoriteProperty.mockRejectedValueOnce(serverError(409, 'DUPLICATE_FAVORITE', '이미 관심 매물로 등록된 단지입니다'));
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(10, 100)]);
+
+    await act(async () => view.result.current.toggleFavorite(10));
+
+    expect(await screen.findByText('이미 관심 매물로 등록된 단지입니다')).toBeTruthy();
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(true));
+    expect(api.getFavoriteProperties).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(view.result.current.processingIds.size).toBe(0));
+  });
+
+  it('해제가 404로 실패하면 서버 문구를 보이고 목록을 다시 받아 빈 하트로 맞춘다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(10, 100)]);
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(true));
+    api.removeFavoriteProperty.mockRejectedValueOnce(serverError(404, 'FAVORITE_NOT_FOUND', '존재하지 않는 관심 등록입니다'));
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+
+    await act(async () => view.result.current.toggleFavorite(10));
+
+    expect(await screen.findByText('존재하지 않는 관심 등록입니다')).toBeTruthy();
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(false));
+  });
+
+  it('요청이 진행 중인 단지를 다시 눌러도 두 번째 요청을 보내지 않는다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
+    const pending = deferred<{ favoritePropertyId: number }>();
+    api.addFavoriteProperty.mockReturnValueOnce(pending.promise);
+
+    act(() => view.result.current.toggleFavorite(10));
+    await waitFor(() => expect(view.result.current.processingIds.has(10)).toBe(true));
+    act(() => view.result.current.toggleFavorite(10));
+    expect(api.addFavoriteProperty).toHaveBeenCalledTimes(1);
+
+    await act(async () => pending.resolve({ favoritePropertyId: 100 }));
+    await waitFor(() => expect(view.result.current.processingIds.has(10)).toBe(false));
+    expect(view.result.current.favoritedIds.has(10)).toBe(true);
   });
 });
