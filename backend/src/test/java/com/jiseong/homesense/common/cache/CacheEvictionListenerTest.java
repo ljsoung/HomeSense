@@ -38,9 +38,9 @@ class CacheEvictionListenerTest {
 
         listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L, 2L), Set.of()));
 
-        verify(complexDetailCache).evict(eq(1L));
-        verify(complexDetailCache).evict(eq(2L));
-        verify(popularComplexesCache).clear();
+        verify(complexDetailCache).evictIfPresent(eq(1L));
+        verify(complexDetailCache).evictIfPresent(eq(2L));
+        verify(popularComplexesCache).invalidate();
     }
 
     @Test
@@ -64,7 +64,7 @@ class CacheEvictionListenerTest {
 
         listener().onLegalDistrictCodeReloaded(new LegalDistrictCodeReloadedEvent());
 
-        verify(regionAutocompleteCache).clear();
+        verify(regionAutocompleteCache).invalidate();
         verify(cacheManager, never()).getCache("complexDetailV3");
         verify(cacheManager, never()).getCache("popularComplexesV3");
     }
@@ -91,7 +91,7 @@ class CacheEvictionListenerTest {
 
         listener().onTradeLoaded(new TradeCacheEvictionEvent(Set.of(1L), Set.of()));
 
-        verify(complexDetailCache).evict(1L);
+        verify(complexDetailCache).evictIfPresent(1L);
     }
 
     @Test
