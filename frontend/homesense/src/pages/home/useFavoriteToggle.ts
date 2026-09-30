@@ -3,9 +3,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ui/useToast';
 import { addFavoriteProperty, getFavoriteProperties, removeFavoriteProperty } from '../../features/favorite/api';
 import type { AuthStatus } from '../../features/auth/authContext';
+import { currentSessionGeneration } from '../../features/auth/session';
 import { useAuth } from '../../features/auth/useAuth';
 import { assertNever } from '../../lib/assertNever';
-import { getErrorMessage } from '../../lib/apiError';
+import { getErrorMessage, SessionAccountChangedError, SessionNotConfirmedError } from '../../lib/apiError';
 
 const PENDING_FAVORITE_KEY = 'homesense.pendingFavoriteComplexId';
 
@@ -53,6 +54,27 @@ export function useFavoriteToggle() {
   const deferredClickRef = useRef<DeferredClick | null>(null);
   // 대기 중인 하트를 화면에 알리기 위한 상태(카드가 aria-busy와 시각적 표시를 단다).
   const [pendingFavoriteId, setPendingFavoriteId] = useState<number | null>(null);
+  // 등록/해제 요청이 진행 중인 단지. 같은 단지에 요청이 겹쳐 나가지 않게 막고(ref, 동기 판정), 버튼을 비활성으로
+  // 그릴 수 있게 알린다(state).
+  const inFlightRef = useRef<Set<number>>(new Set());
+  const [processingIds, setProcessingIds] = useState<ReadonlySet<number>>(new Set());
+  const statusRef = useRef(status);
+  // 인증 상태가 바뀔 때마다 올리는 번호. 등록/해제·재동기화는 시작할 때 이 번호와 세션 세대를 함께 잡아 두고,
+  // 응답이 왔을 때 둘 중 하나라도 바뀌었으면 하트 상태에 쓰지 않는다(Codex P2). 다른 탭의 계정 변경은
+  // authenticated(A) → checking → authenticated(B)로 가서 상태 값만 보면 A의 늦은 응답이 B의 하트를 덮어쓴다.
+  const statusEpochRef = useRef(0);
+  useEffect(() => {
+    statusRef.current = status;
+    statusEpochRef.current += 1;
+  }, [status]);
+
+  /** 지금 계정 기준으로 시작한 작업의 결과를 아직 써도 되는지 판정하는 함수를 돌려준다. */
+  const captureAccount = useCallback(() => {
+    const epoch = statusEpochRef.current;
+    const generation = currentSessionGeneration();
+    return () =>
+      statusRef.current === 'authenticated' && statusEpochRef.current === epoch && currentSessionGeneration() === generation;
+  }, []);
 
   // 로그인 상태에서 마운트되거나(또는 로그인 직후 status가 authenticated로 바뀌면) 실제 등록된
   // 관심 매물 목록으로 하트 상태를 하이드레이트한다 — 이게 없으면 이미 등록된 단지도 새로고침 후
@@ -95,36 +117,87 @@ export function useFavoriteToggle() {
     };
   }, [status]);
 
-  const addFavorite = useCallback(
-    async (complexId: number) => {
-      try {
-        const result = await addFavoriteProperty(complexId);
-        setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
-        showToast('관심 매물로 등록되었습니다.', 'success');
-      } catch (error) {
-        // 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출한다(AUTH-01 확립 관례). 다른 탭의 계정
-        // 변경으로 요청을 보내지 않은 경우도 그 사실을 알린다(getErrorMessage).
-        showToast(getErrorMessage(error), 'error');
+  // 등록/해제가 실패하면 서버의 실제 관심 목록으로 하트 상태를 다시 맞춘다. 409(이미 등록)나 다른 곳에서 이미
+  // 해제된 경우처럼 화면과 서버가 어긋난 채 남지 않게 한다. 실패 원인(상태 코드)은 가리지 않는다.
+  // 재조회는 실패한 요청을 시작한 계정이 그대로일 때만 하고, 응답이 온 시점에도 같을 때만 반영한다 — 계정이
+  // 바뀌었으면 새 계정의 하트 상태는 하이드레이션이 따로 채운다.
+  const resyncFavorites = useCallback(async (stillSameAccount: () => boolean) => {
+    if (!stillSameAccount()) return;
+    try {
+      const result = await getFavoriteProperties();
+      if (stillSameAccount()) {
+        setFavorites(new Map(result.map((item) => [item.complexId, item.favoritePropertyId])));
       }
+    } catch {
+      // 재조회도 실패하면 지금 상태를 그대로 둔다 — 다음 로드에서 다시 맞춰진다.
+    }
+  }, []);
+
+  // 진행 중 표시는 결과를 쓰든 버리든 finally에서 반드시 푼다 — 다른 계정으로 바뀌어 응답을 버린 뒤에도 새 계정
+  // 화면에서 그 단지의 하트가 비활성으로 남지 않는다. 폐기는 task 안의 이른 return이라 이 finally를 그대로 지난다.
+  const runExclusive = useCallback(async (complexId: number, task: () => Promise<void>) => {
+    if (inFlightRef.current.has(complexId)) return;
+    inFlightRef.current.add(complexId);
+    setProcessingIds(new Set(inFlightRef.current));
+    try {
+      await task();
+    } finally {
+      inFlightRef.current.delete(complexId);
+      setProcessingIds(new Set(inFlightRef.current));
+    }
+  }, []);
+
+  // 등록/해제 실패 처리. 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출하고(AUTH-01 확립 관례)
+  // 서버 상태로 다시 맞춘다. 단, 응답이 도착했을 때 계정이 바뀌었으면 그 응답은 이전 계정의 것이라 토스트도
+  // 재동기화도 하지 않는다(새 계정 화면에 이전 계정의 결과를 알리지 않는다). 예외: 요청을 아예 보내지 않은
+  // 인터셉터 거절(SessionAccountChangedError·SessionNotConfirmedError)은 방금 누른 클릭이 처리되지 않았다는
+  // 안내라 계정이 바뀌었어도 보인다 — 계정 변경 거절은 그 자체가 다시 확인(세대 증가)을 시작하므로, 계정
+  // 판정으로 걸러 버리면 사용자가 클릭이 무시된 이유를 알 수 없다(탭 계정 동기화 절).
+  const reportFailure = useCallback(
+    async (error: unknown, stillSameAccount: () => boolean) => {
+      const refusedBeforeSending = error instanceof SessionAccountChangedError || error instanceof SessionNotConfirmedError;
+      if (!refusedBeforeSending && !stillSameAccount()) return;
+      showToast(getErrorMessage(error), 'error');
+      await resyncFavorites(stillSameAccount);
     },
-    [showToast],
+    [showToast, resyncFavorites],
+  );
+
+  const addFavorite = useCallback(
+    (complexId: number) =>
+      runExclusive(complexId, async () => {
+        const stillSameAccount = captureAccount();
+        try {
+          const result = await addFavoriteProperty(complexId);
+          // 응답 전에 계정이 바뀌었으면 A의 favoritePropertyId를 B의 하트 상태에 넣지 않고 성공 토스트도 띄우지 않는다.
+          if (!stillSameAccount()) return;
+          setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
+          showToast('관심 매물로 등록되었습니다.', 'success');
+        } catch (error) {
+          await reportFailure(error, stillSameAccount);
+        }
+      }),
+    [showToast, runExclusive, reportFailure, captureAccount],
   );
 
   const removeFavorite = useCallback(
-    async (complexId: number, favoritePropertyId: number) => {
-      try {
-        await removeFavoriteProperty(favoritePropertyId);
-        setFavorites((prev) => {
-          const next = new Map(prev);
-          next.delete(complexId);
-          return next;
-        });
-        showToast('관심 매물에서 해제되었습니다.', 'success');
-      } catch (error) {
-        showToast(getErrorMessage(error), 'error');
-      }
-    },
-    [showToast],
+    (complexId: number, favoritePropertyId: number) =>
+      runExclusive(complexId, async () => {
+        const stillSameAccount = captureAccount();
+        try {
+          await removeFavoriteProperty(favoritePropertyId);
+          if (!stillSameAccount()) return;
+          setFavorites((prev) => {
+            const next = new Map(prev);
+            next.delete(complexId);
+            return next;
+          });
+          showToast('관심 매물에서 해제되었습니다.', 'success');
+        } catch (error) {
+          await reportFailure(error, stillSameAccount);
+        }
+      }),
+    [showToast, runExclusive, reportFailure, captureAccount],
   );
 
   // 로그인 성공 후 이 페이지로 돌아왔을 때 대기 중인 하트 클릭을 정확히 한 번만 재생한다.
@@ -221,5 +294,5 @@ export function useFavoriteToggle() {
 
   const favoritedIds = useMemo(() => new Set(favorites.keys()), [favorites]);
 
-  return { favoritedIds, toggleFavorite, pendingFavoriteId };
+  return { favoritedIds, toggleFavorite, pendingFavoriteId, processingIds };
 }

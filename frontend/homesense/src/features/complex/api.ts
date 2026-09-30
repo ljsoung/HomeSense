@@ -1,6 +1,7 @@
 import { httpClient } from '../../lib/httpClient';
+import { SESSION_ID_HEADER, getOrCreateSessionId } from '../../lib/sessionId';
 import type { ApiResponse, PageMeta } from '../../types/api';
-import type { ComplexSummaryResponse } from './types';
+import type { ComplexDetailResponse, ComplexSummaryResponse } from './types';
 
 export async function getPopularComplexes(limit: number): Promise<ComplexSummaryResponse[]> {
   const { data } = await httpClient.get<ApiResponse<ComplexSummaryResponse[]>>('/api/complexes/popular', {
@@ -27,4 +28,16 @@ export async function searchComplexes(query: URLSearchParams, signal?: AbortSign
   });
   const body = response.data as Extract<ApiResponse<ComplexSummaryResponse[]>, { success: true }>;
   return { data: body.data, pageMeta: body.pageMeta as PageMeta };
+}
+
+/**
+ * GET /api/complexes/{id} (DTL-01). 조회 이력(SVC-RCV-01)을 남기도록 X-Session-Id를 항상 싣는다 — 비로그인은 이
+ * 헤더로 기록되고, 로그인 사용자는 백엔드가 userId를 우선한다(features/recentview/api.ts와 같은 규칙).
+ */
+export async function getComplexDetail(complexId: number, signal?: AbortSignal): Promise<ComplexDetailResponse> {
+  const { data } = await httpClient.get<ApiResponse<ComplexDetailResponse>>(`/api/complexes/${complexId}`, {
+    headers: { [SESSION_ID_HEADER]: getOrCreateSessionId() },
+    signal,
+  });
+  return (data as Extract<ApiResponse<ComplexDetailResponse>, { success: true }>).data;
 }

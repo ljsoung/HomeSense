@@ -7,8 +7,9 @@ import { UserMenu } from './UserMenu';
 
 // `/`(HOME-01)에서도 "지역·단지 검색"을 활성으로 표시한다 — Figma 데스크톱 로그인(3:2)/비로그인
 // (4:1232) 두 프레임 모두 홈 화면에서 이 탭을 활성 상태로 그린다(홈 히어로 자체가 검색 진입점).
-const NAV_LINKS = [
-  { to: '/search', label: '지역·단지 검색', alsoActiveOn: ['/'] },
+// 단지 상세(`/complexes/*`, DTL-01)도 검색에서 이어지는 화면이라 같은 탭을 활성으로 둔다(UI정의서 4.1절).
+const NAV_LINKS: { to: string; label: string; alsoActiveOn?: string[]; alsoActivePrefix?: string }[] = [
+  { to: '/search', label: '지역·단지 검색', alsoActiveOn: ['/'], alsoActivePrefix: '/complexes/' },
   { to: '/map', label: '지도로 보기' },
   { to: '/favorites', label: '관심목록' },
   { to: '/notifications', label: '알림' },
@@ -49,7 +50,10 @@ export function Gnb() {
 
         <nav className="flex flex-1 items-center justify-center gap-0.5">
           {NAV_LINKS.map((link) => {
-            const active = location.pathname === link.to || (link.alsoActiveOn?.includes(location.pathname) ?? false);
+            const active =
+              location.pathname === link.to ||
+              (link.alsoActiveOn?.includes(location.pathname) ?? false) ||
+              (link.alsoActivePrefix !== undefined && location.pathname.startsWith(link.alsoActivePrefix));
             return (
               <Link
                 key={link.to}

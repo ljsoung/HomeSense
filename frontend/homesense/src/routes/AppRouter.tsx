@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { PlaceholderPage } from '../pages/PlaceholderPage';
+import { ComplexDetailRoute } from '../pages/complex/ComplexDetailPage';
 import { LoginPage } from '../pages/auth/LoginPage';
 import { PasswordResetPage } from '../pages/auth/PasswordResetPage';
 import { SignupPage } from '../pages/auth/SignupPage';
@@ -19,7 +20,7 @@ export function AppRouter() {
             (AUTH-03 프론트 프롬프트 1절) — 이 경로를 바꾸면 이미 발송된 메일의 링크가 깨진다. */}
         <Route path="/password-reset" element={<PasswordResetPage />} />
         <Route path="/search" element={<SearchResultsPage />} />
-        <Route path="/complexes/:id" element={<PlaceholderPage programId="DTL-01" title="단지 상세" />} />
+        <Route path="/complexes/:id" element={<ComplexDetailRoute />} />
         <Route path="/map" element={<PlaceholderPage programId="MAP-01" title="지도로 보기" />} />
         <Route path="/my" element={<PlaceholderPage programId="MY-01" title="마이페이지" />} />
         <Route path="/favorites" element={<PlaceholderPage programId="MY-02" title="관심목록" />} />
