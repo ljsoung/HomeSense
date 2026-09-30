@@ -35,6 +35,7 @@ public record ComplexDetailResponse(
         String sido,
         String sigungu,
         String dongRi,
+        String legalDongCd,
         String legalDongAddress,
         BigDecimal latitude,
         BigDecimal longitude,
@@ -94,6 +95,9 @@ public record ComplexDetailResponse(
      */
     public static ComplexDetailResponse from(Complex c, MatchMethod matchMethod) {
         boolean matchPending = c.getLegalDistrictCode() == null;
+        // 브레드크럼의 시도·시군구 지역 검색 링크(SRCH-01 regionCode)용. 매칭 대기 단지는 null(키 생략).
+        // 지연 로딩 프록시의 식별자만 읽으므로 초기화되지 않는다.
+        String legalDongCd = matchPending ? null : c.getLegalDistrictCode().getLegalDongCd();
 
         BasicInfo basicInfo = new BasicInfo(
                 c.getHouseholdCount(), c.getBuildingCount(), c.getApprovalDate(),
@@ -112,7 +116,7 @@ public record ComplexDetailResponse(
 
         return new ComplexDetailResponse(
                 c.getComplexId(), c.getComplexName(), c.getComplexType(), c.inferHousingType(), c.getSido(),
-                c.getSigungu(), c.getDongRi(), c.getLegalDongAddress(), c.getLatitude(), c.getLongitude(),
+                c.getSigungu(), c.getDongRi(), legalDongCd, c.getLegalDongAddress(), c.getLatitude(), c.getLongitude(),
                 c.getLocationPrecision(), matchPending, matchMethod, basicInfo, extendedInfo);
     }
 }

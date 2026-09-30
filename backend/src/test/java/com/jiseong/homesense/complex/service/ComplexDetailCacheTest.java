@@ -19,6 +19,7 @@ import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.region.entity.LegalDistrictCode;
 import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
@@ -76,6 +77,24 @@ class ComplexDetailCacheTest {
         ComplexDetailResponse response = complexDetailCache.get(1L);
 
         assertThat(response.matchPending()).isTrue();
+        assertThat(response.legalDongCd()).isNull();
+    }
+
+    @Test
+    void get_법정동이_매칭되면_legalDongCd를_담는다() {
+        Complex matched = Complex.builder()
+                .complexId(2L)
+                .sourceComplexCd("SRC-2")
+                .complexName("테스트단지2")
+                .legalDistrictCode(LegalDistrictCode.builder().legalDongCd("4155025021").build())
+                .dataUpdatedAt(LocalDate.of(2026, 1, 1))
+                .build();
+        when(complexRepository.findById(2L)).thenReturn(Optional.of(matched));
+
+        ComplexDetailResponse response = complexDetailCache.get(2L);
+
+        assertThat(response.matchPending()).isFalse();
+        assertThat(response.legalDongCd()).isEqualTo("4155025021");
     }
 
     @Test
