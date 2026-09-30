@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ui/ToastProvider';
 import { AuthContext, type AuthContextValue, type AuthStatus } from '../../features/auth/authContext';
 import type { FavoritePropertySummaryResponse } from '../../features/favorite/types';
+import { advanceSessionGeneration, __resetSessionStateForTests } from '../../features/auth/session';
 import { useFavoriteToggle } from './useFavoriteToggle';
 
 // 다른 탭의 계정 변경으로 authenticated(A) → checking → authenticated(B)가 될 때, 확인 중에 미룬 하트 클릭이
@@ -224,6 +225,78 @@ describe('useFavoriteToggle — 실패 시 서버 문구와 재동기화', () =>
 
     await act(async () => pending.resolve({ favoritePropertyId: 100 }));
     await waitFor(() => expect(view.result.current.processingIds.has(10)).toBe(false));
+    expect(view.result.current.favoritedIds.has(10)).toBe(true);
+  });
+});
+
+// 계정 A에서 시작한 등록/해제·재동기화의 늦은 응답이 계정 B의 하트 상태를 덮어쓰지 않는지(Codex P2).
+describe('useFavoriteToggle — 다른 계정의 늦은 응답은 버린다', () => {
+  afterEach(() => {
+    __resetSessionStateForTests();
+  });
+
+  it('A에서 실패한 등록의 재동기화 응답이 B로 바뀐 뒤 오면 B의 하트 상태를 덮어쓰지 않는다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([]); // A 하이드레이션
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
+
+    api.addFavoriteProperty.mockRejectedValueOnce(serverError(409, 'DUPLICATE_FAVORITE', '이미 관심 매물로 등록된 단지입니다'));
+    const resyncA = deferred<FavoritePropertySummaryResponse[]>();
+    api.getFavoriteProperties.mockReturnValueOnce(resyncA.promise); // A 재동기화(붙잡음)
+    act(() => view.result.current.toggleFavorite(10));
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(2));
+
+    // 다른 탭이 B로 로그인 → 다시 확인 → B로 확정, B의 목록은 단지 20(favoritePropertyId 300).
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(20, 300)]);
+    act(() => view.setStatus('checking'));
+    act(() => view.setStatus('authenticated'));
+    await waitFor(() => expect(view.result.current.favoritedIds.has(20)).toBe(true));
+
+    // A의 재동기화 응답이 이제 도착한다.
+    await act(async () => resyncA.resolve([favorite(10, 100)]));
+
+    expect(view.result.current.favoritedIds.has(20)).toBe(true);
+    expect(view.result.current.favoritedIds.has(10)).toBe(false);
+  });
+
+  it('A에서 보낸 등록의 성공 응답이 B로 바뀐 뒤 오면 B의 하트 상태에 넣지 않는다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
+
+    const addA = deferred<{ favoritePropertyId: number }>();
+    api.addFavoriteProperty.mockReturnValueOnce(addA.promise);
+    act(() => view.result.current.toggleFavorite(10));
+
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+    act(() => view.setStatus('checking'));
+    act(() => view.setStatus('authenticated'));
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(2));
+
+    await act(async () => addA.resolve({ favoritePropertyId: 100 }));
+
+    expect(view.result.current.favoritedIds.has(10)).toBe(false);
+  });
+
+  it('상태 값이 그대로여도 세션 세대가 바뀌면 재동기화 응답을 버린다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
+
+    api.removeFavoriteProperty.mockRejectedValueOnce(serverError(404, 'FAVORITE_NOT_FOUND', '존재하지 않는 관심 등록입니다'));
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(10, 100)]); // 첫 클릭(등록 409)의 재동기화로 하트를 채운다
+    api.addFavoriteProperty.mockRejectedValueOnce(serverError(409, 'DUPLICATE_FAVORITE', '이미 관심 매물로 등록된 단지입니다'));
+    await act(async () => view.result.current.toggleFavorite(10));
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(true));
+
+    const resync = deferred<FavoritePropertySummaryResponse[]>();
+    api.getFavoriteProperties.mockReturnValueOnce(resync.promise);
+    act(() => view.result.current.toggleFavorite(10)); // 해제 실패 → 재동기화(붙잡음)
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(3));
+
+    advanceSessionGeneration(); // 로그인·로그아웃·다시 확인과 같은 세션 전환
+    await act(async () => resync.resolve([]));
+
     expect(view.result.current.favoritedIds.has(10)).toBe(true);
   });
 });

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ui/useToast';
 import { addFavoriteProperty, getFavoriteProperties, removeFavoriteProperty } from '../../features/favorite/api';
 import type { AuthStatus } from '../../features/auth/authContext';
+import { currentSessionGeneration } from '../../features/auth/session';
 import { useAuth } from '../../features/auth/useAuth';
 import { assertNever } from '../../lib/assertNever';
 import { getErrorMessage } from '../../lib/apiError';
@@ -58,9 +59,22 @@ export function useFavoriteToggle() {
   const inFlightRef = useRef<Set<number>>(new Set());
   const [processingIds, setProcessingIds] = useState<ReadonlySet<number>>(new Set());
   const statusRef = useRef(status);
+  // 인증 상태가 바뀔 때마다 올리는 번호. 등록/해제·재동기화는 시작할 때 이 번호와 세션 세대를 함께 잡아 두고,
+  // 응답이 왔을 때 둘 중 하나라도 바뀌었으면 하트 상태에 쓰지 않는다(Codex P2). 다른 탭의 계정 변경은
+  // authenticated(A) → checking → authenticated(B)로 가서 상태 값만 보면 A의 늦은 응답이 B의 하트를 덮어쓴다.
+  const statusEpochRef = useRef(0);
   useEffect(() => {
     statusRef.current = status;
+    statusEpochRef.current += 1;
   }, [status]);
+
+  /** 지금 계정 기준으로 시작한 작업의 결과를 아직 써도 되는지 판정하는 함수를 돌려준다. */
+  const captureAccount = useCallback(() => {
+    const epoch = statusEpochRef.current;
+    const generation = currentSessionGeneration();
+    return () =>
+      statusRef.current === 'authenticated' && statusEpochRef.current === epoch && currentSessionGeneration() === generation;
+  }, []);
 
   // 로그인 상태에서 마운트되거나(또는 로그인 직후 status가 authenticated로 바뀌면) 실제 등록된
   // 관심 매물 목록으로 하트 상태를 하이드레이트한다 — 이게 없으면 이미 등록된 단지도 새로고침 후
@@ -105,11 +119,13 @@ export function useFavoriteToggle() {
 
   // 등록/해제가 실패하면 서버의 실제 관심 목록으로 하트 상태를 다시 맞춘다. 409(이미 등록)나 다른 곳에서 이미
   // 해제된 경우처럼 화면과 서버가 어긋난 채 남지 않게 한다. 실패 원인(상태 코드)은 가리지 않는다.
-  const resyncFavorites = useCallback(async () => {
-    if (statusRef.current !== 'authenticated') return;
+  // 재조회는 실패한 요청을 시작한 계정이 그대로일 때만 하고, 응답이 온 시점에도 같을 때만 반영한다 — 계정이
+  // 바뀌었으면 새 계정의 하트 상태는 하이드레이션이 따로 채운다.
+  const resyncFavorites = useCallback(async (stillSameAccount: () => boolean) => {
+    if (!stillSameAccount()) return;
     try {
       const result = await getFavoriteProperties();
-      if (statusRef.current === 'authenticated') {
+      if (stillSameAccount()) {
         setFavorites(new Map(result.map((item) => [item.complexId, item.favoritePropertyId])));
       }
     } catch {
@@ -132,25 +148,30 @@ export function useFavoriteToggle() {
   const addFavorite = useCallback(
     (complexId: number) =>
       runExclusive(complexId, async () => {
+        const stillSameAccount = captureAccount();
         try {
           const result = await addFavoriteProperty(complexId);
+          // 응답 전에 계정이 바뀌었으면 A의 favoritePropertyId를 B의 하트 상태에 넣지 않는다.
+          if (!stillSameAccount()) return;
           setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
           showToast('관심 매물로 등록되었습니다.', 'success');
         } catch (error) {
           // 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출한다(AUTH-01 확립 관례). 다른 탭의 계정
           // 변경으로 요청을 보내지 않은 경우도 그 사실을 알린다(getErrorMessage). 이어서 서버 상태로 다시 맞춘다.
           showToast(getErrorMessage(error), 'error');
-          await resyncFavorites();
+          await resyncFavorites(stillSameAccount);
         }
       }),
-    [showToast, runExclusive, resyncFavorites],
+    [showToast, runExclusive, resyncFavorites, captureAccount],
   );
 
   const removeFavorite = useCallback(
     (complexId: number, favoritePropertyId: number) =>
       runExclusive(complexId, async () => {
+        const stillSameAccount = captureAccount();
         try {
           await removeFavoriteProperty(favoritePropertyId);
+          if (!stillSameAccount()) return;
           setFavorites((prev) => {
             const next = new Map(prev);
             next.delete(complexId);
@@ -159,10 +180,10 @@ export function useFavoriteToggle() {
           showToast('관심 매물에서 해제되었습니다.', 'success');
         } catch (error) {
           showToast(getErrorMessage(error), 'error');
-          await resyncFavorites();
+          await resyncFavorites(stillSameAccount);
         }
       }),
-    [showToast, runExclusive, resyncFavorites],
+    [showToast, runExclusive, resyncFavorites, captureAccount],
   );
 
   // 로그인 성공 후 이 페이지로 돌아왔을 때 대기 중인 하트 클릭을 정확히 한 번만 재생한다.
