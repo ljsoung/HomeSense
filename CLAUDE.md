@@ -2629,7 +2629,7 @@ SRCH-01 기존 61건 + `home01-card-check` 18건 + 이번 신규 6건, 회귀 �
 - **(b) BAT-SCH-01 활성화 전 확인 — 과거 계약월 재수집 범위와 upsert 갱신 필드.** 이력 표의 "등기 전"·"해제"는 `trade.registration_date`·`cancel_yn`·`cancel_date`에 달려 있다. 등기·해제는 계약보다 몇 주~몇 달 늦게 원천에 반영된다. **2026-09-30 코드로 확인한 사실:** (1) upsert SQL(`TradeRepository.upsert()`의 `ON DUPLICATE KEY UPDATE`)은 `cancel_yn`·`cancel_date`·`registration_date`·`apt_dong`을 갱신한다 — 다만 실 배치로 값이 실제로 바뀌는지는 검증하지 않았다. (2) **정규 배치는 이번 달만 수집한다**(`TradeCollectionScheduler`가 `orchestrate(YearMonth.now(KST))` 한 번 호출). 그래서 계약월이 지나간 뒤에 원천에 반영되는 등기·해제는 다시 받아오지 않는다 — 지금 구조로는 월말 전에 등기되지 않은 거래는 영원히 "등기 전", 달이 넘어간 뒤 해제된 거래는 영원히 "해제" 없이 남는다(Phase 0 실측: 매매 등기일자 NULL 비율이 2월 6% → 9월 94%, 최근 달일수록 높다). 활성화 전에 재수집 범위(예: 최근 N개월 재조회)를 정하고, 그 범위에서 upsert가 세 필드를 실제로 바꾸는지 실 배치로 확인한다.
 
 
-검증: vitest 64건(추가: `priceTrend.test.ts` 10건, `useFavoriteToggle.test.tsx` 실패 시 서버 문구·재동기화 2건과 진행 중 중복 클릭 1건 — 재동기화 호출을 빼면 2건 실패). e2e `dtl01-detail-check` 96/96(모킹 + 실 백엔드 360/768/1280, 세션 헤더·최근 조회 기록·360px 푸터 검사 포함). `tsc -b`, `eslint`(기존 경고 3건), `npm run build` 통과(번들 596kB로 청크 크기 경고 — develop부터 있던 경고, 위 행).
+검증: vitest 64건(추가: `priceTrend.test.ts` 10건, `useFavoriteToggle.test.tsx` 실패 시 서버 문구·재동기화 2건과 진행 중 중복 클릭 1건 — 재동기화 호출을 빼면 2건 실패). e2e `dtl01-detail-check` 101/101(모킹 + 실 백엔드 360/768/1280, 세션 헤더·최근 조회 기록·360px 푸터 검사 포함). 거래상세 모달은 360×640에서 항목이 가장 많은 매매 거래(동·등기일자·해제·토지임대부)로 열어 본문이 넘치는 상태에서 "닫기" 버튼이 스크롤 영역 밖에 있고 연 직후 뷰포트 안인지 검사한다 — 버튼을 스크롤 영역 안으로 옮기면 2건 실패한다(변형 검증, 2026-10-01). `tsc -b`, `eslint`(기존 경고 3건), `npm run build` 통과(번들 596kB로 청크 크기 경고 — develop부터 있던 경고, 위 행).
 
 ### 배포(Vercel) — SPA 클라이언트 라우팅 rewrite
 

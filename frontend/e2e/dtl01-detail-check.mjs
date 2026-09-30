@@ -326,6 +326,54 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
   await context.close();
 }
 
+// 6-1) 360px 거래상세 모달: 항목이 가장 많은 매매 거래(동·등기일자·해제·토지임대부 모두 있음)에서 본문만 스크롤되고
+// "닫기" 버튼은 스크롤 영역 밖에 고정돼 연 직후 스크롤 없이 보인다. 높이 640px로 본문이 실제로 넘치게 한다.
+{
+  const { context, page } = await newPage(360, 640);
+  await mock(page, {
+    tradeDetail: (id) =>
+      envelope({
+        tradeId: id,
+        dealDate: ymd(0, 20),
+        excluUseArea: 84.98,
+        floor: 5,
+        aptDong: '101동',
+        aptDongPending: false,
+        dealCategory: 'SALE',
+        dealAmount: 50000,
+        dealingType: 'AGENT',
+        sellerType: '개인',
+        buyerType: '법인',
+        registrationDate: ymd(0, 25),
+        isCancelled: true,
+        cancelDate: ymd(0, 28),
+        landLeaseYn: true,
+      }),
+  });
+  await page.goto(`${BASE}/complexes/${MOCK_ID}`);
+  await page.locator('tbody tr').first().waitFor();
+  await page.locator('tbody tr').first().click();
+  const dialog = page.getByRole('dialog', { name: '거래 상세' });
+  await dialog.getByText('해제', { exact: true }).waitFor();
+  const layout = await dialog.evaluate((el) => {
+    const button = [...el.querySelectorAll('button')].find((b) => b.textContent.trim() === '닫기');
+    const scroller = [...el.querySelectorAll('*')].find((n) => ['auto', 'scroll'].includes(getComputedStyle(n).overflowY));
+    const rect = button?.getBoundingClientRect();
+    return {
+      inViewport: Boolean(rect) && rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth,
+      outsideScroller: Boolean(button && scroller) && !scroller.contains(button),
+      overflows: Boolean(scroller) && scroller.scrollHeight > scroller.clientHeight,
+      scrollTop: scroller?.scrollTop ?? -1,
+    };
+  });
+  ok('360 모달: 본문이 넘쳐 스크롤 영역이 생김(검사 전제)', layout.overflows);
+  ok('360 모달: 닫기 버튼이 스크롤 영역 밖', layout.outsideScroller);
+  ok('360 모달: 연 직후 닫기 버튼이 뷰포트 안(스크롤 0)', layout.inViewport && layout.scrollTop === 0);
+  await dialog.getByRole('button', { name: '닫기' }).click();
+  ok('360 모달: 닫기 버튼으로 닫힘', (await page.getByRole('dialog').count()) === 0);
+  await context.close();
+}
+
 // 7) SIMILAR / matchMethod null / matchPending / ?deal= 잘못된 값 / 추이 부족
 {
   const { context, page } = await newPage(360, 780);
