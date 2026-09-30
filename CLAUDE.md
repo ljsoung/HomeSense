@@ -1141,6 +1141,29 @@ keyword 필터, rentType 추가)와 처리 로직(검색 기록 제거). 3.11절
 호출한 결과: 수원시 장안구(4111100000) 82건, 수원시(4111000000) 392건, 안성시(4155000000) 80건, 경기도
 4,781건, 세종 172건, 리(4155025021) 3건, 영동군 5건, 폐지 코드(2811000000) 0건.
 
+### DTL-01 백엔드 보강 (2026-09-30, `feature/backend/complex-detail-support`)
+
+SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 쓴 문서: `docs/specs/`가 아직 없어 UI정의서 v2.1.1, 프로그램설계서 v2.1.1(Downloads 사본)을 썼다.
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| **`TradeResponse.cancelDate` 추가(API-TRD-01)** | 이력 목록 항목에 해제사유발생일(`cancel_date`)을 싣는다. 해제되지 않았거나 전월세면 null이고, `non_null` 직렬화라 JSON에서 키가 빠진다 | UI정의서 5.3절 예외 처리표가 이력 테이블 행에 "해제" 라벨과 해제사유발생일을 요구한다. 전에는 상세(`TradeDetailResponse`)에만 있었다. 이력 조회는 캐시를 적용하지 않아 캐시 버전업이 필요 없다 | — |
+| **`ComplexDetailResponse.matchMethod` 추가(SVC-CPX-01), 캐시 `complexDetailV3`** | 정밀/근사 배지용으로 대표 거래(취소되지 않은 가장 최근 거래, `TradeRepository.findRecentTradesByComplexIds`)의 `match_method`를 싣는다. 대표 거래가 없으면 null(배지 생략). 조회는 `ComplexDetailCache.get()` 안에서 하고 결과를 함께 캐시한다. DTO 필드가 늘어 캐시 이름을 V3로 올렸다 | `match_method`는 `trade` 컬럼이라 단지에는 값이 없다. 카드(`ComplexSummaryResponse`)가 대표 거래의 값으로 배지를 정하므로 같은 선정 함수를 쓴다. 거래 적재 시 BAT-LOD-01이 이 캐시 항목을 이미 evict하므로 대표 거래가 바뀌어도 오래된 배지가 남지 않는다 | **SRCH-01과 정확히 같은 값은 아니다:** SRCH-01 카드의 대표 거래는 검색 필터(기본 매매)를 만족하는 최신 거래라, 같은 단지라도 선택한 거래유형에 따라 배지가 다를 수 있다. 상세는 필터 없는 대표 거래(HOME-01 인기 단지·관심 매물과 같은 규칙)를 쓴다. 상세 배지를 거래유형 탭에 맞추기로 하면 이 결정을 다시 본다 |
+| 최근 조회 기록(캐시 히트 시) | 변경 없음 — `record()`는 이미 캐시 빈 밖(`ComplexService.getDetail()`)에서 호출된다 | SVC-RCV-01 절 참고 | — |
+
+**보고만 하고 고치지 않은 불일치(DTL-01 명세가 허용한 보강 범위 밖):**
+- `TradeResponse`에 거래유형(`dealingType`, 중개/직거래)이 없다 — 매매 이력 테이블의 "거래유형" 열을 채울 수 없다(상세 모달에는 있다).
+- `ComplexDetailResponse`에 `legalDongCd`가 없다 — 브레드크럼의 시도·시군구 지역 검색 링크를 만들 수 없어 일반 텍스트가 된다.
+- 중개사 소재지(`estateAgentSggNm`)는 수집·저장하지 않는다(`trade`에 컬럼 없음) — 거래상세 모달의 "거래유형 + 중개사 소재지" 중 뒤쪽을 표시할 수 없다.
+- 상세정보 28개 필드를 6개 그룹으로 나누는 매핑이 어느 문서에도 없다 — 프론트가 그룹 이름을 기준으로 정한다.
+
+검증: `./gradlew test` 630건, `./gradlew integrationTest` 88건 전부 통과. `ComplexDetailCacheTest`(대표 거래 있음 → 그 matchMethod, 없음 → null), `TradeServiceTest`·`TradeControllerTest`(cancelDate 전달·JSON). 로컬 백엔드 스모크: 단지 1의 matchMethod가 첫 호출·캐시 히트 모두 `SIMILAR`, 단지 14894 매매 이력의 해제 건(trade 391755)에 `cancelDate` 2026-09-17.
+
+### 프로그램설계서 반영 필요 (문서 반영은 claude.ai에서)
+
+- 3.3절 SVC-CPX-01 `getDetail()` 응답: `matchMethod`(대표 거래 기준) 추가, 캐시 이름 `complexDetailV3`(2026-09-30).
+- 3.4절 SVC-TRD-01 `getHistory()` 응답 `TradeResponse`: `cancelDate` 추가(2026-09-30).
+
 ### 외부연동 설정(COM-CFG-01)
 프로그램 설계서는 `ExternalApiProperties` 하나에 `getDataGoKrServiceKey()`/`getKakaoApiKey()`/`getJwtSecret()` 세 메서드를 두는 단일 클래스로 정의하지만, 실제 구현은 이미 각 도메인이 소유한 `@ConfigurationProperties` 레코드로 나뉘어 있습니다 — 설계서보다 먼저 BAT-CLC-01(`DataGoKrProperties`)과 COM-SEC-01/02(`JwtProperties`)가 구현되며 이미 굳어진 구조라, COM-CFG-01 시점에 하나로 합치지 않고 그대로 두었습니다. 새로 코드를 짤 때는 이 구조를 따르세요.
 
@@ -1159,7 +1182,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 
 | 캐시 키 | 적용 대상 |
 | --- | --- |
-| `complexDetailV2::{complexId}` | 단지 상세 조회 |
+| `complexDetailV3::{complexId}` | 단지 상세 조회(V3: matchMethod 추가, 2026-09-30) |
 | `popularComplexesV3::{limit}` | 인기 단지 목록(V3: rentType·monthlyRentAmount 추가, 2026-09-23) |
 | `regionAutocomplete::{query}` | 지역 자동완성 |
 | `popularKeywords::{limit}` | 인기 검색어(TTL 1시간) |
@@ -1174,7 +1197,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 
 | 캐시 | 무효화 이벤트 | 발행 주체 | 주기 |
 | --- | --- | --- | --- |
-| `complexDetailV2::{complexId}` | `TradeCacheEvictionEvent` | BAT-LOD-01(`TradeDataLoader`) | 일 1회 이상 |
+| `complexDetailV3::{complexId}` | `TradeCacheEvictionEvent` | BAT-LOD-01(`TradeDataLoader`) | 일 1회 이상 |
 | `popularComplexes` | `TradeCacheEvictionEvent` (전체 evict) | BAT-LOD-01(`TradeDataLoader`) | 일 1회 이상 |
 | `regionAutocomplete` | `LegalDistrictCodeReloadedEvent` (전체 evict) | BAT-MAT-01(`LegalDistrictCodeLoader`) | 비정기(CSV 재적재 시에만) |
 
