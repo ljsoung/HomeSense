@@ -7,6 +7,7 @@ import { ToastProvider } from '../../components/ui/ToastProvider';
 import { AuthContext, type AuthContextValue, type AuthStatus } from '../../features/auth/authContext';
 import type { FavoritePropertySummaryResponse } from '../../features/favorite/types';
 import { advanceSessionGeneration, __resetSessionStateForTests } from '../../features/auth/session';
+import { SessionAccountChangedError } from '../../lib/apiError';
 import { useFavoriteToggle } from './useFavoriteToggle';
 
 // 다른 탭의 계정 변경으로 authenticated(A) → checking → authenticated(B)가 될 때, 확인 중에 미룬 하트 클릭이
@@ -38,10 +39,12 @@ function favorite(complexId: number, favoritePropertyId: number): FavoriteProper
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function renderWithStatus(initial: AuthStatus) {
@@ -259,7 +262,7 @@ describe('useFavoriteToggle — 다른 계정의 늦은 응답은 버린다', ()
     expect(view.result.current.favoritedIds.has(10)).toBe(false);
   });
 
-  it('A에서 보낸 등록의 성공 응답이 B로 바뀐 뒤 오면 B의 하트 상태에 넣지 않는다', async () => {
+  it('A에서 보낸 등록의 성공 응답이 B로 바뀐 뒤 오면 B의 하트 상태에 넣지 않고, 토스트 없이 진행 중 표시만 푼다', async () => {
     api.getFavoriteProperties.mockResolvedValueOnce([]);
     const view = renderWithStatus('authenticated');
     await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
@@ -267,6 +270,7 @@ describe('useFavoriteToggle — 다른 계정의 늦은 응답은 버린다', ()
     const addA = deferred<{ favoritePropertyId: number }>();
     api.addFavoriteProperty.mockReturnValueOnce(addA.promise);
     act(() => view.result.current.toggleFavorite(10));
+    expect(view.result.current.processingIds.has(10)).toBe(true);
 
     api.getFavoriteProperties.mockResolvedValueOnce([]);
     act(() => view.setStatus('checking'));
@@ -276,6 +280,75 @@ describe('useFavoriteToggle — 다른 계정의 늦은 응답은 버린다', ()
     await act(async () => addA.resolve({ favoritePropertyId: 100 }));
 
     expect(view.result.current.favoritedIds.has(10)).toBe(false);
+    // B 화면에서 그 하트는 다시 누를 수 있다(비활성 아님).
+    await waitFor(() => expect(view.result.current.processingIds.has(10)).toBe(false));
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+  });
+
+  it('A에서 보낸 해제의 성공 응답이 B로 바뀐 뒤 오면 B의 하트를 지우지 않고, 토스트 없이 진행 중 표시만 푼다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(10, 100)]); // A: 단지 10 찜
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(true));
+
+    const removeA = deferred<void>();
+    api.removeFavoriteProperty.mockReturnValueOnce(removeA.promise);
+    act(() => view.result.current.toggleFavorite(10));
+    expect(api.removeFavoriteProperty).toHaveBeenCalledWith(100);
+
+    // B도 단지 10을 찜해 둔 계정(favoritePropertyId 300).
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(10, 300)]);
+    act(() => view.setStatus('checking'));
+    act(() => view.setStatus('authenticated'));
+    await waitFor(() => expect(view.result.current.favoritedIds.has(10)).toBe(true));
+
+    await act(async () => removeA.resolve());
+
+    expect(view.result.current.favoritedIds.has(10)).toBe(true);
+    await waitFor(() => expect(view.result.current.processingIds.has(10)).toBe(false));
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+
+    // B 화면에서 누르면 B의 favoritePropertyId로 해제한다.
+    act(() => view.result.current.toggleFavorite(10));
+    expect(api.removeFavoriteProperty).toHaveBeenLastCalledWith(300);
+  });
+
+  it('A에서 보낸 등록의 실패 응답이 B로 바뀐 뒤 오면 실패 토스트도 재동기화도 없이 진행 중 표시만 푼다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
+
+    const addA = deferred<{ favoritePropertyId: number }>();
+    api.addFavoriteProperty.mockReturnValueOnce(addA.promise);
+    act(() => view.result.current.toggleFavorite(10));
+
+    api.getFavoriteProperties.mockResolvedValueOnce([favorite(20, 300)]);
+    act(() => view.setStatus('checking'));
+    act(() => view.setStatus('authenticated'));
+    await waitFor(() => expect(view.result.current.favoritedIds.has(20)).toBe(true));
+
+    await act(async () => addA.reject(serverError(409, 'DUPLICATE_FAVORITE', '이미 관심 매물로 등록된 단지입니다')));
+
+    await waitFor(() => expect(view.result.current.processingIds.has(10)).toBe(false));
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+    expect(api.getFavoriteProperties).toHaveBeenCalledTimes(2); // 재동기화 없음
+    expect(view.result.current.favoritedIds.has(20)).toBe(true);
+  });
+
+  it('요청을 보내지 않은 인터셉터 거절(계정 변경)은 세대가 바뀌었어도 안내 토스트를 보이고 재동기화하지 않는다', async () => {
+    api.getFavoriteProperties.mockResolvedValueOnce([]);
+    const view = renderWithStatus('authenticated');
+    await waitFor(() => expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1));
+
+    // 실제 인터셉터는 거절하면서 다시 확인(세대 증가)을 시작한다.
+    api.addFavoriteProperty.mockImplementationOnce(async () => {
+      advanceSessionGeneration();
+      throw new SessionAccountChangedError();
+    });
+    await act(async () => view.result.current.toggleFavorite(10));
+
+    expect(await screen.findByText(new SessionAccountChangedError().message)).toBeTruthy();
+    expect(api.getFavoriteProperties).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(view.result.current.processingIds.has(10)).toBe(false));
   });
 
   it('상태 값이 그대로여도 세션 세대가 바뀌면 재동기화 응답을 버린다', async () => {

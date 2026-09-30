@@ -6,7 +6,7 @@ import type { AuthStatus } from '../../features/auth/authContext';
 import { currentSessionGeneration } from '../../features/auth/session';
 import { useAuth } from '../../features/auth/useAuth';
 import { assertNever } from '../../lib/assertNever';
-import { getErrorMessage } from '../../lib/apiError';
+import { getErrorMessage, SessionAccountChangedError, SessionNotConfirmedError } from '../../lib/apiError';
 
 const PENDING_FAVORITE_KEY = 'homesense.pendingFavoriteComplexId';
 
@@ -133,6 +133,8 @@ export function useFavoriteToggle() {
     }
   }, []);
 
+  // 진행 중 표시는 결과를 쓰든 버리든 finally에서 반드시 푼다 — 다른 계정으로 바뀌어 응답을 버린 뒤에도 새 계정
+  // 화면에서 그 단지의 하트가 비활성으로 남지 않는다. 폐기는 task 안의 이른 return이라 이 finally를 그대로 지난다.
   const runExclusive = useCallback(async (complexId: number, task: () => Promise<void>) => {
     if (inFlightRef.current.has(complexId)) return;
     inFlightRef.current.add(complexId);
@@ -145,24 +147,37 @@ export function useFavoriteToggle() {
     }
   }, []);
 
+  // 등록/해제 실패 처리. 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출하고(AUTH-01 확립 관례)
+  // 서버 상태로 다시 맞춘다. 단, 응답이 도착했을 때 계정이 바뀌었으면 그 응답은 이전 계정의 것이라 토스트도
+  // 재동기화도 하지 않는다(새 계정 화면에 이전 계정의 결과를 알리지 않는다). 예외: 요청을 아예 보내지 않은
+  // 인터셉터 거절(SessionAccountChangedError·SessionNotConfirmedError)은 방금 누른 클릭이 처리되지 않았다는
+  // 안내라 계정이 바뀌었어도 보인다 — 계정 변경 거절은 그 자체가 다시 확인(세대 증가)을 시작하므로, 계정
+  // 판정으로 걸러 버리면 사용자가 클릭이 무시된 이유를 알 수 없다(탭 계정 동기화 절).
+  const reportFailure = useCallback(
+    async (error: unknown, stillSameAccount: () => boolean) => {
+      const refusedBeforeSending = error instanceof SessionAccountChangedError || error instanceof SessionNotConfirmedError;
+      if (!refusedBeforeSending && !stillSameAccount()) return;
+      showToast(getErrorMessage(error), 'error');
+      await resyncFavorites(stillSameAccount);
+    },
+    [showToast, resyncFavorites],
+  );
+
   const addFavorite = useCallback(
     (complexId: number) =>
       runExclusive(complexId, async () => {
         const stillSameAccount = captureAccount();
         try {
           const result = await addFavoriteProperty(complexId);
-          // 응답 전에 계정이 바뀌었으면 A의 favoritePropertyId를 B의 하트 상태에 넣지 않는다.
+          // 응답 전에 계정이 바뀌었으면 A의 favoritePropertyId를 B의 하트 상태에 넣지 않고 성공 토스트도 띄우지 않는다.
           if (!stillSameAccount()) return;
           setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
           showToast('관심 매물로 등록되었습니다.', 'success');
         } catch (error) {
-          // 409(DuplicateFavoriteException) 등 서버 메시지를 그대로 노출한다(AUTH-01 확립 관례). 다른 탭의 계정
-          // 변경으로 요청을 보내지 않은 경우도 그 사실을 알린다(getErrorMessage). 이어서 서버 상태로 다시 맞춘다.
-          showToast(getErrorMessage(error), 'error');
-          await resyncFavorites(stillSameAccount);
+          await reportFailure(error, stillSameAccount);
         }
       }),
-    [showToast, runExclusive, resyncFavorites, captureAccount],
+    [showToast, runExclusive, reportFailure, captureAccount],
   );
 
   const removeFavorite = useCallback(
@@ -179,11 +194,10 @@ export function useFavoriteToggle() {
           });
           showToast('관심 매물에서 해제되었습니다.', 'success');
         } catch (error) {
-          showToast(getErrorMessage(error), 'error');
-          await resyncFavorites(stillSameAccount);
+          await reportFailure(error, stillSameAccount);
         }
       }),
-    [showToast, runExclusive, resyncFavorites, captureAccount],
+    [showToast, runExclusive, reportFailure, captureAccount],
   );
 
   // 로그인 성공 후 이 페이지로 돌아왔을 때 대기 중인 하트 클릭을 정확히 한 번만 재생한다.
