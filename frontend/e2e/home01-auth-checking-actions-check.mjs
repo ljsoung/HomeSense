@@ -111,7 +111,8 @@ const checkingHeaderEmpty = async (page) =>
   await context.close();
 }
 
-// 2) 이미 찜한 단지 — 판정 직후가 아니라 하트 상태를 불러온 뒤에 처리해 해제(DELETE)한다.
+// 2) 이미 찜한 단지 — 확인 중에는 하트가 비어 보이므로 그 클릭은 "등록" 의도다. 하트 상태를 불러온 뒤 이미
+//    등록돼 있으면 요청을 보내지 않는다(토글로 재생하면 사용자가 본 적 없는 해제 요청이 나갔다).
 {
   const account = await createAccount('b');
   const complexId = popular[0].complexId;
@@ -124,14 +125,16 @@ const checkingHeaderEmpty = async (page) =>
   const { complexId: shownId } = await firstVisibleHeart(page);
   ok('이미 찜함: 첫 카드가 사전 등록한 단지', shownId === complexId);
   ok('이미 찜함: 클릭 시점에 세션 확인 중', await checkingHeaderEmpty(page));
+  ok('이미 찜함: 클릭 순간 하트는 비어 보임(aria-pressed=false)', (await target.getAttribute('aria-pressed')) === 'false');
   await target.click();
   ok('이미 찜함: 확인 중 클릭 직후 대기 표시', await isBusy(target));
   await page.waitForTimeout(REFRESH_DELAY_MS + 1500);
   ok('이미 찜함: 처리 후 대기 표시 사라짐', (await busyCount(page)) === 0);
-  ok('이미 찜함: 해제 요청(DELETE)이 정확히 1회, 등록(POST) 시도 없음', JSON.stringify(favoriteCalls.map((c) => c.method)) === '["DELETE"]');
+  ok('이미 찜함: 등록·해제 요청 모두 없음(이미 의도한 상태)', favoriteCalls.length === 0);
   const [access] = await page.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [ACCESS_KEY, REFRESH_KEY]);
   const favorites = (await (await api('/api/favorites/properties', access)).json()).data ?? [];
-  ok('이미 찜함: 서버에서 관심 매물 해제됨', !favorites.some((f) => f.complexId === complexId));
+  ok('이미 찜함: 서버에 관심 매물이 그대로 등록돼 있음', favorites.some((f) => f.complexId === complexId));
+  ok('이미 찜함: 하트가 채워짐', (await target.getAttribute('aria-pressed')) === 'true');
   ok('이미 찜함: 오류 토스트 없음', (await page.getByRole('status').filter({ hasText: '이미' }).count()) === 0);
   ok('pageerror 없음(이미 찜함)', errors.length === 0);
   await context.close();

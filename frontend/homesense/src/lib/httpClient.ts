@@ -7,6 +7,11 @@ declare module 'axios' {
     _authRetried?: boolean;
     /** 재시도에 실을 Access Token. 복구 단계가 계정 일치를 확인한 바로 그 토큰이다(저장소를 다시 읽지 않는다). */
     _retryAccessToken?: string;
+    /**
+     * 어느 계정의 토큰으로 가도 결과가 같은 요청(예: 인기 검색어 집계용 검색 기록 — search_log에 회원 컬럼이 없다).
+     * 로그인 계정을 확정하지 않은 탭에서도 요청 방어가 막지 않는다(features/auth/session.ts `checkRequestAccount`).
+     */
+    _accountIndependent?: boolean;
   }
 }
 
@@ -30,20 +35,31 @@ export const httpClient = axios.create({
   },
 });
 
+let checkRequestToken: ((accessToken: string, config: InternalAxiosRequestConfig) => void) | null = null;
+
+/**
+ * 토큰을 싣기 직전에 부를 검사를 등록한다(features/auth/session.ts). 검사가 예외를 던지면 요청을 보내지 않고
+ * 그 예외로 거절한다. httpClient가 인증 모듈을 직접 import하지 않도록 등록 방식으로 연결한다(순환 의존 방지).
+ */
+export function setRequestTokenCheck(check: typeof checkRequestToken): void {
+  checkRequestToken = check;
+}
+
 /**
  * 저장된 accessToken을 요청마다 싣는다. 백엔드는 토큰이 없어도 요청을 차단하지 않으므로(CLAUDE.md 인증 절)
- * 비로그인 전용 엔드포인트에도 해가 없다. 재시도 요청도 이 인터셉터를 다시 거쳐 저장소의 새 토큰을 싣는다.
+ * 비로그인 전용 엔드포인트에도 해가 없다. 재시도 요청은 복구 단계가 계정을 확인한 토큰(`_retryAccessToken`)을 싣는다.
  */
 httpClient.interceptors.request.use((config) => {
   const accessToken = config._retryAccessToken ?? tokenStorage.getAccessToken();
   if (accessToken) {
+    checkRequestToken?.(accessToken, config);
     config.headers.set('Authorization', `Bearer ${accessToken}`);
   }
   return config;
 });
 
 /** 인증 엔드포인트(AuthController, `/api/auth/**`)는 재발급 대상에서 뺀다 — 재발급 호출 자체의 재귀도 이것으로 막힌다. */
-function isAuthEndpoint(url: string | undefined): boolean {
+export function isAuthEndpoint(url: string | undefined): boolean {
   return url !== undefined && url.startsWith('/api/auth/');
 }
 

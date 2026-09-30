@@ -35,11 +35,21 @@ export function InterestRegionSummary() {
   // 개인화 API는 로그인이 확인된 뒤에만 부른다 — 확인 중(checking)에 부르면 옛 토큰으로 401을 받고, 비로그인에
   // 부르는 것은 불필요한 401이다.
   useEffect(() => {
-    if (status !== 'authenticated') {
-      return;
-    }
     let cancelled = false;
     const load = async () => {
+      switch (status) {
+        case 'checking':
+        case 'anonymous':
+          // 이전 계정의 요약을 버린다. 다른 탭의 계정 변경으로 authenticated(A) → checking →
+          // authenticated(B)가 되면, B로 확정된 첫 렌더에 A의 관심 지역이 잠깐 보였다(loading이 false로 남아 있었다).
+          setRegions(null);
+          setLoading(true);
+          return;
+        case 'authenticated':
+          break;
+        default:
+          assertNever(status);
+      }
       setLoading(true);
       try {
         const result = await getInterestSummary();

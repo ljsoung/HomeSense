@@ -17,7 +17,9 @@ export async function getPopularKeywords(limit: number): Promise<PopularKeywordR
  */
 export async function logSearch(keyword: string): Promise<void> {
   try {
-    await httpClient.post('/api/search/logs', { keyword });
+    // 검색 기록은 회원과 연결되지 않아(search_log에 회원 컬럼 없음) 어느 계정의 토큰이든 결과가 같다 — 탭이 로그인
+    // 계정을 확정하기 전(확인 중)에 검색해도 요청 방어가 막지 않게 표시한다.
+    await httpClient.post('/api/search/logs', { keyword }, { _accountIndependent: true });
   } catch {
     // 로깅 실패는 검색 자체에 영향을 주면 안 된다 — 조용히 무시한다.
   }
