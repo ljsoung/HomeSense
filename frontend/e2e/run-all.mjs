@@ -42,6 +42,8 @@ const SCRIPTS = [
   'auth-tab-account-sync-check',
   // 서버 로그아웃이 멈춰도 로컬 로그아웃이 제한 시간 안에 끝나는지. 실 백엔드+Redis 필요.
   'home01-logout-hang-check',
+  // DTL-01 단지 상세 — 모킹 시나리오 + 실 백엔드 스모크(360/768/1280). 실 백엔드 필요(REAL_ID, 기본 10059).
+  'dtl01-detail-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;

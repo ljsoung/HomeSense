@@ -6,7 +6,8 @@ const HOUSING_TYPE_LABEL: Record<HousingType, string> = {
 };
 
 interface DataTrustBadgeProps {
-  housingType: HousingType;
+  /** 단지 상세(DTL-01)는 complex_type이 비어 유형을 정할 수 없는 단지가 있다 — 없으면 유형 배지를 그리지 않는다. */
+  housingType?: HousingType | null;
   /**
    * UI정의서 4.9절의 정밀(EXACT)/근사(SIMILAR) 배지 — matchMethod가 null(매칭 실패)이면 렌더링하지
    * 않는다. `undefined`도 함께 받아들이는 이유는 소비자가 `complex.matchMethod ?? undefined`처럼
@@ -19,9 +20,11 @@ interface DataTrustBadgeProps {
 export function DataTrustBadge({ housingType, matchMethod }: DataTrustBadgeProps) {
   return (
     <div className="flex items-center gap-1">
-      <span className="rounded-full bg-[#d1eae6] px-2 py-0.5 text-[10px] font-semibold tracking-[0.25px] text-[#0b4a43]">
-        {HOUSING_TYPE_LABEL[housingType]}
-      </span>
+      {housingType && (
+        <span className="rounded-full bg-[#d1eae6] px-2 py-0.5 text-[10px] font-semibold tracking-[0.25px] text-[#0b4a43]">
+          {HOUSING_TYPE_LABEL[housingType]}
+        </span>
+      )}
       {matchMethod && (
         <span
           className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
