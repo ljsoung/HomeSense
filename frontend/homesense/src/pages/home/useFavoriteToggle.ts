@@ -53,7 +53,12 @@ export function useFavoriteToggle() {
     const load = async () => {
       switch (status) {
         case 'checking':
-          return; // 판정이 나기 전에는 채우지 않는다.
+          // 판정이 나기 전에는 채우지 않고, 이전 판정 기준의 하트 상태도 버린다. 다른 탭의 계정 변경으로
+          // authenticated(A) → checking → authenticated(B)가 되면 hydratedFor가 'authenticated' 그대로라,
+          // 확인 중에 미룬 클릭이 B의 목록을 받기 전에 A의 하트 상태로 등록/해제를 B 토큰으로 보냈다.
+          setFavorites(new Map());
+          setHydratedFor(null);
+          return;
         case 'anonymous':
           setFavorites(new Map());
           setHydratedFor('anonymous');
