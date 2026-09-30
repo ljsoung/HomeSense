@@ -1150,19 +1150,22 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 | **`TradeResponse.cancelDate` 추가(API-TRD-01)** | 이력 목록 항목에 해제사유발생일(`cancel_date`)을 싣는다. 해제되지 않았거나 전월세면 null이고, `non_null` 직렬화라 JSON에서 키가 빠진다 | UI정의서 5.3절 예외 처리표가 이력 테이블 행에 "해제" 라벨과 해제사유발생일을 요구한다. 전에는 상세(`TradeDetailResponse`)에만 있었다. 이력 조회는 캐시를 적용하지 않아 캐시 버전업이 필요 없다 | — |
 | **`ComplexDetailResponse.matchMethod` 추가(SVC-CPX-01), 캐시 `complexDetailV3`** | 정밀/근사 배지용으로 대표 거래(취소되지 않은 가장 최근 거래, `TradeRepository.findRecentTradesByComplexIds`)의 `match_method`를 싣는다. 대표 거래가 없으면 null(배지 생략). 조회는 `ComplexDetailCache.get()` 안에서 하고 결과를 함께 캐시한다. DTO 필드가 늘어 캐시 이름을 V3로 올렸다 | `match_method`는 `trade` 컬럼이라 단지에는 값이 없다. 카드(`ComplexSummaryResponse`)가 대표 거래의 값으로 배지를 정하므로 같은 선정 함수를 쓴다. 거래 적재 시 BAT-LOD-01이 이 캐시 항목을 이미 evict하므로 대표 거래가 바뀌어도 오래된 배지가 남지 않는다 | **SRCH-01과 정확히 같은 값은 아니다:** SRCH-01 카드의 대표 거래는 검색 필터(기본 매매)를 만족하는 최신 거래라, 같은 단지라도 선택한 거래유형에 따라 배지가 다를 수 있다. 상세는 필터 없는 대표 거래(HOME-01 인기 단지·관심 매물과 같은 규칙)를 쓴다. 상세 배지를 거래유형 탭에 맞추기로 하면 이 결정을 다시 본다 |
 | 최근 조회 기록(캐시 히트 시) | 변경 없음 — `record()`는 이미 캐시 빈 밖(`ComplexService.getDetail()`)에서 호출된다 | SVC-RCV-01 절 참고 | — |
+| **`TradeResponse.dealingType` 추가(API-TRD-01, 지성 결정)** | 이력 목록 항목에 거래유형을 싣는다. 값은 BAT-PRS-01(`TradeFieldMapper`)이 정규화한 코드 `AGENT`(중개거래)/`DIRECT`(직거래)이고(2026-09-30 로컬 DB: 매매 73,522건 중 AGENT 68,063·DIRECT 5,459, null 0), 전월세는 원천에 없어 null(키 생략). 화면 문구로 바꾸는 것은 프론트가 한다 | 매매 이력 테이블의 "거래유형" 열(UI정의서 5.3절)을 채우려면 목록 응답에 있어야 한다. 전에는 상세(`TradeDetailResponse`)에만 있었다 | BAT-PRS-01이 코드 체계를 바꾸면 프론트 라벨 매핑도 함께 바꾼다 |
+| **`ComplexDetailResponse.legalDongCd` 추가(SVC-CPX-01, 지성 결정)** | 단지의 법정동코드(10자리)를 싣는다. 매칭 대기 단지(`matchPending=true`)는 null(키 생략). 지연 로딩 프록시의 식별자만 읽어 추가 쿼리가 없다. 같은 브랜치에서 이미 `complexDetailV3`로 올려 추가 버전업은 없다 | 브레드크럼의 시도(앞 2자리)·시군구(앞 5자리)를 SRCH-01 지역 검색(`regionCode`) 링크로 만든다 | — |
+| **상세정보 6그룹 매핑(지성 확정, 합계 28)** | 분양/세대구성(6): `supply_type`·`sale_household_count`·`rental_household_count`·`public_rental_count`·`private_rental_count`·`developer` / 관리방식(2): `management_type`·`management_company` / 승강기(3): `elevator_passenger_count`·`elevator_cargo_count`·`elevator_combined_count` / 주차/전기차(6): `ground_parking_count`·`underground_parking_count`·`ev_charger_ground_yn`·`ev_charger_underground_yn`·`ev_parking_ground_count`·`ev_parking_underground_count` / 보안/편의시설(4): `cctv_count`·`home_network_yn`·`community_facilities`·`resident_amenities` / 관리사무소 및 건물구조(7): `office_address`·`office_phone`·`corridor_type`·`building_structure`·`heating_type`·`highest_floor_registered`·`basement_floor_count` | 어느 문서에도 매핑이 없었다. `ExtendedInfo` 28개 필드·`complex` DDL 컬럼과 대조해 빠지거나 겹치는 것이 없음을 확인했다(2026-09-30). Figma는 5그룹·샘플 라벨이라 디자인과 다르다 | `ExtendedInfo`에 필드를 더하거나 빼면 이 매핑을 다시 정한다 |
 
-**보고만 하고 고치지 않은 불일치(DTL-01 명세가 허용한 보강 범위 밖):**
-- `TradeResponse`에 거래유형(`dealingType`, 중개/직거래)이 없다 — 매매 이력 테이블의 "거래유형" 열을 채울 수 없다(상세 모달에는 있다).
-- `ComplexDetailResponse`에 `legalDongCd`가 없다 — 브레드크럼의 시도·시군구 지역 검색 링크를 만들 수 없어 일반 텍스트가 된다.
-- 중개사 소재지(`estateAgentSggNm`)는 수집·저장하지 않는다(`trade`에 컬럼 없음) — 거래상세 모달의 "거래유형 + 중개사 소재지" 중 뒤쪽을 표시할 수 없다.
-- 상세정보 28개 필드를 6개 그룹으로 나누는 매핑이 어느 문서에도 없다 — 프론트가 그룹 이름을 기준으로 정한다.
+**보고만 하고 고치지 않은 불일치:**
+- 중개사 소재지(`estateAgentSggNm`)는 수집·저장하지 않는다(`trade`에 컬럼 없음) — 거래상세 모달에서 그 행을 숨긴다(지성 결정). 아래 완결 필요 참고.
 
 검증: `./gradlew test` 630건, `./gradlew integrationTest` 88건 전부 통과. `ComplexDetailCacheTest`(대표 거래 있음 → 그 matchMethod, 없음 → null), `TradeServiceTest`·`TradeControllerTest`(cancelDate 전달·JSON). 로컬 백엔드 스모크: 단지 1의 matchMethod가 첫 호출·캐시 히트 모두 `SIMILAR`, 단지 14894 매매 이력의 해제 건(trade 391755)에 `cancelDate` 2026-09-17.
 
 ### 프로그램설계서 반영 필요 (문서 반영은 claude.ai에서)
 
 - 3.3절 SVC-CPX-01 `getDetail()` 응답: `matchMethod`(대표 거래 기준) 추가, 캐시 이름 `complexDetailV3`(2026-09-30).
-- 3.4절 SVC-TRD-01 `getHistory()` 응답 `TradeResponse`: `cancelDate` 추가(2026-09-30).
+- 3.4절 SVC-TRD-01 `getHistory()` 응답 `TradeResponse`: `cancelDate`, `dealingType`(`AGENT`/`DIRECT`) 추가(2026-09-30).
+- 3.3절 SVC-CPX-01 `getDetail()` 응답: `legalDongCd` 추가(2026-09-30).
+
+**완결 필요(DTL-01) — 중개사 소재지 `agent_sgg_nm` 미수집(BAT-PRS-01 매핑 확인 필요).** UI정의서 5.3절 거래상세 모달은 "거래유형 + 중개사 소재지(`estateAgentSggNm`, 시군구 단위)"를 요구하지만 `trade`에 대응 컬럼이 없고 파서(`TradeFieldMapper`)도 매핑하지 않는다. 모달에서는 그 행을 숨긴다. 표시하려면 원천 필드명 확인 → 컬럼 추가(DDL 3곳) → 파서 매핑 → `TradeDetailResponse` 순으로 한다.
 
 ### 외부연동 설정(COM-CFG-01)
 프로그램 설계서는 `ExternalApiProperties` 하나에 `getDataGoKrServiceKey()`/`getKakaoApiKey()`/`getJwtSecret()` 세 메서드를 두는 단일 클래스로 정의하지만, 실제 구현은 이미 각 도메인이 소유한 `@ConfigurationProperties` 레코드로 나뉘어 있습니다 — 설계서보다 먼저 BAT-CLC-01(`DataGoKrProperties`)과 COM-SEC-01/02(`JwtProperties`)가 구현되며 이미 굳어진 구조라, COM-CFG-01 시점에 하나로 합치지 않고 그대로 두었습니다. 새로 코드를 짤 때는 이 구조를 따르세요.
