@@ -1149,6 +1149,7 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 | --- | --- | --- | --- |
 | **`TradeResponse.cancelDate` 추가(API-TRD-01)** | 이력 목록 항목에 해제사유발생일(`cancel_date`)을 싣는다. 해제되지 않았거나 전월세면 null이고, `non_null` 직렬화라 JSON에서 키가 빠진다 | UI정의서 5.3절 예외 처리표가 이력 테이블 행에 "해제" 라벨과 해제사유발생일을 요구한다. 전에는 상세(`TradeDetailResponse`)에만 있었다. 이력 조회는 캐시를 적용하지 않아 캐시 버전업이 필요 없다 | — |
 | **`ComplexDetailResponse.matchMethod` 추가(SVC-CPX-01), 캐시 `complexDetailV3`** | 정밀/근사 배지용으로 대표 거래(취소되지 않은 가장 최근 거래, `TradeRepository.findRecentTradesByComplexIds`)의 `match_method`를 싣는다. 대표 거래가 없으면 null(배지 생략). 조회는 `ComplexDetailCache.get()` 안에서 하고 결과를 함께 캐시한다. DTO 필드가 늘어 캐시 이름을 V3로 올렸다 | `match_method`는 `trade` 컬럼이라 단지에는 값이 없다. 카드(`ComplexSummaryResponse`)가 대표 거래의 값으로 배지를 정하므로 같은 선정 함수를 쓴다. 거래 적재 시 BAT-LOD-01이 이 캐시 항목을 이미 evict하므로 대표 거래가 바뀌어도 오래된 배지가 남지 않는다 | **SRCH-01과 정확히 같은 값은 아니다:** SRCH-01 카드의 대표 거래는 검색 필터(기본 매매)를 만족하는 최신 거래라, 같은 단지라도 선택한 거래유형에 따라 배지가 다를 수 있다. 상세는 필터 없는 대표 거래(HOME-01 인기 단지·관심 매물과 같은 규칙)를 쓴다. 상세 배지를 거래유형 탭에 맞추기로 하면 이 결정을 다시 본다 |
+| **재매칭 후 상세 캐시 무효화(Codex P2, 2026-09-30)** | `TradeRematchRunner`가 배치(500건)가 커밋될 때마다 그 배치에서 거래가 옮겨가거나 매칭 방식이 바뀌거나 중복 삭제된 단지(옛 단지·새 단지 모두)로 `TradeCacheEvictionEvent`를 발행한다. `CacheEvictionListener`가 적재 때와 똑같이 상세 항목과 인기 단지 전체를 비운다. dedup_hash만 고치는 복구 패스는 행을 지운 단지만 보고한다(해시만 바꾸면 대표 거래가 그대로다) | 재매칭은 `applyRematch()`로 DB만 바꾸고 이벤트를 발행하지 않아, 그 전에 채워진 `complexDetailV3`가 TTL(24h) 동안 옛 배지(또는 null)를 돌려줬다. 실행 끝에 한 번이 아니라 배치마다 발행하는 이유: 배치마다 커밋되므로 중간에 실패해도 이미 커밋된 배치의 캐시는 비워져 있어야 한다. 재매칭은 별도 JVM(`rematch` 프로필)으로 돌지만 캐시가 Redis라 서비스 중인 서버에도 반영된다. 검증: `TradeRematchRunnerTest`(발행 호출을 빼면 실패), `TradeRematchBatchProcessorTest` | trade의 complex_id·match_method를 바꾸는 경로를 새로 만들면 그 경로도 커밋 뒤 이 이벤트를 발행한다 |
 | 최근 조회 기록(캐시 히트 시) | 변경 없음 — `record()`는 이미 캐시 빈 밖(`ComplexService.getDetail()`)에서 호출된다 | SVC-RCV-01 절 참고 | — |
 | **`TradeResponse.dealingType` 추가(API-TRD-01, 지성 결정)** | 이력 목록 항목에 거래유형을 싣는다. 값은 BAT-PRS-01(`TradeFieldMapper`)이 정규화한 코드 `AGENT`(중개거래)/`DIRECT`(직거래)이고(2026-09-30 로컬 DB: 매매 73,522건 중 AGENT 68,063·DIRECT 5,459, null 0), 전월세는 원천에 없어 null(키 생략). 화면 문구로 바꾸는 것은 프론트가 한다 | 매매 이력 테이블의 "거래유형" 열(UI정의서 5.3절)을 채우려면 목록 응답에 있어야 한다. 전에는 상세(`TradeDetailResponse`)에만 있었다 | BAT-PRS-01이 코드 체계를 바꾸면 프론트 라벨 매핑도 함께 바꾼다 |
 | **`ComplexDetailResponse.legalDongCd` 추가(SVC-CPX-01, 지성 결정)** | 단지의 법정동코드(10자리)를 싣는다. 매칭 대기 단지(`matchPending=true`)는 null(키 생략). 지연 로딩 프록시의 식별자만 읽어 추가 쿼리가 없다. 같은 브랜치에서 이미 `complexDetailV3`로 올려 추가 버전업은 없다 | 브레드크럼의 시도(앞 2자리)·시군구(앞 5자리)를 SRCH-01 지역 검색(`regionCode`) 링크로 만든다 | — |
@@ -1200,8 +1201,8 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 
 | 캐시 | 무효화 이벤트 | 발행 주체 | 주기 |
 | --- | --- | --- | --- |
-| `complexDetailV3::{complexId}` | `TradeCacheEvictionEvent` | BAT-LOD-01(`TradeDataLoader`) | 일 1회 이상 |
-| `popularComplexes` | `TradeCacheEvictionEvent` (전체 evict) | BAT-LOD-01(`TradeDataLoader`) | 일 1회 이상 |
+| `complexDetailV3::{complexId}` | `TradeCacheEvictionEvent` | BAT-LOD-01(`TradeDataLoader`), BAT-MAT-02 재매칭(`TradeRematchRunner`, 배치 커밋마다) | 일 1회 이상 / 재매칭 실행 시 |
+| `popularComplexes` | `TradeCacheEvictionEvent` (전체 evict) | BAT-LOD-01(`TradeDataLoader`), BAT-MAT-02 재매칭(`TradeRematchRunner`) | 일 1회 이상 / 재매칭 실행 시 |
 | `regionAutocomplete` | `LegalDistrictCodeReloadedEvent` (전체 evict) | BAT-MAT-01(`LegalDistrictCodeLoader`) | 비정기(CSV 재적재 시에만) |
 
 `regionAutocomplete`를 `TradeCacheEvictionEvent`(일 단위)에 묶으면 정적 데이터를 매일 무효화하게 돼 TTL을 길게 가져가려는 설계 의도가 깨집니다 — 실제로 COM-CACHE-01 1차 구현에서 이 실수가 있었고(`CacheEvictionListener`가 `TradeCacheEvictionEvent.legalDongCds()`로 `regionAutocomplete`까지 evict), 이후 `LegalDistrictCodeReloadedEvent`를 신설해 분리했습니다(검증: `CacheEvictionListener.java`, `LegalDistrictCodeLoader.java`).

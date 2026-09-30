@@ -3,17 +3,22 @@ package com.jiseong.homesense.batch.matcher;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
+
+import com.jiseong.homesense.batch.loader.TradeCacheEvictionEvent;
 
 import com.jiseong.homesense.batch.matcher.TradeRematchBatchProcessor.BatchOutcome;
 import com.jiseong.homesense.batch.matcher.TradeRematchRunner.RematchSummary;
@@ -28,15 +33,18 @@ class TradeRematchRunnerTest {
     @Mock
     private TradeRematchBatchProcessor batchProcessor;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     @InjectMocks
     private TradeRematchRunner runner;
 
     @Test
     void 여러_배치의_unchanged_changed를_누적해_요약한다() {
         when(batchProcessor.processUnmatchedBatch(eq(0L)))
-                .thenReturn(new BatchOutcome(10L, 3, 2, true));
+                .thenReturn(new BatchOutcome(10L, 3, 2, true, Set.of()));
         when(batchProcessor.processUnmatchedBatch(eq(10L)))
-                .thenReturn(new BatchOutcome(20L, 1, 4, true));
+                .thenReturn(new BatchOutcome(20L, 1, 4, true, Set.of()));
         when(batchProcessor.processUnmatchedBatch(eq(20L)))
                 .thenReturn(BatchOutcome.empty());
 
@@ -61,7 +69,7 @@ class TradeRematchRunnerTest {
     @Test
     void dedup_hash_복구는_배치_처리기의_repairDedupHashBatch를_커서로_반복_호출한다() {
         when(batchProcessor.repairDedupHashBatch(eq(0L)))
-                .thenReturn(new BatchOutcome(30L, 2, 1, true));
+                .thenReturn(new BatchOutcome(30L, 2, 1, true, Set.of()));
         when(batchProcessor.repairDedupHashBatch(eq(30L)))
                 .thenReturn(BatchOutcome.empty());
 
@@ -76,7 +84,7 @@ class TradeRematchRunnerTest {
     void 두번째_패스는_cutoff를_그대로_배치_처리기에_전달하며_커서를_전진한다() {
         LocalDateTime cutoff = LocalDateTime.of(2026, 9, 16, 13, 0);
         when(batchProcessor.processUpdatedBeforeBatch(eq(cutoff), eq(0L)))
-                .thenReturn(new BatchOutcome(15L, 5, 1, true));
+                .thenReturn(new BatchOutcome(15L, 5, 1, true, Set.of()));
         when(batchProcessor.processUpdatedBeforeBatch(eq(cutoff), eq(15L)))
                 .thenReturn(BatchOutcome.empty());
 
@@ -85,5 +93,32 @@ class TradeRematchRunnerTest {
         assertThat(summary.unchanged()).isEqualTo(5);
         assertThat(summary.changed()).isEqualTo(1);
         verify(batchProcessor, times(2)).processUpdatedBeforeBatch(eq(cutoff), any());
+    }
+
+    @Test
+    void 배치마다_영향받은_단지로_캐시_무효화_이벤트를_발행하고_영향이_없으면_발행하지_않는다() {
+        when(batchProcessor.processUnmatchedBatch(eq(0L)))
+                .thenReturn(new BatchOutcome(10L, 0, 2, true, Set.of(5L, 7L)));
+        when(batchProcessor.processUnmatchedBatch(eq(10L)))
+                .thenReturn(new BatchOutcome(20L, 3, 0, true, Set.of()));
+        when(batchProcessor.processUnmatchedBatch(eq(20L)))
+                .thenReturn(new BatchOutcome(30L, 0, 1, true, Set.of(9L)));
+        when(batchProcessor.processUnmatchedBatch(eq(30L)))
+                .thenReturn(BatchOutcome.empty());
+
+        runner.rematchUnmatched();
+
+        verify(eventPublisher).publishEvent(new TradeCacheEvictionEvent(Set.of(5L, 7L), Set.of()));
+        verify(eventPublisher).publishEvent(new TradeCacheEvictionEvent(Set.of(9L), Set.of()));
+        verify(eventPublisher, times(2)).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void 배치가_처음부터_비어있으면_캐시_무효화_이벤트를_발행하지_않는다() {
+        when(batchProcessor.processUnmatchedBatch(eq(0L))).thenReturn(BatchOutcome.empty());
+
+        runner.rematchUnmatched();
+
+        verify(eventPublisher, never()).publishEvent(any(Object.class));
     }
 }

@@ -2,8 +2,10 @@ package com.jiseong.homesense.batch.matcher;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
@@ -51,11 +53,14 @@ class TradeRematchBatchProcessor {
     /**
      * 배치 처리 결과. {@code lastTradeId}는 이 배치의 마지막 행의 trade_id(커서 전진용, 배치가
      * 비었으면 null). {@code hasMore}는 배치가 하나라도 있었는지(false면 순회 종료 신호).
+     * {@code touchedComplexIds}는 이 배치가 거래를 옮기거나 매칭 방식을 바꾸거나 행을 지워 대표 거래가
+     * 달라졌을 수 있는 단지들이다(옛 단지와 새 단지 모두). {@link TradeRematchRunner}가 배치 커밋 뒤 이
+     * 단지들의 상세·인기 단지 캐시를 비운다.
      */
-    record BatchOutcome(Long lastTradeId, int unchanged, int changed, boolean hasMore) {
+    record BatchOutcome(Long lastTradeId, int unchanged, int changed, boolean hasMore, Set<Long> touchedComplexIds) {
 
         static BatchOutcome empty() {
-            return new BatchOutcome(null, 0, 0, false);
+            return new BatchOutcome(null, 0, 0, false, Set.of());
         }
     }
 
@@ -91,6 +96,7 @@ class TradeRematchBatchProcessor {
 
         int unchanged = 0;
         int changed = 0;
+        Set<Long> touchedComplexIds = new LinkedHashSet<>();
         for (Trade trade : batch) {
             Long complexId = trade.getComplex() == null ? null : trade.getComplex().getComplexId();
             String legalDongCd = trade.getLegalDistrictCode() == null
@@ -106,6 +112,9 @@ class TradeRematchBatchProcessor {
 
             changed++;
             if (reconcileHashCollision(trade.getTradeId(), expectedHash)) {
+                // 지운 행이 그 단지의 대표 거래였을 수 있다. 해시만 고치는 경우는 매칭 필드가 그대로라 대표 거래가
+                // 바뀌지 않으므로 넣지 않는다.
+                addIfPresent(touchedComplexIds, complexId);
                 log.info("BAT-MAT-02 dedup_hash 복구: tradeId={}는 이미 다른 행과 동일 식별자로 수렴해 삭제함",
                         trade.getTradeId());
                 continue;
@@ -117,7 +126,7 @@ class TradeRematchBatchProcessor {
                     trade.getDedupHash(), expectedHash);
         }
 
-        return new BatchOutcome(batch.get(batch.size() - 1).getTradeId(), unchanged, changed, true);
+        return new BatchOutcome(batch.get(batch.size() - 1).getTradeId(), unchanged, changed, true, touchedComplexIds);
     }
 
     private BatchOutcome process(List<Trade> batch) {
@@ -127,6 +136,7 @@ class TradeRematchBatchProcessor {
 
         int unchanged = 0;
         int changed = 0;
+        Set<Long> touchedComplexIds = new LinkedHashSet<>();
         for (Trade trade : batch) {
             Long previousComplexId = trade.getComplex() == null ? null : trade.getComplex().getComplexId();
             MatchMethod previousMatchMethod = trade.getMatchMethod();
@@ -142,10 +152,19 @@ class TradeRematchBatchProcessor {
             } else {
                 changed++;
                 applyChange(trade, previousComplexId, previousMatchMethod, result);
+                // 옛 단지는 거래를 잃고(또는 삭제로), 새 단지는 거래를 얻는다 — 둘 다 대표 거래·매칭 방식이 바뀔 수 있다.
+                addIfPresent(touchedComplexIds, previousComplexId);
+                addIfPresent(touchedComplexIds, result.complexId());
             }
         }
 
-        return new BatchOutcome(batch.get(batch.size() - 1).getTradeId(), unchanged, changed, true);
+        return new BatchOutcome(batch.get(batch.size() - 1).getTradeId(), unchanged, changed, true, touchedComplexIds);
+    }
+
+    private static void addIfPresent(Set<Long> complexIds, Long complexId) {
+        if (complexId != null) {
+            complexIds.add(complexId);
+        }
     }
 
     /**
