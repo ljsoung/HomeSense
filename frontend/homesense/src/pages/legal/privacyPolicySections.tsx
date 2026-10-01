@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { WITHDRAWAL_GRACE_DAYS } from '../../features/user/withdrawalPolicy';
 import { Note, P, SubHeading, Table, Ul } from './privacyPolicyPrimitives';
 
 export interface PrivacySection {
@@ -24,10 +25,9 @@ const brandName = 'HomeSense';
 const officerName = '임지성';
 const officerEmail = 'super15600@gmail.com';
 const initialEffectiveDate = '2026-09-15';
-// 탈퇴 계정 보관(유예) 기간(일). 백엔드 homesense.withdrawal.grace-days(환경변수 WITHDRAWAL_GRACE_DAYS)의
-// 기본값 7과 반드시 같아야 한다 — 이 값을 바꾸거나 배포 환경에서 WITHDRAWAL_GRACE_DAYS를 7이 아닌 값으로
-// 설정하면 2항 문구가 실제 파기 시점과 어긋나므로 이 상수도 함께 바꿔라(CLAUDE.md BAT-USR-01 절 참고).
-const withdrawalGraceDays = 7;
+// 탈퇴 계정 보관(유예) 기간(일). MY-01 탈퇴 안내와 같은 값을 쓰도록 features/user/withdrawalPolicy.ts에 둔다 —
+// 백엔드 기본값과 맞춰야 하는 이유는 그 파일 주석 참고.
+const withdrawalGraceDays = WITHDRAWAL_GRACE_DAYS;
 // v1.1(2026-09-21) — 6항 연령 확인 문구 갱신 시행(자기 확인 체크박스 도입 반영).
 const v11EffectiveDate = '2026-09-21';
 // v1.2(2026-09-21) — 6항 연령 확인 문구 갱신 시행(서버 검증 도입 반영). v1.1과 시행일이 같다.

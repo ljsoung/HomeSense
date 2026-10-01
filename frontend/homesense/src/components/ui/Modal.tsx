@@ -8,10 +8,14 @@ interface ModalProps {
   children: ReactNode;
   /** 하단 버튼 영역(선택). 없으면 "닫기" 버튼 하나를 둔다. */
   footer?: ReactNode;
+  /** 되돌릴 수 없는 동작을 확인받는 대화상자(회원탈퇴 등)는 'alertdialog'. 기본 'dialog'. */
+  role?: 'dialog' | 'alertdialog';
+  /** 본문 중 대화상자 설명으로 읽힐 요소의 id(aria-describedby). alertdialog에 권장된다. */
+  describedBy?: string;
 }
 
 /** Figma 다이얼로그(6:5277, 모바일 28:16012)의 보조 버튼 — 테두리 #e5e7eb, radius 14, 14px 반굵게. */
-const MODAL_SECONDARY_BUTTON_CLASS =
+export const MODAL_SECONDARY_BUTTON_CLASS =
   'flex h-[43px] w-full items-center justify-center rounded-[14px] border border-[#e5e7eb] bg-white text-[14px] font-semibold leading-[21px] text-[#364153] hover:bg-[#f7f8fa] md:h-[47px] md:text-[#4a5565]';
 
 /**
@@ -23,7 +27,7 @@ const MODAL_SECONDARY_BUTTON_CLASS =
  * radius 16, 그림자 0 16px 24px 20%, 제목 18px 가장 굵게. 모바일(28:15995): 오버레이 45%, 폭 320px, 안쪽 24px,
  * 그림자 0 20px 30px 25%, 제목 16px 굵게. 닫기는 X 아이콘 대신 Figma처럼 아래쪽 버튼으로 둔다.
  */
-export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, role = 'dialog', describedBy }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogBehavior(open, dialogRef, onClose);
@@ -35,9 +39,10 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
       <div className="absolute inset-0 bg-black/45 md:bg-black/40" onClick={onClose} aria-hidden="true" />
       <div
         ref={dialogRef}
-        role="dialog"
+        role={role}
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={describedBy}
         className="relative z-10 flex max-h-[85vh] w-full max-w-[320px] flex-col rounded-[16px] bg-white p-6 shadow-[0_20px_30px_rgba(0,0,0,0.25)] md:max-w-[400px] md:p-8 md:shadow-[0_16px_24px_rgba(0,0,0,0.2)]"
       >
         <h2
