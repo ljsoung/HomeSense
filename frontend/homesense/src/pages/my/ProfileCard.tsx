@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { AlertCircleIcon } from '../../components/icons/AlertCircleIcon';
+import { PencilIcon } from '../../components/icons/PencilIcon';
 import type { UserResponse } from '../../features/user/types';
 import { formatDottedDate } from '../../lib/format';
 import { MY_ROUTES } from '../../routes/paths';
@@ -81,8 +82,9 @@ export function ProfileCard({ state }: { state: Loadable<UserResponse> }) {
               화면으로 이동하는 방식으로 바꿨다 — UI정의서를 따른다(문서 동기화 필요). */}
           <Link
             to={MY_ROUTES.profileEdit}
-            className="shrink-0 rounded-[10px] border border-[#e5e7eb] bg-white px-3 py-2 text-[13px] font-semibold text-[#364153] hover:bg-[#f7f8fa]"
+            className="flex shrink-0 items-center gap-1.5 rounded-[10px] border border-[#e5e7eb] bg-white px-3 py-2 text-[13px] font-semibold text-[#364153] hover:bg-[#f7f8fa]"
           >
+            <PencilIcon className="size-3.5 text-[#4a5565]" />
             회원정보 수정
           </Link>
         </>

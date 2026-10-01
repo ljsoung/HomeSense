@@ -179,6 +179,17 @@ async function scenarioContent(label, viewport, mobile) {
     && (await page.getByRole('link', { name: '알림 이력' }).getAttribute('href')) === '/notifications');
   const tileColor = await accountTile(page).evaluate((el) => getComputedStyle(el).color);
   ok(`${label} 메뉴: 계정 타일이 활성 버튼(흐린 색 아님)`, (await accountTile(page).isEnabled()) && tileColor === 'rgb(54, 65, 83)', tileColor);
+  // Figma 아이콘: 장식(aria-hidden), 메뉴 3개는 Primary, 로그아웃은 흐린 회색, 연필은 보조 텍스트 색.
+  const iconInfo = (locator) => locator.locator('svg').first().evaluate((svg) => ({
+    hidden: Boolean(svg.closest('[aria-hidden="true"]')),
+    color: getComputedStyle(svg).color,
+  }));
+  const menuIcons = await Promise.all(['관심 매물·지역 관리', '알림 설정', '알림 이력'].map((name) => iconInfo(page.getByRole('link', { name }))));
+  ok(`${label} 아이콘: 메뉴 3개 Primary·장식`, menuIcons.every((i) => i.hidden && i.color === 'rgb(15, 92, 84)'), JSON.stringify(menuIcons));
+  const logoutIcon = await iconInfo(accountTile(page));
+  ok(`${label} 아이콘: 로그아웃 흐린 회색·장식`, logoutIcon.hidden && logoutIcon.color === 'rgb(156, 163, 175)', JSON.stringify(logoutIcon));
+  const pencilIcon = await iconInfo(page.getByRole('link', { name: '회원정보 수정' }));
+  ok(`${label} 아이콘: 회원정보 수정 연필·장식`, pencilIcon.hidden && pencilIcon.color === 'rgb(74, 85, 101)', JSON.stringify(pencilIcon));
 
   // 8. 가로 스크롤 없음
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

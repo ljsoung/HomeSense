@@ -2293,14 +2293,14 @@ UI정의서 v2.1 5.5절 MY-01(FR-1.4)을 구현했다. 경로 상수는 `src/rou
 **문서와 다른 점(코드 주석에만 기록, 문서 동기화 필요):** UI정의서 6.2절 MY-01 그리드 표기("2열→1열", 실제는 Figma대로 4열→1열). 프로그램설계서 3.2절 하단 메모 "MY-01 회원정보 수정은 인라인/모달"(UI정의서 v2.1은 MY-05 이동). 프로그램설계서 3.2절 `withdraw()` 처리 로직에 비밀번호 재확인 단계(`PasswordEncoder.matches()`)와 불일치 시 `InvalidCredentialsException`(401 `INVALID_CREDENTIALS`)을 반영해야 한다 — 지금 설계서에는 이 단계가 없다.
 
 **완결 필요:**
-- **Figma 대조 미실시(2026-10-01에도 Figma MCP 미연결).** 7:5373·26:15193·26:14966과 참조 프레임(6:4995·6:5286·38:1526)을 보지 못했다. 색·간격·위젯 배치는 기존 화면(HOME-01·DTL-01)의 토큰으로 맞췄다. 지성이 전달한 Figma 아이콘은 하트(MY-02)·종(MY-03)·울리는 종(MY-04, 진동선)·로그아웃(문+화살표)이고 회원정보 수정 버튼에는 연필이 붙는다 — 지금 코드는 하트·종·시계·자물쇠이고 연필이 없다. 저장소에 울리는 종·로그아웃·연필 아이콘이 없어 Figma SVG를 받아 옮겨야 한다(직접 그리지 않는다). 하단 탭 라벨은 코드 "찜", Figma "관심"으로 다르다(보고만 함, 공용 UIC-02라 바꾸지 않았다).
+- **Figma 대조 미실시(2026-10-01에도 Figma MCP 미연결).** 7:5373·26:15193·26:14966과 참조 프레임(6:4995·6:5286·38:1526)을 보지 못했다. 색·간격·위젯 배치는 기존 화면(HOME-01·DTL-01)의 토큰으로 맞췄다. **아이콘은 2026-10-01 지성이 전달한 Figma SVG로 교체했다** — 메뉴 `MenuHeartIcon`·`MenuBellIcon`(20px Figma 버전, 공용 `HeartIcon`·`BellIcon`과 크기·획이 달라 따로 둠)·`BellRingIcon`·`LogOutIcon`, "회원정보 수정" 버튼 `PencilIcon`(14px). 모두 `currentColor`·`aria-hidden`. 색: 메뉴 3개 `brand`(Primary), 로그아웃 `#9ca3af`, 연필 `#4a5565` — 색 토큰은 `brand`뿐이라 나머지 둘은 코드베이스가 이미 쓰는 같은 hex를 그대로 썼다. e2e가 장식 여부와 색을 검사한다. 하단 탭 라벨은 코드 "찜", Figma "관심"으로 다르다(보고만 함, 공용 UIC-02라 바꾸지 않았다).
 - **MY-02 선행 — 관심 매물 요약 응답 확장(백엔드).** UIC-05 카드가 요구하는 최근 거래의 전용면적·층·거래일을 `FavoritePropertySummaryResponse`에 추가하고, 목록 정렬(등록순)을 서버에서 명시한다(지금 `findByUser_UserId`에 ORDER BY가 없다). 들어오면 MY-01 미리보기에 면적을 붙이고 클라이언트 ID 정렬을 걷어낸다(`FavoritePreview.tsx`의 TODO).
 - **`docs/specs/` 부재 원인(2026-10-01 확인).** 무시 규칙이 아니다(`git check-ignore` 결과 없음, `.gitignore`에 docs 항목 없음). 워크트리는 하나뿐이고, 원격 `develop`·`main`과 로컬의 모든 브랜치·태그 이력에 `docs/specs` 경로가 한 번도 없다(`git log --all -- docs/specs` 0건, `ls-remote`로 원격 헤드가 로컬과 같음을 확인). 명세 최신본이 아직 커밋된 적이 없다는 뜻이다 — Downloads에는 프로그램설계서 xlsx만 있다.
 - **방침 6항 갱신 필요.** "마이페이지를 통한 회원정보 수정·탈퇴 자기서비스 기능은 준비 중"이라는 문구는 MY-01 배포 뒤 탈퇴에 대해서는 사실이 아니다(수정은 MY-05 미구현이라 여전히 사실). 개정 문구와 시행일(개정 이력 v1.4, 실가입이 있으면 7일 사전 고지)은 지성이 정한다 — 이번에 고치지 않았다.
 - **하단 탭 "마이" 미읽음 배지.** 여전히 없다. 미읽음 개수 API가 없다(SCR-HOME-01 절 "알림 벨" 행).
 - **실 백엔드 확인 미실시(2026-10-01에도 Docker 꺼짐).** (1) `home01-logout-check` — 헤더 계정 메뉴의 로그아웃을 `useLogoutAction`으로 옮겼다. (2) 탈퇴 수동 확인: 비밀번호 틀림 → 세션 유지, 맞음 → 탈퇴 후 HOME-01, 같은 계정 로그인 거부(403 `ACCOUNT_WITHDRAWN`). 다음에 백엔드를 띄우면 이것부터 한다.
 
-검증: `npm run lint`(오류 0), `tsc -b`, `npm run build`, vitest 88건(`relativeTime`·`pickRecentFavorites`·`RequireAuth`·탈퇴 비밀번호 불일치 포함). e2e `my01-mypage-check` 261/261(390/768/1280, 백엔드 불필요). 회귀 확인: `auth-status-checking-check` 22/22, `auth-interceptor-multitab-check` 17/17.
+검증: `npm run lint`(오류 0), `tsc -b`, `npm run build`, vitest 88건(`relativeTime`·`pickRecentFavorites`·`RequireAuth`·탈퇴 비밀번호 불일치 포함). e2e `my01-mypage-check` 270/270(390/768/1280, 백엔드 불필요). 회귀 확인: `auth-status-checking-check` 22/22, `auth-interceptor-multitab-check` 17/17.
 
 ### 기술 부채 — 반응형 두 벌 렌더 기존 사용처 (2026-09-29 목록화, 이번에 고치지 않음)
 

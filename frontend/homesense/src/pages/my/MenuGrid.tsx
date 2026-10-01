@@ -1,17 +1,18 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { BellIcon } from '../../components/icons/BellIcon';
+import { BellRingIcon } from '../../components/icons/BellRingIcon';
 import { ChevronRightIcon } from '../../components/icons/ChevronRightIcon';
-import { ClockIcon } from '../../components/icons/ClockIcon';
-import { HeartIcon } from '../../components/icons/HeartIcon';
-import { LockIcon } from '../../components/icons/LockIcon';
+import { LogOutIcon } from '../../components/icons/LogOutIcon';
+import { MenuBellIcon } from '../../components/icons/MenuBellIcon';
+import { MenuHeartIcon } from '../../components/icons/MenuHeartIcon';
 import { MY_ROUTES } from '../../routes/paths';
 import { CARD_CLASS } from './SectionCard';
 
+// 아이콘은 Figma(7:5373) SVG. 색은 currentColor라 타일 아이콘 칸의 text-brand(Primary)를 따른다.
 const MENU_ITEMS = [
-  { to: MY_ROUTES.favorites, label: '관심 매물·지역 관리', icon: <HeartIcon className="size-5" /> },
-  { to: MY_ROUTES.notificationSettings, label: '알림 설정', icon: <BellIcon className="size-5" /> },
-  { to: MY_ROUTES.notifications, label: '알림 이력', icon: <ClockIcon className="size-5" /> },
+  { to: MY_ROUTES.favorites, label: '관심 매물·지역 관리', icon: <MenuHeartIcon className="size-5" /> },
+  { to: MY_ROUTES.notificationSettings, label: '알림 설정', icon: <MenuBellIcon className="size-5" /> },
+  { to: MY_ROUTES.notifications, label: '알림 이력', icon: <BellRingIcon className="size-5" /> },
 ] as const;
 
 // 한 벌로 렌더하고 배치만 CSS로 바꾼다(반응형 렌더 규칙) — 모바일: 아이콘+라벨+chevron 가로 행, md 이상: 아이콘 위·라벨
@@ -54,7 +55,9 @@ export function MenuGrid({ onOpenAccount }: { onOpenAccount: () => void }) {
         ))}
         <li>
           <button type="button" aria-haspopup="dialog" onClick={onOpenAccount} className={TILE_CLASS}>
-            <TileContent icon={<LockIcon className="size-5" />} label="로그아웃·회원탈퇴" />
+            {/* Figma는 계정 타일 아이콘만 흐린 회색(#9ca3af — 색 토큰이 없어 하단 탭 비활성과 같은 값을 쓴다).
+                아이콘은 장식이고 라벨 글자는 다른 타일과 같은 #364153이라 대비 기준(NFR-8)과 무관하다. */}
+            <TileContent icon={<LogOutIcon className="size-5 text-[#9ca3af]" />} label="로그아웃·회원탈퇴" />
           </button>
         </li>
       </ul>
