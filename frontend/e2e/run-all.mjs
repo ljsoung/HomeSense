@@ -44,6 +44,8 @@ const SCRIPTS = [
   'home01-logout-hang-check',
   // DTL-01 단지 상세 — 모킹 시나리오 + 실 백엔드 스모크(360/768/1280). 실 백엔드 필요(REAL_ID, 기본 10059).
   'dtl01-detail-check',
+  // MY-01 마이페이지 홈 — 보호 라우트, 위젯 상태, 로그아웃·탈퇴 다이얼로그(390/768/1280). 백엔드 불필요.
+  'my01-mypage-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;
