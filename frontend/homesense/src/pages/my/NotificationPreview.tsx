@@ -10,20 +10,13 @@ import { RowSkeleton, SectionCard, WidgetError } from './SectionCard';
 import type { Loadable } from './useLoadable';
 
 /**
- * 점 색의 의미: 읽지 않은 알림 = 브랜드색, 읽은 알림 = 회색(NotificationResponse.isRead). MY-04 알림 이력과 같은
- * 의미여야 한다 — MY-04 Figma(38:1526)를 이번 작업에서 대조하지 못해(Figma 연결 끊김) 확인이 필요하다.
- * 색만으로 구분하지 않도록 스크린리더용 문구를 함께 둔다.
+ * 점은 Figma(MY-01·MY-04)에서 알림 대상의 종류를 뜻한다 — 관심 매물 = Primary, 관심 지역 = amber. 하지만 지금은
+ * 응답만으로 대상을 가를 수 없어 한 색(Primary)으로 통일한다: NotificationResponse의 complexId·legalDongCd·tradeId는
+ * 상호 배타가 아니고(관심 지역의 신규 거래 알림에도 complexId가 실릴 수 있다), 알림을 만드는 BAT-NTF-01이 아직 없어
+ * 어떤 조합이 오는지 정해진 계약도 없다(CLAUDE.md SCR-MY-01 절). 읽음 여부는 MY-01에서 표시하지 않는다.
  */
-function ReadDot({ isRead }: { isRead: boolean }) {
-  return (
-    <>
-      <span
-        aria-hidden="true"
-        className={`mt-1.5 size-2 shrink-0 rounded-full ${isRead ? 'bg-[#d1d5dc]' : 'bg-brand'}`}
-      />
-      <span className="sr-only">{isRead ? '읽음' : '읽지 않음'}</span>
-    </>
-  );
+function TargetDot() {
+  return <span aria-hidden="true" className="mt-1.5 size-2 shrink-0 rounded-full bg-brand" />;
 }
 
 /**
@@ -56,7 +49,7 @@ export function NotificationPreview({ state, onRetry }: { state: Loadable<Notifi
           {state.data.map((notification) => (
             <li key={notification.notificationId}>
               <Link to={MY_ROUTES.notifications} className="flex items-start gap-3 rounded-[10px] py-3 hover:bg-[#f7f8fa]">
-                <ReadDot isRead={notification.isRead} />
+                <TargetDot />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="truncate text-[14px] font-semibold text-[#101828]">{notification.title}</span>
                   <span className="line-clamp-2 text-[13px] text-[#4a5565]">{notification.message}</span>

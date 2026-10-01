@@ -13,6 +13,8 @@ import type { Loadable } from './useLoadable';
 /**
  * 행의 "가격 · 면적" — 응답에 있는 값만 쓴다. FavoritePropertySummaryResponse에는 전용면적이 없어 면적은 생략하고,
  * 대표 거래가 없으면(recentAmount=null) 가격도 생략한다. 전월세 대표 거래의 금액은 보증금이다.
+ * TODO(MY-02 선행): 관심 매물 요약 응답에 최근 거래의 전용면적·층·거래일이 추가되면 여기에 "· 84㎡"를 붙이고,
+ * 서버가 등록순 정렬을 명시하면 pickRecentFavorites의 ID 정렬을 걷어낸다(CLAUDE.md SCR-MY-01 절).
  */
 function describeFavorite(favorite: FavoritePropertySummaryResponse): string {
   if (favorite.recentAmount === null) return '';

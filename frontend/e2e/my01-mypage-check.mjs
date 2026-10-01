@@ -81,6 +81,7 @@ async function open(viewport, { loggedIn = true, api: apiOverrides = {} } = {}) 
       return json(200, okBody(USER));
     }
     if (path === '/api/users/me' && request.method() === 'DELETE') {
+      // 실제 백엔드 응답과 같다: UserService.withdraw() → InvalidCredentialsException(401 INVALID_CREDENTIALS).
       if (api.withdraw === 'fail') return json(401, errBody('INVALID_CREDENTIALS', '비밀번호가 일치하지 않습니다'));
       return json(200, okBody(null));
     }
@@ -166,7 +167,8 @@ async function scenarioContent(label, viewport, mobile) {
   ok(`${label} 4: 최근 알림 3건`, (await notiLinks.count()) === 3);
   const notiTexts = await notiLinks.allInnerTexts();
   ok(`${label} 4: 상대 시간(3시간 전·2일 전·날짜)`, notiTexts[0].includes('3시간 전') && notiTexts[1].includes('2일 전') && /\d{4}\.\d{2}\.\d{2}/.test(notiTexts[2]), notiTexts.join('|'));
-  ok(`${label} 4: 읽음 여부 문구(색만으로 구분하지 않음)`, notiTexts[0].includes('읽지 않음') && notiTexts[1].includes('읽음'));
+  const dotColors = await notiLinks.evaluateAll((links) => links.map((a) => getComputedStyle(a.querySelector('span[aria-hidden]')).backgroundColor));
+  ok(`${label} 4: 알림 점은 한 색(Primary)`, dotColors.length === 3 && dotColors.every((c) => c === 'rgb(15, 92, 84)'), dotColors.join('|'));
   ok(`${label} 4: 알림 행·전체 보기 → MY-04`, (await notiLinks.first().getAttribute('href')) === '/notifications' && (await page.getByRole('link', { name: '알림 전체 보기' }).getAttribute('href')) === '/notifications');
   ok(`${label} 4: 알림 요청 page=0&size=3`, calls.some((c) => c.path === '/api/notifications' && c.search.includes('page=0') && c.search.includes('size=3')));
   ok(`${label} 4: 읽음 처리(PATCH) 없음`, !calls.some((c) => c.method === 'PATCH'));
@@ -277,7 +279,9 @@ async function scenarioWithdraw(label, viewport) {
   await submit.click();
   ok(`${label} 6: 실패 시 다이얼로그 안 서버 메시지`, await dialog.getByText('비밀번호가 일치하지 않습니다').waitFor({ timeout: 5000 }).then(() => true, () => false));
   ok(`${label} 6: 실패 시 /my에 머묾·토큰 유지`, path(page) === '/my' && (await tokens(page)).every((t) => t !== null));
-  ok(`${label} 6: 실패 후 비밀번호 칸으로 포커스`, await dialog.getByLabel('비밀번호 확인').evaluate((el) => el === document.activeElement));
+  ok(`${label} 6: 실패 시 토큰 재발급 0회(비즈니스 401)`, !calls.some((c) => c.path === '/api/auth/refresh'));
+  ok(`${label} 6: 실패 시 헤더는 여전히 로그인 상태`, await page.locator('header:visible').first().getByRole('button', { name: /계정 메뉴/ }).isVisible());
+  ok(`${label} 6: 실패 후 비밀번호 칸으로 포커스`,await dialog.getByLabel('비밀번호 확인').evaluate((el) => el === document.activeElement));
 
   api.withdraw = 'ok';
   await dialog.getByLabel('비밀번호 확인').fill('Passw0rd!');
