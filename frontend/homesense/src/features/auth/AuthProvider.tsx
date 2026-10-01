@@ -28,12 +28,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return tokenStorage.getAccessToken() !== null ? 'checking' : 'anonymous';
   });
   const [user, setUser] = useState<UserResponse | null>(null);
+  const [signedOutByUser, setSignedOutByUser] = useState(false);
   // 다시 확인할 때마다 올린다 — 이미 'checking'인 상태에서 다시 확인이 시작돼도 복원 effect가 다시 돈다.
   const [checkRound, setCheckRound] = useState(0);
 
-  const becomeAnonymous = useCallback(() => {
+  const becomeAnonymous = useCallback((byUser: boolean) => {
     markTabUnauthenticated();
     setUser(null);
+    setSignedOutByUser(byUser);
     setStatus('anonymous');
   }, []);
 
@@ -41,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // (sessionGeneration)가 그대로일 때만 부른다 — 그사이 사용자가 로그인·로그아웃했으면 호출되지 않는다.
   // 화면 이동은 하지 않는다: 보호 라우트의 가드가 AUTH-01로 보내고, 공개 화면은 비로그인으로 계속 보인다.
   useEffect(() => {
-    setSessionExpiredListener(becomeAnonymous);
+    setSessionExpiredListener(() => becomeAnonymous(false));
     return () => setSessionExpiredListener(null);
   }, [becomeAnonymous]);
 
@@ -51,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setRecheckListener((next) => {
       setUser(null);
+      setSignedOutByUser(false);
       setStatus(next);
       setCheckRound((round) => round + 1);
     });
@@ -77,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void restoreSession().then((result) => {
       if (cancelled || currentSessionGeneration() !== generationAtStart) return;
       if (result.kind !== 'authenticated') {
-        becomeAnonymous();
+        becomeAnonymous(false);
         return;
       }
       // 복원 도중 다른 탭이 다른 계정으로 로그인했으면(저장소 계정 ≠ 확인한 사용자) 확정하지 않고 다시 확인한다.
@@ -100,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const generation = advanceSessionGeneration();
     await storeTokens(result.accessToken, result.refreshToken);
     markTabAuthenticated(null);
+    setSignedOutByUser(false);
     setStatus('authenticated');
     try {
       const me = await getMe();
@@ -116,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     advanceSessionGeneration();
     await storeTokens(result.accessToken, result.refreshToken);
     markTabAuthenticated(result.userId);
+    setSignedOutByUser(false);
     setUser({ userId: result.userId, email: result.email, nickname: result.nickname, createdAt: '' });
     setStatus('authenticated');
   }, []);
@@ -128,8 +133,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await revokeSessionWithinDeadline();
     } finally {
       tokenStorage.clearTokens();
-      becomeAnonymous();
+      becomeAnonymous(true);
     }
+  }, [becomeAnonymous]);
+
+  // 회원탈퇴 성공 직후 — 서버가 이 사용자의 Refresh Token을 전부 폐기했고(UserService.withdraw) 상태 캐시도
+  // WITHDRAWN이라 기존 Access Token도 거부된다. 그래서 /logout을 부르지 않고 logout()의 로컬 정리 단계만 한다.
+  // 세대를 먼저 올려, 진행 중이던 복원·재발급 결과가 정리된 세션을 되살리지 않게 한다.
+  const endSession = useCallback(() => {
+    advanceSessionGeneration();
+    tokenStorage.clearTokens();
+    becomeAnonymous(true);
   }, [becomeAnonymous]);
 
   const value = useMemo(
@@ -139,8 +153,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       signup,
       logout,
+      endSession,
+      signedOutByUser,
     }),
-    [status, user, login, signup, logout],
+    [status, user, login, signup, logout, endSession, signedOutByUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -27,6 +27,17 @@ export interface AuthContextValue {
   signup: (payload: SignupRequest) => Promise<void>;
   /** 서버의 Refresh Token 폐기를 시도한 뒤(실패해도) 로컬 토큰을 지우고 비로그인으로 바꾼다. */
   logout: () => Promise<void>;
+  /**
+   * 서버 호출 없이 이 브라우저의 세션만 정리한다 — 회원탈퇴 성공 직후처럼 서버가 이미 이 사용자의 토큰을 전부
+   * 폐기한 경우에 쓴다(`/logout`을 다시 부르지 않는다). logout()의 로컬 정리와 같은 단계다.
+   */
+  endSession: () => void;
+  /**
+   * 지금의 비로그인 상태가 사용자가 직접 끝낸 결과(로그아웃·탈퇴)인지. 보호 라우트 가드가 그 화면에서 로그아웃한
+   * 경우를 세션 만료와 구분해, 로그인 화면이 아니라 HOME-01로 보내는 데 쓴다(RequireAuth). 로그인·가입·다시
+   * 확인·세션 만료 때 false로 돌아간다.
+   */
+  signedOutByUser: boolean;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
