@@ -10,29 +10,33 @@ import { useLoadable } from './useLoadable';
 
 const LOADING = { status: 'loading' } as const;
 
+/**
+ * 본문 틀(Figma 7:5373·26:15193·26:14966) — 최대 폭 1000(패딩 포함), 패딩 48/32·섹션 간격 28, 모바일 24/16·20.
+ * 제목 26/39(모바일 22/33) ExtraBold. Figma 데스크톱·태블릿의 부제(14/21 #99a1af)는 문구를 받지 못해 넣지 않았다.
+ */
 function MyPageFrame({ children }: { children: ReactNode }) {
   return (
     <MainLayout>
-      <div className="mx-auto flex max-w-[1280px] flex-col gap-4 px-4 py-5 md:gap-5 md:px-8 md:py-8">
-        <h1 className="sr-only">마이페이지</h1>
+      <div className="mx-auto flex max-w-[1000px] flex-col gap-5 px-4 py-6 md:gap-7 md:px-8 md:py-12">
+        <h1 className="text-[22px] leading-[33px] font-extrabold text-[#101828] md:text-[26px] md:leading-[39px]">마이페이지</h1>
         {children}
       </div>
     </MainLayout>
   );
 }
 
-/** 위젯 두 개 — 데스크톱(1280 이상)은 나란히, 그 아래는 세로로 쌓는다(CSS로만, 한 벌 렌더). */
+/** 위젯 두 개 — 768 이상은 나란히(간격 24), 그 아래는 세로로 쌓는다(CSS로만, 한 벌 렌더). */
 function WidgetRow({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-1 gap-4 md:gap-5 xl:grid-cols-2">{children}</div>;
+  return <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">{children}</div>;
 }
 
 /** 로그인 상태 확인 중(`checking`)에 보호 라우트 가드가 보여 주는 자리 표시 — 리다이렉트하지 않는다. */
 export function MyPageSkeleton() {
   return (
     <MyPageFrame>
-      <div role="status" aria-label="로그인 상태 확인 중" className="flex flex-col gap-4 md:gap-5">
+      <div role="status" aria-label="로그인 상태 확인 중" className="flex flex-col gap-5 md:gap-7">
         <ProfileCard state={LOADING} />
-        <div aria-hidden="true" className="h-[220px] animate-pulse rounded-[16px] bg-[#eef0f3] md:h-[112px]" />
+        <div aria-hidden="true" className="h-[250px] animate-pulse rounded-[16px] bg-[#eef0f3] md:h-[190px]" />
         <WidgetRow>
           <div aria-hidden="true" className="h-[200px] animate-pulse rounded-[16px] bg-[#eef0f3]" />
           <div aria-hidden="true" className="h-[200px] animate-pulse rounded-[16px] bg-[#eef0f3]" />

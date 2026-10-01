@@ -7,7 +7,7 @@ import { formatKoreanPrice } from '../../lib/format';
 import { MY_ROUTES } from '../../routes/paths';
 import type { FavoritePreview as FavoritePreviewData } from './myPageData';
 import { FAVORITE_PREVIEW_COUNT } from './myPageData';
-import { RowSkeleton, SectionCard, WidgetError } from './SectionCard';
+import { CardBody, CardFooterLink, RowSkeleton, SectionCard, WidgetError } from './SectionCard';
 import type { Loadable } from './useLoadable';
 
 /**
@@ -24,17 +24,13 @@ function describeFavorite(favorite: FavoritePropertySummaryResponse): string {
 
 /**
  * MY-01 관심 매물 미리보기 — 최근 등록 2건. 행을 누르면 그 단지의 DTL-01. 하트는 표시 전용(aria-hidden)이고
- * 해제는 MY-02(삭제 확인 다이얼로그·토스트)의 책임이다.
+ * 해제는 MY-02(삭제 확인 다이얼로그·토스트)의 책임이다. 행 모양은 Figma(7:5373): 여백 16/20, 간격 14, 썸네일 56×42.
  */
 export function FavoritePreview({ state, onRetry }: { state: Loadable<FavoritePreviewData>; onRetry: () => void }) {
   return (
-    <SectionCard
-      title="관심 매물"
-      icon={<HeartIcon filled className="size-4 text-[#ff2056]" />}
-      viewAll={{ to: MY_ROUTES.favorites, ariaLabel: '관심 매물 전체 보기' }}
-    >
+    <SectionCard title="관심 매물" viewAll={{ to: MY_ROUTES.favorites, ariaLabel: '관심 매물 전체 보기' }}>
       {state.status === 'loading' && (
-        <div aria-busy="true">
+        <div aria-busy="true" className="divide-y divide-[#f3f4f6]">
           <span className="sr-only">관심 매물을 불러오는 중</span>
           {Array.from({ length: FAVORITE_PREVIEW_COUNT }, (_, index) => (
             <RowSkeleton key={index} thumbnail />
@@ -43,18 +39,20 @@ export function FavoritePreview({ state, onRetry }: { state: Loadable<FavoritePr
       )}
       {state.status === 'error' && <WidgetError message={state.message} onRetry={onRetry} />}
       {state.status === 'success' && state.data.items.length === 0 && (
-        <EmptyState
-          icon={<HeartIcon className="size-5" />}
-          description="아직 등록한 관심 매물이 없어요"
-          actions={
-            <Link
-              to="/search"
-              className="rounded-[10px] bg-brand px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#0c4a44]"
-            >
-              매물 둘러보기
-            </Link>
-          }
-        />
+        <CardBody>
+          <EmptyState
+            icon={<HeartIcon className="size-5" />}
+            description="아직 등록한 관심 매물이 없어요"
+            actions={
+              <Link
+                to="/search"
+                className="rounded-[10px] bg-brand px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#0c4a44]"
+              >
+                매물 둘러보기
+              </Link>
+            }
+          />
+        </CardBody>
       )}
       {state.status === 'success' && state.data.items.length > 0 && (
         <>
@@ -65,14 +63,14 @@ export function FavoritePreview({ state, onRetry }: { state: Loadable<FavoritePr
                 <li key={favorite.favoritePropertyId}>
                   <Link
                     to={`/complexes/${favorite.complexId}`}
-                    className="flex items-center gap-3 rounded-[10px] py-3 hover:bg-[#f7f8fa]"
+                    className="flex items-center gap-3.5 px-5 py-4 hover:bg-[#f7f8fa]"
                   >
-                    <div className="flex size-[52px] shrink-0 items-center justify-center rounded-[10px] bg-[#f3f4f6]">
-                      <HomeIcon aria-hidden="true" className="size-6 opacity-40 [&_path]:stroke-[#6a7282]" />
+                    <div className="flex h-[42px] w-14 shrink-0 items-center justify-center rounded-[14px] bg-[#f3f4f6]">
+                      <HomeIcon aria-hidden="true" className="size-5 opacity-40 [&_path]:stroke-[#6a7282]" />
                     </div>
-                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate text-[14px] font-semibold text-[#101828]">{favorite.complexName}</span>
-                      {summary && <span className="text-[13px] text-[#4a5565]">{summary}</span>}
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-[13px] leading-5 font-bold text-[#101828]">{favorite.complexName}</span>
+                      {summary && <span className="text-[12px] leading-[18px] text-[#99a1af]">{summary}</span>}
                     </div>
                     <HeartIcon filled aria-hidden="true" className="size-4 shrink-0 text-[#ff2056]" />
                   </Link>
@@ -80,13 +78,7 @@ export function FavoritePreview({ state, onRetry }: { state: Loadable<FavoritePr
               );
             })}
           </ul>
-          <Link
-            to={MY_ROUTES.favorites}
-            className="mt-2 flex h-10 items-center justify-center rounded-[10px] border border-[#e5e7eb] text-[13px] font-semibold text-[#364153] hover:bg-[#f7f8fa]"
-          >
-            전체 관심 매물 보기
-            {state.data.total > 0 && <span className="ml-1 text-[#6a7282]">({state.data.total})</span>}
-          </Link>
+          <CardFooterLink to={MY_ROUTES.favorites}>전체 관심 매물 보기</CardFooterLink>
         </>
       )}
     </SectionCard>

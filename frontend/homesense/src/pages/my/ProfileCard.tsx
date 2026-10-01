@@ -5,7 +5,6 @@ import { PencilIcon } from '../../components/icons/PencilIcon';
 import type { UserResponse } from '../../features/user/types';
 import { formatDottedDate } from '../../lib/format';
 import { MY_ROUTES } from '../../routes/paths';
-import { CARD_CLASS } from './SectionCard';
 import type { Loadable } from './useLoadable';
 
 /**
@@ -46,6 +45,9 @@ export function ProfileErrorBanner({ state, onRetry }: { state: Loadable<UserRes
   );
 }
 
+// 프로필 카드만 그림자가 6%다(다른 카드는 5%, Figma 7:5373).
+const PROFILE_CARD_CLASS = 'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.06)]';
+
 /** MY-01 프로필 요약 카드 — 아바타(닉네임 첫 글자, 헤더 UserMenu와 같은 모양), 닉네임, 이메일, 가입일. */
 export function ProfileCard({ state }: { state: Loadable<UserResponse> }) {
   const user = state.status === 'success' ? state.data : null;
@@ -54,21 +56,24 @@ export function ProfileCard({ state }: { state: Loadable<UserResponse> }) {
     <section
       aria-label="내 프로필"
       aria-busy={state.status === 'loading'}
-      className={`flex items-center gap-4 p-5 md:p-6 ${CARD_CLASS}`}
+      className={`flex items-center gap-5 p-5 md:p-7 ${PROFILE_CARD_CLASS}`}
     >
       {user ? (
         <>
           <span
             aria-hidden="true"
-            className="flex size-14 shrink-0 items-center justify-center rounded-full bg-brand text-[20px] font-bold text-white md:size-16 md:text-[22px]"
+            className="flex size-[52px] shrink-0 items-center justify-center rounded-full bg-brand text-[20px] leading-[30px] font-extrabold text-white md:size-16 md:text-[24px] md:leading-9"
           >
             {user.nickname.charAt(0)}
           </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <p className="truncate text-[17px] font-bold text-[#101828] md:text-[19px]">{user.nickname}</p>
-            {/* 모바일은 이메일과 가입일을 두 줄로 나눠 이메일만 말줄임한다(긴 이메일이 가입일을 밀어내지 않게).
-                말줄임은 CSS라 전체 이메일은 DOM과 스크린리더에 그대로 남고, title로 마우스 오버에서도 보인다. */}
-            <p className="flex min-w-0 flex-col text-[13px] text-[#6a7282] md:flex-row md:items-center md:gap-1.5">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <p className="truncate text-[16px] leading-6 font-extrabold text-[#101828] md:text-[20px] md:leading-[30px]">
+              {user.nickname}
+            </p>
+            {/* 모바일은 이메일과 가입일을 두 줄로 나눠 이메일만 말줄임한다(긴 이메일이 가입일을 밀어내지 않게). Figma 모바일은
+                가입일을 숨기지만 UI정의서 MY-01의 필수 항목이라 그대로 보인다. 말줄임은 CSS라 전체 이메일은 DOM과
+                스크린리더에 그대로 남고, title로 마우스 오버에서도 보인다. */}
+            <p className="mt-0.5 flex min-w-0 flex-col text-[13px] leading-5 text-[#99a1af] md:flex-row md:items-center md:gap-1.5">
               <span className="truncate" title={user.email}>
                 {user.email}
               </span>
@@ -82,15 +87,15 @@ export function ProfileCard({ state }: { state: Loadable<UserResponse> }) {
               화면으로 이동하는 방식으로 바꿨다 — UI정의서를 따른다(문서 동기화 필요). */}
           <Link
             to={MY_ROUTES.profileEdit}
-            className="flex shrink-0 items-center gap-1.5 rounded-[10px] border border-[#e5e7eb] bg-white px-3 py-2 text-[13px] font-semibold text-[#364153] hover:bg-[#f7f8fa]"
+            className="flex shrink-0 items-center gap-1.5 rounded-[14px] border border-[#e5e7eb] bg-white px-4 py-2 text-[13px] leading-5 font-semibold text-[#4a5565] hover:bg-[#f7f8fa]"
           >
-            <PencilIcon className="size-3.5 text-[#4a5565]" />
+            <PencilIcon className="size-3.5" />
             회원정보 수정
           </Link>
         </>
       ) : (
         <>
-          <span aria-hidden="true" className="size-14 shrink-0 animate-pulse rounded-full bg-[#f3f4f6] md:size-16" />
+          <span aria-hidden="true" className="size-[52px] shrink-0 animate-pulse rounded-full bg-[#f3f4f6] md:size-16" />
           <div aria-hidden="true" className="flex flex-1 flex-col gap-2">
             <div className="h-4 w-28 animate-pulse rounded bg-[#f3f4f6]" />
             <div className="h-3.5 w-48 max-w-full animate-pulse rounded bg-[#f3f4f6]" />

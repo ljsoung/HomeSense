@@ -177,8 +177,26 @@ async function scenarioContent(label, viewport, mobile) {
   ok(`${label} 메뉴: MY-02/03/04 링크`, (await page.getByRole('link', { name: '관심 매물·지역 관리' }).getAttribute('href')) === '/favorites'
     && (await page.getByRole('link', { name: '알림 설정' }).getAttribute('href')) === '/notifications/settings'
     && (await page.getByRole('link', { name: '알림 이력' }).getAttribute('href')) === '/notifications');
-  const tileColor = await accountTile(page).evaluate((el) => getComputedStyle(el).color);
-  ok(`${label} 메뉴: 계정 타일이 활성 버튼(흐린 색 아님)`, (await accountTile(page).isEnabled()) && tileColor === 'rgb(54, 65, 83)', tileColor);
+  // 라벨 색: 일반 타일 #1c1c1e, 계정 타일 #6a7282(Figma #9ca3af는 대비 2.5:1이라 올림 — 흰 배경 대비 4.5:1 이상).
+  const tileColor = await accountTile(page).locator('span', { hasText: '로그아웃·회원탈퇴' }).evaluate((el) => getComputedStyle(el).color);
+  ok(`${label} 메뉴: 계정 타일이 활성 버튼, 라벨 #6a7282`, (await accountTile(page).isEnabled()) && tileColor === 'rgb(106, 114, 130)', tileColor);
+  const menuLabelColor = await page.getByRole('link', { name: '알림 설정' }).locator('span', { hasText: '알림 설정' }).evaluate((el) => getComputedStyle(el).color);
+  ok(`${label} 메뉴: 일반 타일 라벨 #1c1c1e`, menuLabelColor === 'rgb(28, 28, 30)', menuLabelColor);
+
+  // Figma 토큰 대조(레이아웃·크기) — 모바일 / md 이상 값이 다르다.
+  const h1 = await page.getByRole('heading', { level: 1, name: '마이페이지' }).evaluate((el) => getComputedStyle(el).fontSize);
+  ok(`${label} 토큰: 페이지 제목 ${mobile ? 22 : 26}px`, h1 === `${mobile ? 22 : 26}px`, h1);
+  const avatar = await page.getByRole('region', { name: '내 프로필' }).locator('span[aria-hidden]').first().boundingBox();
+  ok(`${label} 토큰: 아바타 ${mobile ? 52 : 64}px`, avatar && Math.round(avatar.width) === (mobile ? 52 : 64), JSON.stringify(avatar));
+  const tileBoxes = await Promise.all(
+    [page.getByRole('link', { name: '관심 매물·지역 관리' }), page.getByRole('link', { name: '알림 이력' }), accountTile(page)].map((l) => l.boundingBox()),
+  );
+  const sameRow = tileBoxes.every((b) => b && Math.abs(b.y - tileBoxes[0].y) < 1);
+  ok(`${label} 토큰: 메뉴 ${mobile ? '1열 목록' : '4열 타일'}`, mobile ? !sameRow : sameRow, JSON.stringify(tileBoxes.map((b) => b && Math.round(b.y))));
+  const favBox = await page.getByRole('region', { name: '관심 매물' }).boundingBox();
+  const notiBox = await page.getByRole('region', { name: '최근 알림' }).boundingBox();
+  const widgetsSideBySide = favBox && notiBox && Math.abs(favBox.y - notiBox.y) < 1 && notiBox.x > favBox.x;
+  ok(`${label} 토큰: 위젯 ${mobile ? '세로 쌓임' : '2열'}`, mobile ? !widgetsSideBySide : widgetsSideBySide, JSON.stringify([favBox, notiBox]));
   // Figma 아이콘: 장식(aria-hidden), 메뉴 3개는 Primary, 로그아웃은 흐린 회색, 연필은 보조 텍스트 색.
   const iconInfo = (locator) => locator.locator('svg').first().evaluate((svg) => ({
     hidden: Boolean(svg.closest('[aria-hidden="true"]')),

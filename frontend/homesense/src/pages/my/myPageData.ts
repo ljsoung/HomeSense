@@ -23,7 +23,6 @@ export function pickRecentFavorites(
 
 export interface FavoritePreview {
   items: FavoritePropertySummaryResponse[];
-  total: number;
 }
 
 // useLoadable은 렌더마다 바뀌지 않는 fetcher를 받는다 — 모듈 수준 함수로 둔다.
@@ -31,7 +30,7 @@ export const loadProfile = (): Promise<UserResponse> => getMe();
 
 export const loadFavoritePreview = async (): Promise<FavoritePreview> => {
   const favorites = await getFavoriteProperties();
-  return { items: pickRecentFavorites(favorites), total: favorites.length };
+  return { items: pickRecentFavorites(favorites) };
 };
 
 /** 서버가 발송 시각 내림차순으로 준다. 유형 필터 없음(전체). */
