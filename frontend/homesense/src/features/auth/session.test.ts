@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GENERIC_ERROR_MESSAGE, getErrorMessage } from '../../lib/apiError';
 import { DEFAULT_REQUEST_TIMEOUT_MS, httpClient } from '../../lib/httpClient';
 import { tokenStorage } from '../../lib/tokenStorage';
+import { withdraw } from '../user/api';
 import {
   __resetSessionStateForTests,
   advanceSessionGeneration,
@@ -164,6 +165,30 @@ describe('재발급 대상이 아닌 401', () => {
 
     await expect(httpClient.put('/api/users/me', {})).rejects.toMatchObject({ response: { status: 401 } });
     expect(refreshCalls).toHaveLength(0);
+  });
+
+  it('탈퇴 비밀번호 불일치(DELETE /api/users/me 401 INVALID_CREDENTIALS)는 재발급·재시도·세션 정리 없이 서버 문구로 실패한다', async () => {
+    // 백엔드 실제 응답과 같은 모양: UserService.withdraw() → InvalidCredentialsException → GlobalExceptionHandler.
+    tokenStorage.setTokens('A1', 'R1');
+    const withdrawCalls: string[] = [];
+    handler = async (config) => {
+      if (config.url === '/api/auth/refresh') refreshCalls.push(body(config));
+      if (config.method === 'delete') withdrawCalls.push(config.url ?? '');
+      return respond(config, 401, { ...unauthorized, error: { code: 'INVALID_CREDENTIALS', message: '비밀번호가 일치하지 않습니다' } });
+    };
+    const expired = vi.fn();
+    setSessionExpiredListener(expired);
+    markTabAuthenticated(null); // MY-01은 로그인이 확정된 탭에서만 그려진다.
+    const generation = currentSessionGeneration();
+
+    const failure = await withdraw('wrong-password').catch((error: unknown) => error);
+
+    expect(getErrorMessage(failure)).toBe('비밀번호가 일치하지 않습니다');
+    expect(withdrawCalls).toEqual(['/api/users/me']);
+    expect(refreshCalls).toHaveLength(0);
+    expect(expired).not.toHaveBeenCalled();
+    expect(currentSessionGeneration()).toBe(generation);
+    expect([tokenStorage.getAccessToken(), tokenStorage.getRefreshToken()]).toEqual(['A1', 'R1']);
   });
 
   it('로그인 실패(인증 엔드포인트의 401)는 재발급하지 않는다', async () => {

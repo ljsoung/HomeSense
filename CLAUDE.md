@@ -2221,7 +2221,7 @@ UIC-08 `EmptyState`/`Spinner`, UIC-09 `DataTrustBadge`)도 같은 이유로 이 
 | **분기 방식** | 상태에 따라 동작이 갈리는 곳은 `switch`로 분기하고 default에서 `assertNever`(`lib/assertNever.ts`)를 부른다. 상태를 boolean으로 줄이는 지역 변수(`const isAuthenticated = status === 'authenticated'`)도 만들지 않는다 | 상태가 늘면 처리하지 않은 분기가 컴파일 에러로 드러난다. type-aware lint(`@typescript-eslint/switch-exhaustiveness-check`)는 이 프로젝트에 설정돼 있지 않아 켜지 않았다(lint 설정 범위를 넓히지 않음) | type-aware lint를 도입하면 `switch-exhaustiveness-check`를 함께 켠다 |
 | **상태 전이 규칙** | 초기값: 저장소에 Access Token이 있으면 `checking`, 없으면 `anonymous`. `checking → authenticated/anonymous`는 세션 복원 결과로만(세대가 그대로일 때). 로그인·가입 성공 → `authenticated`, 로그아웃 → `anonymous`, 사용 중 재발급이 세션 종료로 끝남 → `anonymous`. 세 전이 모두 먼저 세대를 올리고(`advanceSessionGeneration`), 늦게 끝난 복원·재발급 결과는 세대가 바뀌었으면 버린다. **[2026-09-30 추가]** 다른 탭이 저장소의 계정을 바꾸면 `authenticated/anonymous → checking`(저장소에 토큰이 없으면 `→ anonymous`)으로 다시 확인한다 — 이 전이도 먼저 세대를 올린다("탭 계정 동기화" 절). 그 밖에 `checking`으로 되돌아가는 전이는 없다 | 사용자가 직접 바꾼 세션을 늦게 끝난 비동기 결과가 되돌리지 않게 한다("401 자동 재발급과 요청 timeout" 절의 조건 3) | 다른 이유(예: 탭 복귀 시 재검증)로 `checking`으로 돌아가는 전이를 추가하면 같은 다시 확인 경로(`beginRecheck`)를 쓴다 |
 | **`checking`일 때 화면** | 헤더: 로그인 링크도 계정 메뉴도 아닌 자리 표시(`data-testid="account-placeholder"`). 크기는 실측한 비로그인 영역에 맞췄다 — 데스크톱 144×32px(로그인·회원가입), 모바일 35×28px(로그인 링크 35×20과 아바타 28 중 큰 쪽). 보호 라우트: 리다이렉트하지 않고 기다린다. HOME-01 개인화: 관심 지역 요약·관심 매물 API를 부르지 않고 가입 유도 CTA도 띄우지 않는다(로딩 표시) | 확인 중인 로그인 사용자를 비로그인으로 단정하지 않는다. 데스크톱 중앙 메뉴는 우측 영역 너비에 따라 위치가 바뀌므로, 처음 방문하는 대부분의 상태(비로그인)와 같은 너비로 자리를 잡는다. 헤더 높이는 60px 고정이라 세로 이동은 없다 | 헤더 우측 버튼 구성이 바뀌면 자리 표시 크기를 다시 잰다 |
-| **`RequireAuth` 가드** | `src/routes/RequireAuth.tsx` 하나. `checking`은 대기(스피너), `anonymous`는 `/login`으로 `replace` 이동하며 `state.from`에 원래 위치를 남기고, `authenticated`는 화면을 그린다. **라우트에는 아직 적용하지 않았다** — 로그인이 필요한 화면(MY-01·MY-02·MY-04)이 아직 플레이스홀더라 가짜 보호 화면을 만들지 않았다. 관리자 권한 가드는 범위 밖이다 | vitest(`MemoryRouter`)로 세 상태를 검증했다. Playwright 가드 시나리오는 첫 보호 화면을 만들 때 그 라우트를 감싸며 추가한다 | 첫 보호 화면을 구현할 때 그 라우트에 적용하고 e2e를 추가한다 |
+| **`RequireAuth` 가드** | `src/routes/RequireAuth.tsx` 하나. `checking`은 대기(스피너), `anonymous`는 `/login`으로 `replace` 이동하며 `state.from`에 원래 위치를 남기고, `authenticated`는 화면을 그린다. **[2026-10-01 적용] MY-01(`/my`)과 MY-02~05 자리 표시 라우트에 적용했다** — "SCR-MY-01" 절. 화면이 `checkingFallback`으로 자기 스켈레톤을 넘기면 스피너 대신 그것을 보인다. 사용자가 직접 로그아웃·탈퇴한 경우(`signedOutByUser`)는 로그인 화면이 아니라 HOME-01로 보낸다. 관리자 권한 가드는 범위 밖이다 | vitest 6건(세 상태 + 직접 로그아웃 → 홈, 세션 종료 → 로그인, 이미 비로그인으로 진입 → 로그인), e2e `my01-mypage-check` | 보호 화면을 새로 만들면 그 라우트도 감싼다 |
 
 검증: vitest `RequireAuth.test.tsx`(3건), e2e `auth-status-checking-check`(22/22 — 세션 확인 응답을 붙잡은 동안 데스크톱·모바일 헤더에 자리 표시만 있고 로그인 링크·계정 메뉴 없음, 개인화 API 호출 없음, 가입 유도 CTA 없음, 풀면 계정 메뉴로 확정되고 헤더 높이 그대로, 토큰이 없으면 처음부터 로그인 링크). 헤더와 관심 지역 카드가 확인 중을 비로그인처럼 그리게 바꾸면 4건 실패한다(변형 검증). 기존 인증·홈 e2e 9개도 통과했다.
 
@@ -2257,6 +2257,52 @@ UIC-08 `EmptyState`/`Spinner`, UIC-09 `DataTrustBadge`)도 같은 이유로 이 
 - 숨은 쪽의 폼 상태가 보이는 쪽과 따로 움직인다.
 
 **무효화 조건:** 서버 렌더링 도입 등으로 첫 렌더에서 화면 크기를 알 수 없어 한 벌 렌더가 깜빡임을 만들면, 그 화면에 한해 다시 판단하고 여기에 기록한다.
+
+### SCR-MY-01 마이페이지 홈 (2026-10-01, `feature/frontend/mypage`)
+
+UI정의서 v2.1 5.5절 MY-01(FR-1.4)을 구현했다. 경로 상수는 `src/routes/paths.ts`의 `MY_ROUTES`, 화면은 `src/pages/my/`이다.
+- 프로필·관심 매물·최근 알림을 동시에 따로 불러(`useLoadable`) 한 영역의 실패가 다른 영역을 막지 않는다.
+- 탈퇴 유예 일수는 `features/user/withdrawalPolicy.ts`의 `WITHDRAWAL_GRACE_DAYS` 하나를 방침과 탈퇴 안내가 함께 쓴다.
+
+**착수 전 확인(2절):**
+- (a) 401 인터셉터·인증 상태 3종은 develop에 있다.
+- (b) `UserResponse.createdAt`이 이미 있어 백엔드를 고치지 않았다.
+- (c) `WithdrawRequest`는 password(필수, 재확인)와 reason(선택)을 받지만, reason은 `toCommand()`가 넘기지 않아 저장되지 않는다.
+- (d) `FavoritePropertySummaryResponse`에 전용면적·등록일시가 없고, 목록 쿼리에 ORDER BY가 없다.
+- (e) `GET /api/notifications`는 `ApiResponse.success(Page<T>)` 관례를 따르고 sentAt 내림차순이며, `isRead`가 있다.
+- (f) `/my`·`/favorites`·`/notifications`가 자리 표시로 있었다. 헤더 계정 메뉴에 "마이페이지"가 있었고 하단 탭 "마이"는 `/my`였다. 경로 상수 파일은 없어 새로 만들었다.
+- (g) `Modal` + `useDialogBehavior`(포커스 트랩·Esc·트리거로 포커스 복귀)가 있다.
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| 계정 타일 → 선택 다이얼로그 | "로그아웃·회원탈퇴" 타일은 버튼이다. 누르면 "로그아웃 / 회원탈퇴 / 취소" 선택 다이얼로그를 연다. 로그아웃은 확인 없이 바로 실행하고, 헤더 계정 메뉴와 같은 `useLogoutAction`을 쓴다(로그아웃 경로를 두 벌로 만들지 않음) | 타일 하나에 두 동작이 묶여 있어 무엇을 할지 먼저 고르게 했다 | Figma에 로그아웃·탈퇴가 따로 정의되면 |
+| 직접 로그아웃·탈퇴 후 이동 | `AuthContext.signedOutByUser`(로그아웃·`endSession`에서 true, 로그인·가입·세션 재확인·세션 만료에서 false)와 가드의 "로그인 상태를 본 적이 있는가"(`sawAuthenticated`, 렌더 중 상태 조정)를 함께 본다. 둘 다 참이면 `RequireAuth`가 HOME-01로 replace한다. 그 외 비로그인은 기존대로 `/login` + `state.from`이다. 화면은 직접 navigate하지 않는다 | 보호 화면에서 로그아웃한 사람을 "로그인하면 돌아온다"는 로그인 화면으로 보내면 안 된다. 헤더 메뉴로 보호 화면에서 로그아웃해도 같은 규칙이 적용된다. 예전에 로그아웃한 채로 하단 탭 "마이"를 누르면 플래그는 남아 있지만 가드가 로그인 상태를 본 적이 없어 로그인 화면으로 간다. 검증: vitest 6건, e2e 시나리오 5·6. 두 조건 중 하나를 빼면 각각 vitest 1건이 실패하고, 홈 이동을 끄면 e2e 20건이 실패한다(변형 검증) | 로그아웃 뒤 이동 정책이 화면별로 달라지면 |
+| 탈퇴 후 세션 정리 | `AuthContext.endSession()`은 세대를 올리고 로컬 토큰을 지운 뒤 비로그인으로 전환한다. `/api/auth/logout`은 부르지 않는다 | 서버(`UserService.withdraw`)가 이미 Refresh Token을 모두 폐기했고 `user:status`를 WITHDRAWN으로 썼다 | 탈퇴 API가 토큰을 폐기하지 않게 바뀌면 |
+| 탈퇴 확인 다이얼로그 | `role="alertdialog"`, 안내는 `aria-describedby`로 연결한다. 순서: 처리 안내 → "안내 사항을 확인했습니다" 체크 → 비밀번호 재확인 → [탈퇴하기]. 체크하고 비밀번호를 입력해야 버튼이 활성화된다. 실패하면 서버 `error.message`를 다이얼로그 안에 보이고 비밀번호 칸으로 포커스를 돌린다. 열 때마다 새로 마운트해 이전 입력이 남지 않는다. 안내 문구는 방침 2항과 코드에 있는 사실만 쓴다(즉시 로그인 불가·토큰 폐기, 7일 보관 후 매일 새벽 자동 파기, 파기 대상, 재로그인으로 복구되지 않음, 같은 이메일 재가입은 파기 뒤) | 비밀번호 불일치는 401 `INVALID_CREDENTIALS`(비즈니스 401)라 인터셉터가 재발급하지 않는다 | — |
+| 탈퇴 비밀번호 불일치 응답(2026-10-01 확인, 백엔드 변경 없음) | `DELETE /api/users/me`와 `PUT /api/users/me`의 비밀번호 불일치는 둘 다 `UserService`가 던지는 `InvalidCredentialsException` → **401 `INVALID_CREDENTIALS`**("비밀번호가 일치하지 않습니다")다. 프론트 401 인터셉터는 `error.code === 'UNAUTHORIZED'`일 때만 재발급하므로(`refreshableAccessToken`) 이 응답에는 재발급·재시도·세션 정리 중 아무것도 하지 않는다. 그래서 백엔드 브랜치(`feature/backend/password-confirm-status`, 400 전용 코드로 바꾸기)는 만들지 않았고, `WithdrawRequest.reason` 제거도 그 브랜치에 묶여 있어 하지 않았다 | 충돌이 실제로 생기는 조건이 아니다(인터셉터 판별 기준이 상태가 아니라 에러 코드). 검증: vitest `session.test.ts` "탈퇴 비밀번호 불일치"(재발급 0회·DELETE 1회·세대 불변·만료 리스너 미호출·토큰 유지·서버 문구), 인터셉터의 코드 판별을 빼면 이 테스트와 기존 PUT 테스트가 실패한다(변형 검증). e2e `my01-mypage-check` 시나리오 6(실제 백엔드와 같은 401 바디, 재발급 0회, 헤더 로그인 유지, 다이얼로그 안 메시지) | 인터셉터가 상태 코드(401)만으로 재발급하게 바뀌거나, 다른 클라이언트·프록시가 401을 세션 만료로 취급하게 되면 400 전용 코드로 바꾸는 백엔드 작업을 다시 연다. 실 백엔드로는 아직 확인하지 않았다(아래 완결 필요) |
+| 탈퇴 사유 미수집 | 사유 입력란을 두지 않는다. 요청 본문은 password만 보낸다 | 서버가 받아도 저장하지 않는다(user 테이블에 컬럼 없음). 쓰지 않는 데이터는 모으지 않는다 | 사유 저장 컬럼·API가 생기면 |
+| 탈퇴 다이얼로그에서 철회 미안내 | 철회 가능성을 안내하지 않는다 | `POST /api/auth/reactivate`는 있지만 호출하는 화면이 없고, 방침도 철회를 안내하지 않는다 | 철회 화면이 생기면(`/privacy` 2항과 함께 갱신) |
+| MY-02~05 자리 표시 | `/favorites`(MY-02), `/notifications/settings`(MY-03, 새 경로), `/notifications`(MY-04), `/my/profile`(MY-05, 새 경로)를 보호 라우트 아래 "준비 중" 화면(`MyPreparingPage`, MainLayout + 마이페이지로 돌아가기)으로 둔다. **부수 효과:** 비로그인으로 GNB "관심목록"·하단 탭 "찜"·"알림"을 누르면 이제 로그인 화면으로 간다(전에는 공개 자리 표시였다) | MY-01 메뉴 링크가 404나 빈 화면이 되지 않게 한다. 세 화면 모두 로그인이 필요하다 | 해당 화면을 구현하면 |
+| 미리보기의 하트·알림 읽음 | 관심 매물 행의 하트는 표시 전용(`aria-hidden`)이고, 해제는 MY-02의 일이다. 최근 알림은 읽음 처리(PATCH)를 하지 않는다 | UI정의서 MY-01에 해제·읽음 처리가 정의돼 있지 않다 | UI정의서가 바뀌면 |
+| 관심 매물 "최근 등록순" | `favoritePropertyId` 내림차순 상위 2건(`pickRecentFavorites`) | 응답에 등록일시가 없고 목록 쿼리에 정렬이 없다. ID는 AUTO_INCREMENT이고 등록 시각은 저장 시점이라 ID 순서가 등록 순서와 같다. 행에는 응답에 있는 가격만 쓰고(전월세는 "보증금"), 면적은 응답에 없어 생략한다 | 응답에 등록일시나 면적이 추가되면 |
+| 알림 점 색 **[2026-10-01 변경]** | 한 색(Primary)으로 통일하고 읽음 여부는 MY-01에서 표시하지 않는다. 상대 시간은 공용 `lib/relativeTime.ts`(서버 LocalDateTime을 KST로 읽음, 7일 이상은 날짜) | Figma(지성 전달)에서 점 색은 알림 대상의 종류다 — 관심 매물 = Primary, 관심 지역 = amber. 하지만 응답으로 대상을 가를 수 없다: `NotificationResponse`의 `complexId`·`legalDongCd`·`tradeId`는 상호 배타가 아니고(엔티티·DTO 주석: 신규 거래 알림은 complex와 trade가 함께 채워질 수 있다), 알림을 만드는 BAT-NTF-01이 없어 대상별로 어떤 조합이 오는지 정한 계약도 없다(2026-10-01 코드 확인 — `Notification` 생성 호출부 0건). 처음 구현(읽지 않음 = 브랜드, 읽음 = 회색)은 Figma와 의미가 달라 바꿨다. 검증: e2e `my01-mypage-check`(점 3개가 모두 Primary) | 알림 응답에 대상 종류(예: `favoritePropertyId`/`favoriteRegionId` 또는 대상 유형 필드)가 생기거나 BAT-NTF-01이 대상별 필드 조합을 정하면 두 색으로 나눈다 — MY-04를 구현할 때 같은 규칙을 쓴다 |
+| 프로필 오류 | 401이 아닌 실패만 상단 배너(서버 메시지 + 다시 시도)로 알린다. 401은 가드가 로그인 화면으로 보내므로 배너를 띄우지 않는다 | UI정의서 MY-01 예외 처리 | — |
+| 확인 중 화면 | `RequireAuth`에 `checkingFallback`을 추가했다. MY-01은 레이아웃이 같은 스켈레톤(`MyPageSkeleton`)을 넘긴다 | 확인 중에 리다이렉트하지 않고 화면 모양을 유지한다 | — |
+| 레이아웃·토큰(2026-10-01 Figma 대조 반영) | 한 벌 렌더(반응형 렌더 규칙). 지성이 Figma 7:5373·26:15193·26:14966에서 추출한 값을 그대로 썼다: 본문 최대 폭 1000(패딩 포함)·패딩 48/32·섹션 간격 28(모바일 24/16·20), 보이는 제목 "마이페이지" 26/39(모바일 22/33) ExtraBold, 카드 radius 16·테두리 #f3f4f6·그림자 0 1px 4px 5%(프로필만 6%), 섹션 제목(메뉴·관심 매물·최근 알림)은 카드 밖 위 14/21 Bold #99a1af(모바일 "메뉴"만 13/20·간격 8), "전체 보기"는 13/20 SemiBold brand + 화살표 14. 메뉴는 md(768) 이상 4열 타일(간격 16, 여백 32/16, 아이콘 칸 48/16·#e8f2f0, 라벨 13/18 #1c1c1e), 모바일은 카드 하나 안 1열 목록(행 16/20, 아이콘 칸 36/14, 라벨 14/21 + chevron). 위젯은 md 이상 2열(간격 24)로 바꿨다(처음엔 xl 이상). 목록 행 16/20·간격 14·구분선 #f3f4f6, 썸네일 56×42/14, 단지명 13/20 Bold, 가격 12/18 #99a1af. 하단 탭 여백은 MainLayout(`pb-16`). 검증: e2e `my01-mypage-check`(제목 크기·아바타·메뉴 열·위젯 열·라벨 색), 스크린샷 `my01-screenshots` | UI정의서 6.2절의 "2열→1열"은 Figma와 달라 Figma를 따랐다(코드 주석에만 기록). `ArrowRightIcon`(14)·`ChevronRightIcon`(16)은 Figma 크기와 같아 그대로 썼다 | Figma가 바뀌면 |
+| Figma와 의도적으로 다르게 둔 것 | (1) 로그아웃 타일 라벨 #6a7282(Figma #9ca3af는 흰 배경 대비 2.54:1, 지성 결정). (2) 모바일 프로필의 가입일을 보인다(Figma는 숨김 — UI정의서 필수 항목, 기존 결정). (3) 데스크톱·태블릿 부제(14/21 #99a1af)를 넣지 않았다 — 문구를 받지 못했다. (4) 최근 알림 행은 Figma처럼 한 줄 문구라 `message`만 보이고 `title`은 쓰지 않는다 — BAT-NTF-01이 없어 두 필드의 내용이 정해지지 않았다. (5) "전체 관심 매물 보기" 뒤의 개수 표시를 없앴다(Figma에 없음, 함께 쓰던 `FavoritePreview.total`도 제거). (6) 위젯 섹션 제목 앞 아이콘(하트·종)을 없앴다(Figma는 글자만) | — | (3) 부제 문구를 받으면 넣는다(모바일은 숨김). (4) BAT-NTF-01이 title/message 내용을 정하면 다시 본다 |
+| **대비 미달(결정 필요)** | Figma 회색 #99a1af 글자를 그대로 썼다: 이메일·가입일, 가격 줄, 알림 상대 시간(흰 카드 위 2.60:1), 섹션 제목(페이지 배경 #f7f8fa 위 2.45:1). NFR-8 기준 4.5:1에 못 미친다. 로그아웃 라벨처럼 올릴지(예: #6a7282 4.84:1) 지성 결정이 필요하다 — 같은 #99a1af가 다른 화면에도 63곳 쓰여 화면 단위가 아니라 공통 결정이 낫다 | 대조값은 지성이 준 Figma 값이고, 로그아웃 라벨만 명시적으로 바꾸라고 했다 | 결정이 나면 이 행을 바꾼다 |
+
+**문서와 다른 점(코드 주석에만 기록, 문서 동기화 필요):** UI정의서 6.2절 MY-01 그리드 표기("2열→1열", 실제는 Figma대로 4열→1열). 프로그램설계서 3.2절 하단 메모 "MY-01 회원정보 수정은 인라인/모달"(UI정의서 v2.1은 MY-05 이동). 프로그램설계서 3.2절 `withdraw()` 처리 로직에 비밀번호 재확인 단계(`PasswordEncoder.matches()`)와 불일치 시 `InvalidCredentialsException`(401 `INVALID_CREDENTIALS`)을 반영해야 한다 — 지금 설계서에는 이 단계가 없다.
+
+**완결 필요:**
+- **Figma 대조 미실시(2026-10-01에도 Figma MCP 미연결).** 7:5373·26:15193·26:14966과 참조 프레임(6:4995·6:5286·38:1526)을 보지 못했다. 색·간격·위젯 배치는 기존 화면(HOME-01·DTL-01)의 토큰으로 맞췄다. **아이콘은 2026-10-01 지성이 전달한 Figma SVG로 교체했다** — 메뉴 `MenuHeartIcon`·`MenuBellIcon`(20px Figma 버전, 공용 `HeartIcon`·`BellIcon`과 크기·획이 달라 따로 둠)·`BellRingIcon`·`LogOutIcon`, "회원정보 수정" 버튼 `PencilIcon`(14px). 모두 `currentColor`·`aria-hidden`. 색: 메뉴 3개 `brand`(Primary), 로그아웃 `#9ca3af`, 연필 `#4a5565` — 색 토큰은 `brand`뿐이라 나머지 둘은 코드베이스가 이미 쓰는 같은 hex를 그대로 썼다. e2e가 장식 여부와 색을 검사한다. 하단 탭 라벨은 코드 "찜", Figma "관심"으로 다르다(보고만 함, 공용 UIC-02라 바꾸지 않았다).
+- **MY-02 선행 — 관심 매물 요약 응답 확장(백엔드).** UIC-05 카드가 요구하는 최근 거래의 전용면적·층·거래일을 `FavoritePropertySummaryResponse`에 추가하고, 목록 정렬(등록순)을 서버에서 명시한다(지금 `findByUser_UserId`에 ORDER BY가 없다). 들어오면 MY-01 미리보기에 면적을 붙이고 클라이언트 ID 정렬을 걷어낸다(`FavoritePreview.tsx`의 TODO).
+- **`docs/specs/` 부재 원인(2026-10-01 확인).** 무시 규칙이 아니다(`git check-ignore` 결과 없음, `.gitignore`에 docs 항목 없음). 워크트리는 하나뿐이고, 원격 `develop`·`main`과 로컬의 모든 브랜치·태그 이력에 `docs/specs` 경로가 한 번도 없다(`git log --all -- docs/specs` 0건, `ls-remote`로 원격 헤드가 로컬과 같음을 확인). 명세 최신본이 아직 커밋된 적이 없다는 뜻이다 — Downloads에는 프로그램설계서 xlsx만 있다.
+- **방침 6항 갱신 필요.** "마이페이지를 통한 회원정보 수정·탈퇴 자기서비스 기능은 준비 중"이라는 문구는 MY-01 배포 뒤 탈퇴에 대해서는 사실이 아니다(수정은 MY-05 미구현이라 여전히 사실). 개정 문구와 시행일(개정 이력 v1.4, 실가입이 있으면 7일 사전 고지)은 지성이 정한다 — 이번에 고치지 않았다.
+- **하단 탭 "마이" 미읽음 배지.** 여전히 없다. 미읽음 개수 API가 없다(SCR-HOME-01 절 "알림 벨" 행).
+- **실 백엔드 확인 미실시(2026-10-01에도 Docker 꺼짐).** (1) `home01-logout-check` — 헤더 계정 메뉴의 로그아웃을 `useLogoutAction`으로 옮겼다. (2) 탈퇴 수동 확인: 비밀번호 틀림 → 세션 유지, 맞음 → 탈퇴 후 HOME-01, 같은 계정 로그인 거부(403 `ACCOUNT_WITHDRAWN`). 다음에 백엔드를 띄우면 이것부터 한다.
+
+검증: `npm run lint`(오류 0), `tsc -b`, `npm run build`, vitest 88건(`relativeTime`·`pickRecentFavorites`·`RequireAuth`·탈퇴 비밀번호 불일치 포함). e2e `my01-mypage-check` 285/285(390/768/1280, 백엔드 불필요). 회귀 확인: `auth-status-checking-check` 22/22, `auth-interceptor-multitab-check` 17/17.
 
 ### 기술 부채 — 반응형 두 벌 렌더 기존 사용처 (2026-09-29 목록화, 이번에 고치지 않음)
 

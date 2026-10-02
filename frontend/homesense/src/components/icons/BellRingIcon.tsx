@@ -1,0 +1,13 @@
+import type { SVGProps } from 'react';
+
+/** MY-01 메뉴 "알림 이력" 울리는 종 — Figma(7:5373)의 20px SVG. */
+export function BellRingIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" {...props}>
+      <path d="M8.55667 17.5C8.70296 17.7533 8.91335 17.9637 9.16671 18.11C9.42006 18.2563 9.70746 18.3333 10 18.3333C10.2926 18.3333 10.5799 18.2563 10.8333 18.11C11.0867 17.9637 11.2971 17.7533 11.4433 17.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M18.3333 6.66699C18.3333 4.75033 17.6667 3.08366 16.6667 1.66699" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M2.71833 12.772C2.60947 12.8913 2.53763 13.0397 2.51155 13.1991C2.48547 13.3585 2.50627 13.522 2.57142 13.6698C2.63658 13.8176 2.74328 13.9433 2.87855 14.0316C3.01381 14.1198 3.17182 14.1669 3.33333 14.167H16.6667C16.8282 14.167 16.9862 14.1202 17.1216 14.0321C17.2569 13.944 17.3637 13.8184 17.4291 13.6708C17.4944 13.5231 17.5154 13.3596 17.4895 13.2001C17.4637 13.0407 17.392 12.8923 17.2833 12.7728C16.175 11.6303 15 10.4162 15 6.66699C15 5.34091 14.4732 4.06914 13.5355 3.13146C12.5979 2.19378 11.3261 1.66699 10 1.66699C8.67392 1.66699 7.40215 2.19378 6.46447 3.13146C5.52679 4.06914 5 5.34091 5 6.66699C5 10.4162 3.82417 11.6303 2.71833 12.772Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.33332 1.66699C2.33332 3.08366 1.66666 4.75033 1.66666 6.66699" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}

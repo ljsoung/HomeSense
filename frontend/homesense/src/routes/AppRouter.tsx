@@ -6,7 +6,11 @@ import { PasswordResetPage } from '../pages/auth/PasswordResetPage';
 import { SignupPage } from '../pages/auth/SignupPage';
 import { HomePage } from '../pages/home/HomePage';
 import { PrivacyPolicyPage } from '../pages/legal/PrivacyPolicyPage';
+import { MyPage, MyPageSkeleton } from '../pages/my/MyPage';
+import { MyPreparingPage } from '../pages/my/MyPreparingPage';
 import { SearchResultsPage } from '../pages/search/SearchResultsPage';
+import { MY_ROUTES } from './paths';
+import { RequireAuth } from './RequireAuth';
 
 export function AppRouter() {
   return (
@@ -22,12 +26,50 @@ export function AppRouter() {
         <Route path="/search" element={<SearchResultsPage />} />
         <Route path="/complexes/:id" element={<ComplexDetailRoute />} />
         <Route path="/map" element={<PlaceholderPage programId="MAP-01" title="지도로 보기" />} />
-        <Route path="/my" element={<PlaceholderPage programId="MY-01" title="마이페이지" />} />
-        <Route path="/favorites" element={<PlaceholderPage programId="MY-02" title="관심목록" />} />
+        <Route
+          path={MY_ROUTES.home}
+          element={
+            <RequireAuth checkingFallback={<MyPageSkeleton />}>
+              <MyPage />
+            </RequireAuth>
+          }
+        />
+        {/* MY-02~05는 아직 준비 중 — MY-01 메뉴 링크가 끊기지 않게 보호 라우트 아래 자리 표시를 둔다. */}
+        <Route
+          path={MY_ROUTES.favorites}
+          element={
+            <RequireAuth>
+              <MyPreparingPage programId="MY-02" title="관심 매물·지역 관리" />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path={MY_ROUTES.notificationSettings}
+          element={
+            <RequireAuth>
+              <MyPreparingPage programId="MY-03" title="알림 설정" />
+            </RequireAuth>
+          }
+        />
         {/* NotificationController.getNotifications()/NotificationResponse Javadoc이 "MY-04 알림
             이력"이라고 명시한다 — MY-03은 별개 화면(알림 설정, GET/PUT /api/notifications/settings).
             처음엔 이 구분을 확인하지 않고 MY-03으로 잘못 연결했었다(CLAUDE.md SCR-HOME-01 절 참고). */}
-        <Route path="/notifications" element={<PlaceholderPage programId="MY-04" title="알림 이력" />} />
+        <Route
+          path={MY_ROUTES.notifications}
+          element={
+            <RequireAuth>
+              <MyPreparingPage programId="MY-04" title="알림 이력" />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path={MY_ROUTES.profileEdit}
+          element={
+            <RequireAuth>
+              <MyPreparingPage programId="MY-05" title="회원정보 수정" />
+            </RequireAuth>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

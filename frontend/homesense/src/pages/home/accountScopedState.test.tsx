@@ -54,6 +54,8 @@ function renderWithStatus(initial: AuthStatus, ui: () => ReactNode) {
     login: async () => {},
     signup: async () => {},
     logout: async () => {},
+    endSession: () => {},
+    signedOutByUser: false,
   });
   const tree = () => (
     <MemoryRouter>

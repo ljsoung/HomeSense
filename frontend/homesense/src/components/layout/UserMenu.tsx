@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../features/auth/useAuth';
-import { useToast } from '../ui/useToast';
+import { useLogoutAction } from '../../features/auth/useLogoutAction';
+import { MY_ROUTES } from '../../routes/paths';
 
 interface UserMenuProps {
   /** 'desktop' = 아바타+닉네임 알약(Figma 3:38), 'mobile' = 아바타 원형만. */
@@ -10,15 +11,14 @@ interface UserMenuProps {
 
 /**
  * 로그인 상태의 헤더 우측 아바타 — 누르면 "마이페이지 / 로그아웃" 메뉴가 열린다. Figma(3:2/24:6736)는
- * 아바타만 그리고 로그아웃 위치를 정의하지 않았고, 마이페이지(MY-01)는 아직 자리표시라 그 안에 둘 수도
- * 없어 여기 둔다. ARIA 메뉴 버튼 패턴(aria-haspopup/aria-expanded, role=menu/menuitem)을 따르고,
+ * 아바타만 그리고 로그아웃 위치를 정의하지 않아 여기 둔다. MY-01의 계정 다이얼로그에도
+ * 로그아웃이 있고, 두 곳은 같은 경로(useLogoutAction)를 쓴다. ARIA 메뉴 버튼 패턴(aria-haspopup/aria-expanded, role=menu/menuitem)을 따르고,
  * 열리면 첫 항목에 포커스, ↑/↓로 이동, Esc·바깥 클릭으로 닫힌다(Esc는 버튼으로 포커스 복귀).
  */
 export function UserMenu({ variant }: UserMenuProps) {
-  const { user, logout } = useAuth();
-  const { showToast } = useToast();
+  const { user } = useAuth();
+  const { logoutWithNotice, loggingOut } = useLogoutAction();
   const [open, setOpen] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -60,11 +60,8 @@ export function UserMenu({ variant }: UserMenuProps) {
   };
 
   const handleLogout = async () => {
-    setLoggingOut(true);
-    await logout();
-    setLoggingOut(false);
+    await logoutWithNotice();
     setOpen(false);
-    showToast('로그아웃되었습니다');
   };
 
   return (
@@ -105,7 +102,7 @@ export function UserMenu({ variant }: UserMenuProps) {
           className="absolute top-[calc(100%+8px)] right-0 z-40 w-40 rounded-[14px] border border-[#e5e7eb] bg-white py-1.5 shadow-[0_10px_20px_rgba(0,0,0,0.12)]"
         >
           <Link
-            to="/my"
+            to={MY_ROUTES.home}
             role="menuitem"
             onClick={() => setOpen(false)}
             className="block px-3.5 py-2 text-[13px] text-[#364153] outline-none hover:bg-[#f7f8fa] focus-visible:bg-[#f0f9f7] focus-visible:text-brand"
