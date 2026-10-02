@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { FieldHint } from '../../components/ui/FieldHint';
-import { MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
+import { MODAL_DANGER_BUTTON_CLASS, MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
 import { TextField } from '../../components/ui/TextField';
 import { useToast } from '../../components/ui/useToast';
 import { useAuth } from '../../features/auth/useAuth';
@@ -14,9 +14,6 @@ export type AccountDialog = 'choice' | 'withdraw' | null;
 
 const PRIMARY_BUTTON_CLASS =
   'flex h-[43px] w-full items-center justify-center rounded-[14px] bg-brand text-[14px] font-semibold text-white hover:bg-[#0c4a44] disabled:cursor-not-allowed disabled:opacity-50 md:h-[47px]';
-// 탈퇴 버튼 — 흰 글자와 #e7000b는 대비 약 4.8:1(NFR-8 4.5:1 이상).
-const DANGER_BUTTON_CLASS =
-  'flex h-[43px] w-full items-center justify-center rounded-[14px] bg-[#e7000b] text-[14px] font-semibold text-white hover:bg-[#c10007] disabled:cursor-not-allowed disabled:opacity-50 md:h-[47px]';
 const DANGER_OUTLINE_BUTTON_CLASS =
   'flex h-[43px] w-full items-center justify-center rounded-[14px] border border-[#fecaca] bg-white text-[14px] font-semibold text-[#c10007] hover:bg-[#fef2f2] disabled:cursor-not-allowed disabled:opacity-50 md:h-[47px]';
 
@@ -127,7 +124,7 @@ function WithdrawDialog({ onClose }: { onClose: () => void }) {
       describedBy={noticeId}
       footer={
         <div className="flex flex-col gap-2 md:flex-row-reverse">
-          <button type="submit" form={formId} disabled={!canSubmit} className={DANGER_BUTTON_CLASS}>
+          <button type="submit" form={formId} disabled={!canSubmit} className={MODAL_DANGER_BUTTON_CLASS}>
             {submitting ? '탈퇴 처리 중…' : '탈퇴하기'}
           </button>
           <button type="button" onClick={onClose} disabled={submitting} className={MODAL_SECONDARY_BUTTON_CLASS}>

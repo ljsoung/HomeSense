@@ -11,9 +11,12 @@ function favorite(favoritePropertyId: number): FavoritePropertySummaryResponse {
     sigungu: '종로구',
     dongRi: '숭인동',
     housingType: 'APT',
+    registeredAt: '2026-09-01T10:00:00',
     recentDealCategory: null,
     recentDealDate: null,
     recentAmount: null,
+    recentArea: null,
+    recentFloor: null,
     changeRate: null,
     hasNotificationSetting: false,
   };

@@ -18,6 +18,10 @@ interface ModalProps {
 export const MODAL_SECONDARY_BUTTON_CLASS =
   'flex h-[43px] w-full items-center justify-center rounded-[14px] border border-[#e5e7eb] bg-white text-[14px] font-semibold leading-[21px] text-[#364153] hover:bg-[#f7f8fa] md:h-[47px] md:text-[#4a5565]';
 
+/** 되돌릴 수 없는 동작의 확인 버튼(회원탈퇴, MY-02 삭제) — 흰 글자와 #e7000b는 대비 약 4.8:1(NFR-8 4.5:1 이상). */
+export const MODAL_DANGER_BUTTON_CLASS =
+  'flex h-[43px] w-full items-center justify-center rounded-[14px] bg-[#e7000b] text-[14px] font-semibold text-white hover:bg-[#c10007] disabled:cursor-not-allowed disabled:opacity-50 md:h-[47px]';
+
 /**
  * 공용 모달 대화상자 — DTL-01 거래상세 모달이 처음 쓰고, MY-02 삭제 다이얼로그 등이 이어서 쓴다.
  * role="dialog" + aria-modal, 제목으로 aria-labelledby, 포커스 트랩·Esc·배경 클릭 닫기·본문 스크롤 잠금·닫을 때

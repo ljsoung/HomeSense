@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+﻿import { Link } from 'react-router-dom';
 import { HeartIcon } from '../../components/icons/HeartIcon';
 import { HomeIcon } from '../../components/icons/HomeIcon';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -17,7 +17,8 @@ import type { Loadable } from './useLoadable';
  * 서버가 등록순 정렬을 명시하면 pickRecentFavorites의 ID 정렬을 걷어낸다(CLAUDE.md SCR-MY-01 절).
  */
 function describeFavorite(favorite: FavoritePropertySummaryResponse): string {
-  if (favorite.recentAmount === null) return '';
+  // 서버가 null 필드를 빼므로(non_null) 값이 없으면 undefined로 온다 — === null이면 "NaN만원"이 된다.
+  if (favorite.recentAmount == null) return '';
   const price = formatKoreanPrice(favorite.recentAmount);
   return favorite.recentDealCategory === 'RENT' ? `보증금 ${price}` : price;
 }
