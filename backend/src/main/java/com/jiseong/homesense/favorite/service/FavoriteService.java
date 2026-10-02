@@ -31,6 +31,7 @@ import com.jiseong.homesense.favorite.exception.DuplicateFavoriteException;
 import com.jiseong.homesense.favorite.exception.DuplicateFavoriteRegionException;
 import com.jiseong.homesense.favorite.exception.FavoriteNotFoundException;
 import com.jiseong.homesense.favorite.exception.HousingTypeUndeterminedException;
+import com.jiseong.homesense.favorite.exception.InvalidFavoriteRegionLevelException;
 import com.jiseong.homesense.favorite.exception.MissingComplexIdException;
 import com.jiseong.homesense.favorite.repository.FavoritePropertyRepository;
 import com.jiseong.homesense.favorite.repository.FavoriteRegionRepository;
@@ -103,7 +104,8 @@ public class FavoriteService {
                 .toList();
         List<Long> favoritePropertyIds = favorites.stream().map(FavoriteProperty::getFavoritePropertyId).toList();
 
-        Map<Long, Trade> recentTrades = tradeRepository.findRecentTradesByComplexIds(complexIds);
+        // 최근 거래가·면적·층은 매매 거래에서만 고른다 — changeRate와 같은 기준(FavoritePropertySummaryResponse 참고).
+        Map<Long, Trade> recentTrades = tradeRepository.findRecentSaleTradesByComplexIds(complexIds);
         Map<Long, BigDecimal> changeRates = calculatePropertyChangeRates(complexIds);
         Set<Long> propertyIdsWithSetting = new HashSet<>(
                 notificationSettingRepository.findFavoritePropertyIdsWithSetting(userId, favoritePropertyIds));
@@ -175,6 +177,12 @@ public class FavoriteService {
     }
 
     public FavoriteRegionResponse addFavoriteRegion(Long userId, AddFavoriteRegionCommand cmd) {
+        // 읍·면·동 단위만 받는다(FR-5.2). 아래 조회 조건은 시도·시군구 대표행은 걸러내지만 리 단위 행
+        // (eupmyeondongName="기장읍 동부리")은 통과시키므로 코드 형태로 먼저 거른다. 프론트의 자동완성 필터만으로는
+        // API 직접 호출을 막을 수 없다.
+        if (!isEupmyeondongLevel(cmd.legalDongCd())) {
+            throw new InvalidFavoriteRegionLevelException();
+        }
         if (favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(userId, cmd.legalDongCd())) {
             throw new DuplicateFavoriteRegionException();
         }
@@ -205,6 +213,14 @@ public class FavoriteService {
             throw new AccessDeniedException();
         }
         favoriteRegionRepository.delete(favorite);
+    }
+
+    /** 법정동코드 10자리 숫자이고, 읍면동 자리(6~8번째)가 000이 아니며 리 자리(9~10번째)가 00인지. */
+    static boolean isEupmyeondongLevel(String legalDongCd) {
+        return legalDongCd != null
+                && legalDongCd.matches("\\d{10}")
+                && !legalDongCd.startsWith("000", 5)
+                && legalDongCd.endsWith("00");
     }
 
     /**

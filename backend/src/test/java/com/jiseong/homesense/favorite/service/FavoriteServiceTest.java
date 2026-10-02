@@ -21,6 +21,9 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import com.jiseong.homesense.favorite.exception.InvalidFavoriteRegionLevelException;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -245,8 +248,8 @@ class FavoriteServiceTest {
                 .housingType(HousingType.APT).dealCategory(DealCategory.SALE)
                 .datasetId("15126468").sggCd("11680").complex(complex)
                 .excluUseArea(new BigDecimal("59.90")).dealDate(LocalDate.of(2026, 1, 10))
-                .dealAmount(100_000L).cancelYn(false).dedupHash("hash-1").build();
-        when(tradeRepository.findRecentTradesByComplexIds(List.of(10L)))
+                .floor((short) 9).dealAmount(100_000L).cancelYn(false).dedupHash("hash-1").build();
+        when(tradeRepository.findRecentSaleTradesByComplexIds(List.of(10L)))
                 .thenReturn(Map.of(10L, recentTrade));
         when(tradeRepository.findAverageSaleAmountGroupedByComplex(eq(List.of(10L)), any(), any()))
                 .thenReturn(List.of());
@@ -257,7 +260,11 @@ class FavoriteServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).recentAmount()).isEqualTo(100_000L);
+        assertThat(result.get(0).recentArea()).isEqualByComparingTo(new BigDecimal("59.90"));
+        assertThat(result.get(0).recentFloor()).isEqualTo((short) 9);
+        assertThat(result.get(0).registeredAt()).isEqualTo(favorite.getRegisteredAt());
         assertThat(result.get(0).hasNotificationSetting()).isTrue();
+        verify(tradeRepository, never()).findRecentTradesByComplexIds(any());
     }
 
     @Test
@@ -266,7 +273,7 @@ class FavoriteServiceTest {
         Complex complex = complex(10L, "아파트");
         FavoriteProperty favorite = FavoriteProperty.register(owner, complex, HousingType.APT);
         when(favoritePropertyRepository.findByUser_UserId(1L)).thenReturn(List.of(favorite));
-        when(tradeRepository.findRecentTradesByComplexIds(List.of(10L))).thenReturn(Map.of());
+        when(tradeRepository.findRecentSaleTradesByComplexIds(List.of(10L))).thenReturn(Map.of());
         when(tradeRepository.findAverageSaleAmountGroupedByComplex(eq(List.of(10L)), any(), any()))
                 .thenReturn(List.of());
 
@@ -283,7 +290,7 @@ class FavoriteServiceTest {
         Complex complex = complex(10L, "아파트");
         FavoriteProperty favorite = FavoriteProperty.register(owner, complex, HousingType.APT);
         when(favoritePropertyRepository.findByUser_UserId(1L)).thenReturn(List.of(favorite));
-        when(tradeRepository.findRecentTradesByComplexIds(List.of(10L))).thenReturn(Map.of());
+        when(tradeRepository.findRecentSaleTradesByComplexIds(List.of(10L))).thenReturn(Map.of());
 
         LocalDate now = LocalDate.now(KST);
         when(tradeRepository.findAverageSaleAmountGroupedByComplex(eq(List.of(10L)), eq(now.minusMonths(1)), any()))
@@ -312,26 +319,35 @@ class FavoriteServiceTest {
 
     @Test
     void addFavoriteRegion_존재하지_않는_법정동코드면_RegionNotFoundException을_던진다() {
-        when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "9999999999"))
+        when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "9999999900"))
                 .thenReturn(false);
-        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("9999999999"))
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("9999999900"))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("9999999999")))
+        assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("9999999900")))
                 .isInstanceOf(RegionNotFoundException.class);
     }
 
     @Test
-    void addFavoriteRegion_비활성이거나_대표행인_법정동코드면_RegionNotFoundException을_던진다() {
-        when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "1168000000"))
+    void addFavoriteRegion_비활성인_읍면동_코드면_RegionNotFoundException을_던진다() {
+        when(favoriteRegionRepository.existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(1L, "1168010700"))
                 .thenReturn(false);
-        // isActive=false이거나 eupmyeondongName=null(시도/시군구 대표행)인 코드는 이 파생 쿼리가 아예
-        // 후보에서 제외한다 — findById()라면 통과시켰을 케이스다.
-        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("1168000000"))
+        // isActive=false(폐지)인 코드는 이 파생 쿼리가 후보에서 제외한다 — findById()라면 통과시켰을 케이스다.
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull("1168010700"))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("1168000000")))
+        assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand("1168010700")))
                 .isInstanceOf(RegionNotFoundException.class);
+        verify(favoriteRegionRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1100000000", "1168000000", "4111100000", "2671025021", "116801010", "11680101000", "11680A0100"})
+    void addFavoriteRegion_읍면동_단위가_아닌_코드면_조회하지_않고_InvalidFavoriteRegionLevelException을_던진다(String code) {
+        // 시도 · 시군구 대표행 · 구(시+구 도시) · 리 단위 · 길이/숫자 형식 오류
+        assertThatThrownBy(() -> favoriteService.addFavoriteRegion(1L, new AddFavoriteRegionCommand(code)))
+                .isInstanceOf(InvalidFavoriteRegionLevelException.class);
+        verify(favoriteRegionRepository, never()).existsByUser_UserIdAndLegalDistrictCode_LegalDongCd(any(), any());
         verify(favoriteRegionRepository, never()).save(any());
     }
 
@@ -413,5 +429,9 @@ class FavoriteServiceTest {
         assertThat(result.get(0).legalDongCd()).isEqualTo("1168010100");
         assertThat(result.get(0).pricePerPyeong()).isEqualByComparingTo(new BigDecimal("3000"));
         assertThat(result.get(0).newTradeCount()).isEqualTo(4L);
+        assertThat(result.get(0).sidoName()).isEqualTo("서울특별시");
+        assertThat(result.get(0).sigunguName()).isEqualTo("강남구");
+        assertThat(result.get(0).eupmyeondongName()).isEqualTo("역삼동");
+        assertThat(result.get(0).registeredAt()).isEqualTo(favorite.getRegisteredAt());
     }
 }

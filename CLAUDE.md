@@ -1169,6 +1169,24 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 
 **완결 필요(DTL-01) — 중개사 소재지 `agent_sgg_nm` 미수집(BAT-PRS-01 매핑 확인 필요).** UI정의서 5.3절 거래상세 모달은 "거래유형 + 중개사 소재지(`estateAgentSggNm`, 시군구 단위)"를 요구하지만 `trade`에 대응 컬럼이 없고 파서(`TradeFieldMapper`)도 매핑하지 않는다. 모달에서는 그 행을 숨긴다. 표시하려면 원천 필드명 확인 → 컬럼 추가(DDL 3곳) → 파서 매핑 → `TradeDetailResponse` 순으로 한다.
 
+### MY-02 백엔드 보강 (2026-10-02, `feature/backend/favorite-summary-support`)
+
+SCR-MY-02(관심 매물·지역 관리) 프론트 착수 전 선행 작업이다. 확인에 쓴 문서: `docs/specs/`가 없어 작업 지시에 옮겨 둔 UI정의서 v2.1 5.5절 MY-02와 프로그램설계서 3.7절 원문.
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| **관심 매물 "최근 거래가"를 매매만으로(SVC-FAV-01)** | `FavoritePropertySummaryResponse`의 recent*(거래가·거래일·면적·층)를 취소되지 않은 **매매** 거래 중 최신 1건에서 채운다. `TradeRepository.findRecentSaleTradesByComplexIds()`를 새로 두고, 기존 `findRecentTradesByComplexIds()`와 선정 쿼리를 공유한다(`findRepresentativeTrades(ids, dealCategory)`, 유형 조건은 바깥 행과 두 상관 서브쿼리에 모두 건다). 기존 메서드(CPX·RCV·상세 배지)의 동작은 그대로다. 매매 거래가 없는 단지는 recent*가 모두 null | 전에는 유형을 가리지 않아 최근 거래가 전세면 보증금이 "최근 거래가"로 보였고, 같은 카드의 변동률(매매만 집계)과 기준이 어긋났다. `recentDealCategory`는 이제 SALE 또는 null이지만 MY-01 미리보기 호환을 위해 남겼다. 검증: `TradeRepositoryMariaDbIT` 2건(더 최신 전세·취소된 매매를 건너뜀, 전월세만 있으면 키 없음 — 같은 테스트에서 기존 메서드는 여전히 전세를 고름) | 관심 매물 카드에 전월세 시세를 따로 보여 주게 되면 유형별 필드를 나눈다 |
+| **최근 거래 면적·층, 등록일시 추가** | 관심 매물에 `registeredAt`, `recentArea`(전용면적), `recentFloor`. 관심 지역에 `registeredAt`, `sidoName`, `sigunguName`, `eupmyeondongName` | 같은 단지라도 평형별 가격이 달라 면적 없이 최근 거래가를 해석할 수 없다. 등록일시는 "등록순" 정렬과 카드 표시에 쓴다(전에는 응답에 없어 MY-01이 ID로 정렬했다). 지역 이름 조각은 같은 이름의 동을 시군구로 구분하려는 것이다 — fullPath를 공백으로 쪼개면 "수원시 장안구"처럼 공백이 든 시군구에서 틀린다. FAV는 캐시 미적용이라 캐시 이름 버전업이 필요 없다 | — |
+| **관심 지역은 읍·면·동 단위만(400 `INVALID_REGION_LEVEL`)** | `addFavoriteRegion()`이 맨 먼저 코드 형태를 검사한다: 10자리 숫자이고 읍면동 자리(6~8번째)가 000이 아니며 리 자리(9~10번째)가 00. 아니면 `InvalidFavoriteRegionLevelException`(400, "읍·면·동 단위 지역만 관심 지역으로 등록할 수 있습니다"). 존재하지 않거나 폐지된 읍면동 코드는 기존대로 404 `REGION_NOT_FOUND` | FR-5.2는 읍면동 단위다. 기존 조회 조건(활성 + eupmyeondongName not null)은 시도·시군구 대표행은 막았지만 리 단위 행(eupmyeondongName "기장읍 동부리")은 통과시켰다. 프론트 필터만으로는 API 직접 호출을 막을 수 없다. 검증: `FavoriteServiceTest` 7개 코드(시도·시군구 대표행·구·리·길이·문자), `FavoriteControllerTest`(400 코드·문구). 테스트 픽스처의 `9999999999`·`1168099999`는 리 자리가 00이 아니라 `…00`으로 바꿨다 | 리 단위 관심 지역이 요구되면 이 검사를 넓히고 통계 집계 단위(`RegionStatsCalculator`)도 함께 본다 |
+| 알림 설정 요약 | 관심 매물 응답에 넣지 않았다. MY-02가 `GET /api/notifications/settings`를 함께 불러 `favoritePropertyId`로 조인한다 | SVC-NTF-01이 처음부터 이 조인을 전제로 설계됐다("NotificationSettingResponse에 대상 표시 필드 미포함" 행). 응답에 임계치·신규거래·이메일 여부가 이미 있다 | 조인 비용이나 실패 처리가 문제가 되면 요약 필드를 관심 매물 응답에 넣는다 |
+| N+1 | 변경 없음 — 목록은 이미 JOIN FETCH와 배치 집계로 항목 수와 무관한 고정 쿼리 수다 | SVC-FAV-01 절 | — |
+
+**알려진 한계(고치지 않음):** 지역 자동완성(`GET /api/regions?query=`)은 법정동코드 순 상위 10건이라, 시군구 이름으로 검색하면 리 단위 행이 10건을 채워 뒤쪽 읍면동 후보가 잘릴 수 있다(MY-02는 읍면동만 남기도록 화면에서 거른다). 읍면동 이름까지 입력하면 나온다. 서버에 단위 필터를 두려면 `regionAutocomplete` 캐시 키를 바꿔야 한다.
+
+**프로그램설계서 반영 필요:** 3.7절 SVC-FAV-01 `getFavoriteProperties()`(최근 거래는 매매만, 응답 필드 `registeredAt`·`recentArea`·`recentFloor`), `getFavoriteRegions()`(응답 필드 `registeredAt`·`sidoName`·`sigunguName`·`eupmyeondongName`), `addFavoriteRegion()` 예외표(400 `InvalidFavoriteRegionLevelException`).
+
+검증: `./gradlew test` 646건, `./gradlew integrationTest` 90건(1건은 기존 `RefreshTokenReuseAccessCutoffMariaDbIT`의 같은 초 확인 `assumeTrue` 건너뜀) 전부 통과.
+
 ### 외부연동 설정(COM-CFG-01)
 프로그램 설계서는 `ExternalApiProperties` 하나에 `getDataGoKrServiceKey()`/`getKakaoApiKey()`/`getJwtSecret()` 세 메서드를 두는 단일 클래스로 정의하지만, 실제 구현은 이미 각 도메인이 소유한 `@ConfigurationProperties` 레코드로 나뉘어 있습니다 — 설계서보다 먼저 BAT-CLC-01(`DataGoKrProperties`)과 COM-SEC-01/02(`JwtProperties`)가 구현되며 이미 굳어진 구조라, COM-CFG-01 시점에 하나로 합치지 않고 그대로 두었습니다. 새로 코드를 짤 때는 이 구조를 따르세요.
 

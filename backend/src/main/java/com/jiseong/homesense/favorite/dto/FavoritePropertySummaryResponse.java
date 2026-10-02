@@ -2,6 +2,7 @@ package com.jiseong.homesense.favorite.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.favorite.entity.FavoriteProperty;
@@ -16,11 +17,12 @@ import com.jiseong.homesense.trade.entity.Trade;
  * "데이터 없음"을 프론트가 표시하게 한다(ComplexService.buildSummary()가 대표 거래 없는 후보를
  * 걸러내는 것과 반대 방향의 판단).
  *
- * <p>recentAmount(최근 거래가)는 "가장 최근 거래" 1건을 매매/전월세 구분 없이 그대로 쓰지만(SVC-CPX-01
- * ComplexSummaryResponse와 같은 관례), changeRate(전월 대비 변동률)는 매매(SALE)만 대상으로 한다
- * (SVC-CPX-01/TRD-01/RGN-01의 기존 "금액 구조가 달라 하나로 합산할 기준이 없다" 결정과 같은 이유) —
- * 즉 최근 거래가 전세/월세였다면 changeRate가 null일 수 있다(지성 확인 필요, 설계서가 다루지 않은
- * 간극).
+ * <p>recent*(최근 거래가·거래일·전용면적·층)는 취소되지 않은 <b>매매(SALE)</b> 거래 중 최신 1건에서 채운다
+ * (TradeRepository#findRecentSaleTradesByComplexIds, 2026-10-02 MY-02 착수 시 변경 — 그 전에는 매매/전월세를
+ * 가리지 않아 전세 보증금이 "최근 거래가"로 보일 수 있었다). changeRate(최근 1개월 매매 평균 vs 그 직전
+ * 1개월 매매 평균)도 매매만 대상이라 두 값의 기준이 같다. 매매 거래가 없는 단지는 recent*가 모두 null이다.
+ * recentDealCategory는 이제 항상 SALE 또는 null이지만 기존 소비자(MY-01 미리보기) 호환을 위해 남긴다.
+ * 면적·층은 같은 단지라도 평형별 가격이 크게 달라 최근 거래가를 해석하는 데 필요하다(MY-02 카드 "84㎡ · 9층").
  */
 public record FavoritePropertySummaryResponse(
         Long favoritePropertyId,
@@ -30,19 +32,18 @@ public record FavoritePropertySummaryResponse(
         String sigungu,
         String dongRi,
         HousingType housingType,
+        LocalDateTime registeredAt,
         DealCategory recentDealCategory,
         LocalDate recentDealDate,
         Long recentAmount,
+        BigDecimal recentArea,
+        Short recentFloor,
         BigDecimal changeRate,
         boolean hasNotificationSetting) {
 
     public static FavoritePropertySummaryResponse of(FavoriteProperty favorite, Trade recentTrade,
             BigDecimal changeRate, boolean hasNotificationSetting) {
         Complex complex = favorite.getComplex();
-        Long recentAmount = recentTrade == null ? null
-                : recentTrade.getDealCategory() == DealCategory.SALE
-                        ? recentTrade.getDealAmount()
-                        : recentTrade.getDepositAmount();
 
         return new FavoritePropertySummaryResponse(
                 favorite.getFavoritePropertyId(),
@@ -52,9 +53,12 @@ public record FavoritePropertySummaryResponse(
                 complex.getSigungu(),
                 complex.getDongRi(),
                 favorite.getHousingType(),
+                favorite.getRegisteredAt(),
                 recentTrade == null ? null : recentTrade.getDealCategory(),
                 recentTrade == null ? null : recentTrade.getDealDate(),
-                recentAmount,
+                recentTrade == null ? null : recentTrade.getDealAmount(),
+                recentTrade == null ? null : recentTrade.getExcluUseArea(),
+                recentTrade == null ? null : recentTrade.getFloor(),
                 changeRate,
                 hasNotificationSetting);
     }

@@ -39,6 +39,7 @@ import com.jiseong.homesense.favorite.dto.FavoritePropertySummaryResponse;
 import com.jiseong.homesense.favorite.dto.FavoriteRegionResponse;
 import com.jiseong.homesense.favorite.dto.FavoriteRegionSummaryResponse;
 import com.jiseong.homesense.favorite.exception.DuplicateFavoriteException;
+import com.jiseong.homesense.favorite.exception.InvalidFavoriteRegionLevelException;
 import com.jiseong.homesense.favorite.exception.MissingComplexIdException;
 import com.jiseong.homesense.favorite.service.FavoriteService;
 import com.jiseong.homesense.trade.entity.HousingType;
@@ -84,11 +85,15 @@ class FavoriteControllerTest {
     void 관심매물_목록_조회는_인증된_사용자ID로_조회한다() throws Exception {
         when(favoriteService.getFavoriteProperties(1L)).thenReturn(List.of(
                 new FavoritePropertySummaryResponse(100L, 10L, "테스트단지", "서울특별시", "강남구", "역삼동",
-                        HousingType.APT, null, null, null, null, false)));
+                        HousingType.APT, LocalDateTime.of(2026, 9, 1, 10, 0), null, null, null,
+                        new BigDecimal("84.98"), (short) 9, null, false)));
 
         mockMvc.perform(get("/api/favorites/properties"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].complexId").value(10));
+                .andExpect(jsonPath("$.data[0].complexId").value(10))
+                .andExpect(jsonPath("$.data[0].registeredAt").value("2026-09-01T10:00:00"))
+                .andExpect(jsonPath("$.data[0].recentArea").value(84.98))
+                .andExpect(jsonPath("$.data[0].recentFloor").value(9));
     }
 
     @Test
@@ -152,12 +157,15 @@ class FavoriteControllerTest {
     void 관심지역_목록_조회는_인증된_사용자ID로_조회한다() throws Exception {
         when(favoriteService.getFavoriteRegions(1L)).thenReturn(List.of(
                 new FavoriteRegionSummaryResponse(200L, "1168010100", "서울특별시 강남구 역삼동",
+                        "서울특별시", "강남구", "역삼동", LocalDateTime.of(2026, 9, 2, 9, 0),
                         new BigDecimal("110000"), new BigDecimal("10.00"), new BigDecimal("3000"), 4L)));
 
         mockMvc.perform(get("/api/favorites/regions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].legalDongCd").value("1168010100"))
-                .andExpect(jsonPath("$.data[0].newTradeCount").value(4));
+                .andExpect(jsonPath("$.data[0].newTradeCount").value(4))
+                .andExpect(jsonPath("$.data[0].sigunguName").value("강남구"))
+                .andExpect(jsonPath("$.data[0].eupmyeondongName").value("역삼동"));
     }
 
     @Test
@@ -170,6 +178,19 @@ class FavoriteControllerTest {
                         .content("{\"legalDongCd\":\"1168010100\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.favoriteRegionId").value(200));
+    }
+
+    @Test
+    void 관심지역_등록시_읍면동_단위가_아니면_400_INVALID_REGION_LEVEL을_반환한다() throws Exception {
+        when(favoriteService.addFavoriteRegion(eq(1L), eq(new AddFavoriteRegionCommand("2671025021"))))
+                .thenThrow(new InvalidFavoriteRegionLevelException());
+
+        mockMvc.perform(post("/api/favorites/regions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"legalDongCd\":\"2671025021\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_REGION_LEVEL"))
+                .andExpect(jsonPath("$.error.message").value("읍·면·동 단위 지역만 관심 지역으로 등록할 수 있습니다"));
     }
 
     @Test

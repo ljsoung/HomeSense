@@ -394,4 +394,36 @@ class TradeRepositoryMariaDbIT {
 
         assertThat(result).isEmpty();
     }
+
+    /**
+     * MY-02 관심 매물 카드의 "최근 거래가"는 매매만 본다. 더 최신인 전세 거래·취소된 매매가 있어도 남은 매매 중
+     * 최신 1건을 고른다 — 상관 서브쿼리에 유형 조건이 빠지면 전세의 최신일과 비교해 결과가 비게 된다.
+     */
+    @Test
+    void findRecentSaleTradesByComplexIds_더_최신인_전세와_취소된_매매를_건너뛰고_매매_최신건을_고른다() {
+        Trade sale = tradeRepository.saveAndFlush(baseTrade().dealDate(LocalDate.of(2026, 1, 10))
+                .dealAmount(70000L).floor((short) 9).dedupHash("h-sale").build());
+        tradeRepository.saveAndFlush(baseTrade().dealCategory(DealCategory.RENT).rentType(RentType.JEONSE)
+                .dealAmount(null).depositAmount(40000L).dealDate(LocalDate.of(2026, 2, 1)).dedupHash("h-rent-newer").build());
+        tradeRepository.saveAndFlush(baseTrade().dealDate(LocalDate.of(2026, 2, 5))
+                .dealAmount(99000L).cancelYn(true).dedupHash("h-sale-cancelled").build());
+
+        Map<Long, Trade> saleOnly = tradeRepository.findRecentSaleTradesByComplexIds(List.of(complexA.getComplexId()));
+        Map<Long, Trade> anyType = tradeRepository.findRecentTradesByComplexIds(List.of(complexA.getComplexId()));
+
+        assertThat(saleOnly.get(complexA.getComplexId()).getTradeId()).isEqualTo(sale.getTradeId());
+        assertThat(saleOnly.get(complexA.getComplexId()).getFloor()).isEqualTo((short) 9);
+        // 기존 메서드(CPX·RCV가 쓰는 대표 거래)는 동작이 바뀌지 않는다 — 유형을 가리지 않고 전세를 고른다.
+        assertThat(anyType.get(complexA.getComplexId()).getDealCategory()).isEqualTo(DealCategory.RENT);
+    }
+
+    @Test
+    void findRecentSaleTradesByComplexIds_전월세만_있으면_결과_Map에_키가_없다() {
+        tradeRepository.saveAndFlush(baseTrade().dealCategory(DealCategory.RENT).rentType(RentType.WOLSE)
+                .dealAmount(null).depositAmount(5000L).monthlyRentAmount(100L).dedupHash("h-rent-only").build());
+
+        Map<Long, Trade> result = tradeRepository.findRecentSaleTradesByComplexIds(List.of(complexA.getComplexId()));
+
+        assertThat(result).doesNotContainKey(complexA.getComplexId());
+    }
 }
