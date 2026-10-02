@@ -1,4 +1,4 @@
-﻿// MY-02 관심 매물·지역 관리 — 모바일(390)·태블릿(768)·데스크톱(1280). 백엔드 불필요(route로 상태 있는 가짜 서버).
+// MY-02 관심 매물·지역 관리 — 모바일(390)·태블릿(768)·데스크톱(1280). 백엔드 불필요(route로 상태 있는 가짜 서버).
 // 1. 렌더: 데스크톱은 세로 섹션 + 정렬 chip, 태블릿·모바일은 탭 + 정렬 드롭다운(탭 전환·URL ?tab=regions)
 //    카드(면적·층, 최근 매매가, 변동률 문구, 알림조건 배지 4종), 정렬(변동률순 → URL ?sort=rate, null 맨 뒤)
 // 2. 빈 상태: 안내 카드 + "매물 둘러보기"(→ /) + 관심 지역 추가 입력은 남는다
@@ -8,6 +8,8 @@
 // 5. 이동: 매물 → DTL-01, 지역 → SRCH-01(regionCode), 배지 → MY-03 ?favoritePropertyId=, 모바일 하단 탭 "찜" 활성
 // 6. 키보드만으로 삭제·실행취소·지역 추가, 삭제 뒤 포커스가 다음 항목으로
 // 7. 가로 스크롤 없음
+// 8. 알림 설정 조회만 실패 → 목록은 표시, 배지만 숨김
+// 1에 Figma 대조 항목 포함: 썸네일 크기(60×46·90×70·64×64), 모바일 라벨 열·삭제 터치 영역·삭제 글자색
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 
@@ -69,7 +71,7 @@ const AUTOCOMPLETE = {
 const browser = await chromium.launch();
 
 /** options.empty: 두 목록을 비운다. deleteMode: 'ok'|'fail'|'notFound'. clock: page.clock 설치. */
-async function open(viewport, { empty = false, deleteMode = 'ok', clock = false, query = '' } = {}) {
+async function open(viewport, { empty = false, deleteMode = 'ok', clock = false, query = '', settingsMode = 'ok' } = {}) {
   const context = await browser.newContext({ viewport });
   await context.addInitScript(() => {
     if (!sessionStorage.getItem('__seeded')) {
@@ -90,7 +92,10 @@ async function open(viewport, { empty = false, deleteMode = 'ok', clock = false,
     if (path === '/api/users/me') return json(200, okBody(USER));
     if (path === '/api/favorites/properties' && method === 'GET') return json(200, okBody(db.properties));
     if (path === '/api/favorites/regions' && method === 'GET') return json(200, okBody(db.regions));
-    if (path === '/api/notifications/settings') return json(200, okBody(SETTINGS));
+    if (path === '/api/notifications/settings') {
+      if (settingsMode === 'fail') return json(500, errBody('INTERNAL_SERVER_ERROR', '일시적인 오류가 발생했습니다'));
+      return json(200, okBody(SETTINGS));
+    }
     if (path === '/api/regions') {
       const q = url.searchParams.get('query') ?? '';
       const key = Object.keys(AUTOCOMPLETE).find((k) => q.startsWith(k));
@@ -123,7 +128,7 @@ async function open(viewport, { empty = false, deleteMode = 'ok', clock = false,
   const page = await context.newPage();
   if (clock) await page.clock.install();
   await page.goto(`${BASE}/favorites${query}`);
-  await page.getByRole('heading', { name: '관심 매물·지역 관리' }).waitFor({ timeout: 10000 });
+  await page.getByRole('heading', { level: 1, name: /관심 매물·지역/ }).waitFor({ timeout: 10000 });
   return { context, page, calls, db };
 }
 
@@ -147,6 +152,8 @@ async function showRegions(page, isDesktop) {
 async function scenarioRender(label, viewport, isDesktop) {
   const { context, page } = await open(viewport);
   await page.getByText('래미안 원베일리').waitFor({ timeout: 5000 });
+  // 배지는 알림 설정 목록을 받은 뒤에 나타난다.
+  await page.getByRole('link', { name: /알림 조건/ }).first().waitFor({ timeout: 5000 });
   if (isDesktop) {
     ok(`${label} 1: 세로 섹션(관심 매물·관심 지역·추가)`, (await page.getByRole('heading', { level: 2, name: /관심 매물/ }).isVisible())
       && (await page.getByRole('heading', { level: 2, name: /관심 지역$|관심 지역\s*\d/ }).first().isVisible())
@@ -160,8 +167,8 @@ async function scenarioRender(label, viewport, isDesktop) {
   }
   const first = page.locator('li[data-favorite-key="property:1"]');
   const text = (await first.innerText()).replace(/\s+/g, ' ');
-  ok(`${label} 1: 매물 카드(면적·층·가격·변동률·배지·등록일)`, text.includes('전용 85㎡ · 9층') && text.includes('42억 5,000만원')
-    && text.includes('▲ 3.2%') && text.includes('±5% · 신규거래') && text.includes('등록 2026.09.01'), text);
+  ok(`${label} 1: 매물 카드(면적·층·가격·변동률·배지·등록일)`, text.includes('85㎡ · 9층') && text.includes('42억 5,000만원')
+    && text.includes('▲ 3.2%') && text.includes('±5% · 신규거래') && text.includes('등록일 2026.09.01'), text);
   ok(`${label} 1: 변동률 스크린리더 문장`, (await first.locator('.sr-only').allInnerTexts()).some((t) => t.includes('직전 1개월 대비 3.2% 상승')));
   const t2 = await page.locator('li[data-favorite-key="property:2"]').innerText();
   const t3 = await page.locator('li[data-favorite-key="property:3"]').innerText();
@@ -172,7 +179,30 @@ async function scenarioRender(label, viewport, isDesktop) {
   ok(`${label} 1: 하락·변동없음·거래 없음`, t2.includes('▼ 1.1%') && t4.includes('변동없음') && t3.includes('거래 없음') && t3.includes('—'));
   const registeredOrder = await cardNames(page);
   ok(`${label} 1: 등록순(기본) 정렬`, JSON.stringify(registeredOrder) === JSON.stringify(['아크로리버파크', '반포자이', '래미안 원베일리', '신반포센트럴자이']), JSON.stringify(registeredOrder));
-  ok(`${label} 1: 썸네일은 모바일에서 숨김`, (await first.locator('div[aria-hidden="true"]').first().isVisible()) === (viewport.width >= 768));
+  // Figma: 데스크톱 60×46, 태블릿 90×70, 모바일 64×64 — 모든 크기에 있다.
+  const thumb = await first.getByTestId('favorite-thumbnail').boundingBox();
+  const expectedThumb = isDesktop ? [60, 46] : viewport.width >= 768 ? [90, 70] : [64, 64];
+  ok(`${label} 1: 썸네일 크기 ${expectedThumb.join('×')}`, thumb && Math.round(thumb.width) === expectedThumb[0] && Math.round(thumb.height) === expectedThumb[1],
+    JSON.stringify(thumb));
+  if (viewport.width < 768) {
+    // 라벨 열: "직전 1개월 대비"가 한 줄에 들어가고 두 줄의 값 시작 위치가 같다.
+    const labelBox = await first.getByText('직전 1개월 대비', { exact: true }).boundingBox();
+    const priceBox = await first.getByText('42억 5,000만원').boundingBox();
+    const rateBox = await first.getByText('▲ 3.2%').boundingBox();
+    ok(`${label} 1: 모바일 라벨 한 줄, 값 시작 위치 정렬`, labelBox.height < 20 && Math.abs(priceBox.x - rateBox.x) < 1,
+      `label h=${labelBox.height} price x=${priceBox.x} rate x=${rateBox.x}`);
+    // 삭제 버튼: 보이는 크기는 작지만 위아래 20px 지점도 같은 버튼이 받는다(터치 영역 44px 이상).
+    const hit = await first.getByRole('button', { name: '래미안 원베일리 관심 매물 삭제' }).evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const at = (x, y) => document.elementFromPoint(x, y)?.closest('button') === button;
+      return { h: rect.height, ok: at(cx, cy - 20) && at(cx, cy + 20) && at(rect.left - 4, cy) && at(rect.right + 4, cy) };
+    });
+    ok(`${label} 1: 모바일 삭제 터치 영역 44px 이상(보이는 높이 ${hit.h}px)`, hit.ok);
+    const deleteColor = await first.getByRole('button', { name: '래미안 원베일리 관심 매물 삭제' }).evaluate((b) => getComputedStyle(b).color);
+    ok(`${label} 1: 모바일 삭제 글자색 #6a7282`, deleteColor === 'rgb(106, 114, 130)', deleteColor);
+  }
 
   if (isDesktop) await page.getByRole('radio', { name: '변동률순' }).click();
   else await page.getByRole('combobox', { name: '정렬' }).selectOption('rate');
@@ -204,6 +234,21 @@ async function scenarioEmpty(label, viewport) {
   await page.getByText('아직 등록한 관심 매물·지역이 없어요').waitFor({ timeout: 5000 });
   ok(`${label} 2: 빈 상태 + 매물 둘러보기(→ /)`, (await page.getByRole('link', { name: '매물 둘러보기' }).getAttribute('href')) === '/');
   ok(`${label} 2: 빈 상태에서도 지역 추가 입력`, await page.getByRole('combobox', { name: /관심 지역 추가/ }).isVisible());
+  await context.close();
+}
+
+// 알림 설정 조회만 실패 → 목록은 그대로, 배지만 숨긴다("알림 설정"으로 보이면 설정이 있는 사용자에게 틀린 정보).
+async function scenarioSettingsFail(label, viewport) {
+  const { context, page, calls } = await open(viewport, { settingsMode: 'fail' });
+  await page.getByText('래미안 원베일리').waitFor({ timeout: 5000 });
+  await waitFor(async () => calls.some((c) => c.path === '/api/notifications/settings'));
+  await page.waitForTimeout(300);
+  const items = await page.locator('li[data-favorite-key^="property:"]').count();
+  const badges = await page.getByRole('link', { name: /알림 조건/ }).count();
+  const listText = await page.locator('li[data-favorite-key^="property:"]').allInnerTexts();
+  ok(`${label} 8: 알림 설정 조회 실패 → 목록 4건 표시, 배지 없음, "알림 설정" 문구 없음`, items === 4 && badges === 0
+    && !listText.some((t) => t.includes('알림 설정') || t.includes('알림 꺼짐')), `items=${items} badges=${badges}`);
+  ok(`${label} 8: 매물 정보는 그대로(가격·변동률)`, listText.join(' ').includes('42억 5,000만원') && listText.join(' ').includes('3.2%'));
   await context.close();
 }
 
@@ -326,7 +371,7 @@ async function scenarioNavigation(label, viewport, isDesktop) {
   ok(`${label} 5: 카드 빈 곳 클릭 → SRCH-01`, await waitFor(async () => new URL(page.url()).pathname === '/search'));
   if (!isDesktop && viewport.width < 768) {
     await page.goto(`${BASE}/favorites`);
-    await page.getByRole('heading', { name: '관심 매물·지역 관리' }).waitFor();
+    await page.getByRole('heading', { level: 1, name: /관심 매물·지역/ }).waitFor();
     const tab = page.locator('nav').getByRole('link', { name: '찜' });
     ok(`${label} 5: 하단 탭 "찜" 활성`, (await tab.getAttribute('class')).includes('text-brand'));
   }
@@ -378,6 +423,7 @@ for (const [label, viewport, isDesktop] of [
 ].filter(([name]) => !only || only.includes(name))) {
   await scenarioRender(label, viewport, isDesktop);
   await scenarioEmpty(label, viewport);
+  await scenarioSettingsFail(label, viewport);
   await scenarioDelete(label, viewport, isDesktop);
   await scenarioAddRegion(label, viewport, isDesktop);
   await scenarioNavigation(label, viewport, isDesktop);

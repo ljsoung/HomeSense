@@ -1,6 +1,4 @@
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { PlusIcon } from '../../components/icons/PlusIcon';
-import { SearchIcon } from '../../components/icons/SearchIcon';
 import { isEupmyeondongCode } from '../../features/region/regionLevel';
 import type { RegionAutocompleteResponse } from '../../features/region/types';
 import { useRegionAutocomplete } from '../../features/region/useRegionAutocomplete';
@@ -115,13 +113,13 @@ export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-2">
-      <label htmlFor={inputId} className="text-[13px] font-semibold text-[#364153]">
-        읍·면·동 이름으로 관심 지역 추가
+      {/* 보이는 제목은 데스크톱 섹션 제목("관심 지역 추가")이 맡는다(Figma 6-4695). 탭 안에서는 제목이 없어 이름만 둔다. */}
+      <label htmlFor={inputId} className="sr-only">
+        관심 지역 추가 — 읍·면·동 이름
       </label>
-      <div className="flex gap-2">
+      <div className="flex gap-3">
         <div className="relative min-w-0 flex-1">
-          <div className="flex h-[46px] items-center gap-2.5 rounded-[14px] border border-[#e5e7eb] bg-white px-3.5 focus-within:border-brand">
-            <SearchIcon aria-hidden="true" className="size-[18px] shrink-0 text-[#99a1af]" />
+          <div className="flex h-11 items-center rounded-[14px] border border-[#e5e7eb] bg-white px-4 focus-within:border-brand">
             <input
               ref={inputRef}
               id={inputId}
@@ -147,7 +145,7 @@ export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
                 // 후보 클릭(mousedown)이 blur보다 먼저 처리되도록 살짝 늦춘다(UIC-03과 같다).
                 setTimeout(close, 120);
               }}
-              className="w-full min-w-0 text-[14px] text-[#101828] placeholder:text-[#99a1af] focus:outline-none"
+              className="w-full min-w-0 text-[14px] text-[#101828] placeholder:font-medium placeholder:text-[#99a1af] focus:outline-none"
             />
           </div>
           {open && suggestions.length > 0 && (
@@ -176,9 +174,8 @@ export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
         <button
           type="submit"
           disabled={!canAdd}
-          className="flex h-[46px] shrink-0 items-center gap-1 rounded-[14px] bg-brand px-4 text-[14px] font-semibold text-white hover:bg-[#0c4a44] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 w-[66px] shrink-0 items-center justify-center rounded-[14px] bg-brand text-[14px] font-bold text-white hover:bg-[#0c4a44] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <PlusIcon aria-hidden="true" className="size-4" />
           추가
         </button>
       </div>

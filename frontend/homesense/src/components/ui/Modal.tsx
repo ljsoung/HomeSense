@@ -12,6 +12,8 @@ interface ModalProps {
   role?: 'dialog' | 'alertdialog';
   /** 본문 중 대화상자 설명으로 읽힐 요소의 id(aria-describedby). alertdialog에 권장된다. */
   describedBy?: string;
+  /** 제목 위 아이콘(선택) — MY-02 삭제 다이얼로그의 휴지통 원(Figma 6:4995: 56px, 아래 20px). */
+  icon?: ReactNode;
 }
 
 /** Figma 다이얼로그(6:5277, 모바일 28:16012)의 보조 버튼 — 테두리 #e5e7eb, radius 14, 14px 반굵게. */
@@ -31,7 +33,7 @@ export const MODAL_DANGER_BUTTON_CLASS =
  * radius 16, 그림자 0 16px 24px 20%, 제목 18px 가장 굵게. 모바일(28:15995): 오버레이 45%, 폭 320px, 안쪽 24px,
  * 그림자 0 20px 30px 25%, 제목 16px 굵게. 닫기는 X 아이콘 대신 Figma처럼 아래쪽 버튼으로 둔다.
  */
-export function Modal({ open, onClose, title, children, footer, role = 'dialog', describedBy }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, role = 'dialog', describedBy, icon }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogBehavior(open, dialogRef, onClose);
@@ -49,6 +51,7 @@ export function Modal({ open, onClose, title, children, footer, role = 'dialog',
         aria-describedby={describedBy}
         className="relative z-10 flex max-h-[85vh] w-full max-w-[320px] flex-col rounded-[16px] bg-white p-6 shadow-[0_20px_30px_rgba(0,0,0,0.25)] md:max-w-[400px] md:p-8 md:shadow-[0_16px_24px_rgba(0,0,0,0.2)]"
       >
+        {icon && <div className="mb-5 shrink-0">{icon}</div>}
         <h2
           id={titleId}
           className="shrink-0 text-[16px] font-bold leading-6 text-[#101828] md:text-[18px] md:font-extrabold md:leading-[27px]"

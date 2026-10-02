@@ -7,6 +7,12 @@ export type FavoritesSort = 'registered' | 'rate';
 /** 태블릿·모바일 탭 — URL `?tab=regions`. 없거나 모르는 값은 관심 매물. 데스크톱(세로 섹션)에서는 쓰지 않는다. */
 export type FavoritesTab = 'properties' | 'regions';
 
+/**
+ * 화면 크기별 배치 — 모바일(767px 이하)·태블릿(768~1279px)·데스크톱(1280px 이상). Figma 세 프레임의 카드 구성이 서로
+ * 달라 화면이 이 값으로 한 벌만 그린다(반응형 렌더 규칙).
+ */
+export type FavoritesLayout = 'mobile' | 'tablet' | 'desktop';
+
 export const SORT_QUERY_VALUE: Record<FavoritesSort, string | null> = { registered: null, rate: 'rate' };
 export const TAB_QUERY_VALUE: Record<FavoritesTab, string | null> = { properties: null, regions: 'regions' };
 
@@ -61,21 +67,27 @@ function formatThreshold(pct: number): string {
  * - 설정 없음 → "알림 설정"(설정 유도)
  * - 이메일 수신 꺼짐 → "알림 꺼짐"(MVP의 알림 수단은 이메일뿐이라 실질적으로 꺼진 상태)
  * - 임계치 + 신규거래 → "±{n}% · 신규거래", 임계치만 → "±{n}% 알림"
- * `settingsAvailable`이 false면(알림 설정 조회 실패) 관심 매물 응답의 hasNotificationSetting만으로 정한다.
+ * 알림 설정 목록을 아직 받지 못했거나 조회가 실패하면 배지를 그리지 않는다(호출부) — 그때 "알림 설정"을 보이면 설정이
+ * 있는 사용자에게 틀린 정보가 되고, 관심 매물 응답의 hasNotificationSetting만으로는 "알림 꺼짐"을 가릴 수 없다.
  */
-export function describeNotificationBadge(
-  setting: NotificationSettingResponse | undefined,
-  options: { settingsAvailable: boolean; hasNotificationSetting: boolean },
-): NotificationBadge {
-  if (!options.settingsAvailable) {
-    return options.hasNotificationSetting ? { label: '알림 설정됨', tone: 'on' } : { label: '알림 설정', tone: 'unset' };
-  }
+export function describeNotificationBadge(setting: NotificationSettingResponse | undefined): NotificationBadge {
   if (!setting) return { label: '알림 설정', tone: 'unset' };
   if (!setting.emailAlertYn) return { label: '알림 꺼짐', tone: 'off' };
   const threshold = `±${formatThreshold(setting.priceChangeThresholdPct)}%`;
   return setting.newTradeAlertYn
     ? { label: `${threshold} · 신규거래`, tone: 'on' }
     : { label: `${threshold} 알림`, tone: 'on' };
+}
+
+/**
+ * 카드에 보일 배지. 알림 설정 목록이 없으면(로딩 중·조회 실패 — `settingsByProperty`가 null) null을 돌려 배지를 숨긴다.
+ */
+export function resolveNotificationBadge(
+  settingsByProperty: ReadonlyMap<number, NotificationSettingResponse> | null,
+  favoritePropertyId: number,
+): NotificationBadge | null {
+  if (settingsByProperty === null) return null;
+  return describeNotificationBadge(settingsByProperty.get(favoritePropertyId));
 }
 
 /** SRCH-01이 읽는 파라미터(regionCode·regionLabel)로 그 지역 검색 결과 링크를 만든다. 나머지 필터는 기본값. */

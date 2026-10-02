@@ -8,6 +8,7 @@ import {
   parseSort,
   parseTab,
   regionSearchHref,
+  resolveNotificationBadge,
   sortFavorites,
 } from './favoritesModel';
 
@@ -57,37 +58,34 @@ describe('알림조건 배지 문구(D4)', () => {
     emailAlertYn: true,
     ...overrides,
   });
-  const available = { settingsAvailable: true, hasNotificationSetting: true };
-
   it('설정 없음 → "알림 설정"', () => {
-    expect(describeNotificationBadge(undefined, { settingsAvailable: true, hasNotificationSetting: false })).toEqual({
-      label: '알림 설정',
-      tone: 'unset',
-    });
+    expect(describeNotificationBadge(undefined)).toEqual({ label: '알림 설정', tone: 'unset' });
   });
 
   it('이메일 수신 꺼짐 → "알림 꺼짐"', () => {
-    expect(describeNotificationBadge(setting({ emailAlertYn: false, newTradeAlertYn: true }), available)).toEqual({
+    expect(describeNotificationBadge(setting({ emailAlertYn: false, newTradeAlertYn: true }))).toEqual({
       label: '알림 꺼짐',
       tone: 'off',
     });
   });
 
   it('임계치만 → "±n% 알림", 소수 임계치는 한 자리', () => {
-    expect(describeNotificationBadge(setting({}), available).label).toBe('±5% 알림');
-    expect(describeNotificationBadge(setting({ priceChangeThresholdPct: 2.5 }), available).label).toBe('±2.5% 알림');
+    expect(describeNotificationBadge(setting({})).label).toBe('±5% 알림');
+    expect(describeNotificationBadge(setting({ priceChangeThresholdPct: 2.5 })).label).toBe('±2.5% 알림');
   });
 
   it('임계치 + 신규거래 → "±n% · 신규거래"', () => {
-    expect(describeNotificationBadge(setting({ newTradeAlertYn: true }), available)).toEqual({
-      label: '±5% · 신규거래',
-      tone: 'on',
-    });
+    expect(describeNotificationBadge(setting({ newTradeAlertYn: true }))).toEqual({ label: '±5% · 신규거래', tone: 'on' });
   });
 
-  it('알림 설정을 불러오지 못하면 hasNotificationSetting만으로 정한다', () => {
-    expect(describeNotificationBadge(undefined, { settingsAvailable: false, hasNotificationSetting: true }).label).toBe('알림 설정됨');
-    expect(describeNotificationBadge(undefined, { settingsAvailable: false, hasNotificationSetting: false }).label).toBe('알림 설정');
+  it('알림 설정 목록이 없으면(로딩 중·조회 실패) 배지를 숨긴다 — "알림 설정"으로 보이지 않는다', () => {
+    expect(resolveNotificationBadge(null, 10)).toBeNull();
+  });
+
+  it('목록이 있으면 그 항목의 설정으로, 없는 항목은 "알림 설정"', () => {
+    const map = new Map([[10, setting({ newTradeAlertYn: true })]]);
+    expect(resolveNotificationBadge(map, 10)?.label).toBe('±5% · 신규거래');
+    expect(resolveNotificationBadge(map, 11)).toEqual({ label: '알림 설정', tone: 'unset' });
   });
 });
 
