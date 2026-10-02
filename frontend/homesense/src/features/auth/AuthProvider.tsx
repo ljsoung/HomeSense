@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AuthContext, type AuthStatus } from './authContext';
 import { login as loginRequest, signup as signupRequest } from './api';
 import {
@@ -31,11 +31,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [signedOutByUser, setSignedOutByUser] = useState(false);
   // 다시 확인할 때마다 올린다 — 이미 'checking'인 상태에서 다시 확인이 시작돼도 복원 effect가 다시 돈다.
   const [checkRound, setCheckRound] = useState(0);
+  // 진행 중인 로그아웃 수. 로그아웃은 서버 폐기를 최대 5초 기다린 뒤 비로그인으로 바뀌는데, 그사이 다른 경로가 먼저
+  // 비로그인으로 바꿀 수 있다 — 로그아웃 시작 뒤 401을 받은 요청의 재발급이 실패하면 세션 만료 알림이 온다(세대를
+  // 로그아웃이 이미 올린 뒤라 그 재발급은 새 세대 기준이다). 그때도 사용자가 직접 로그아웃한 것으로 기록해야
+  // 보호 화면의 가드가 로그인 화면이 아니라 HOME-01로 보낸다(가드는 첫 비로그인 전환에서 이동하고 언마운트된다).
+  const pendingLogouts = useRef(0);
 
   const becomeAnonymous = useCallback((byUser: boolean) => {
     markTabUnauthenticated();
     setUser(null);
-    setSignedOutByUser(byUser);
+    setSignedOutByUser(byUser || pendingLogouts.current > 0);
     setStatus('anonymous');
   }, []);
 
@@ -127,13 +132,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 서버 폐기(최선 노력, 상한 5초) 후 로컬 토큰을 지운다 — 서버가 응답하지 않거나 요청이 멈춰도 상한 뒤
   // finally에서 반드시 로컬 로그아웃을 끝낸다(예전엔 멈춘 요청이 로그아웃을 영원히 붙잡았다, Codex P2).
+  // 로그아웃 의도는 서버 폐기를 기다리기 전에 기록한다(`pendingLogouts`, 위 설명).
   const logout = useCallback(async () => {
+    pendingLogouts.current += 1;
     advanceSessionGeneration();
     try {
       await revokeSessionWithinDeadline();
     } finally {
       tokenStorage.clearTokens();
       becomeAnonymous(true);
+      pendingLogouts.current -= 1;
     }
   }, [becomeAnonymous]);
 
