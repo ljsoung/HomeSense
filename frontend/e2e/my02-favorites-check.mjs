@@ -259,6 +259,23 @@ async function scenarioDelete(label, viewport, isDesktop) {
   await page.getByRole('button', { name: '래미안 원베일리 관심 매물 삭제' }).click();
   const dialog = page.getByRole('alertdialog', { name: '삭제하시겠어요?' });
   ok(`${label} 3: 확인 다이얼로그 문구`, (await dialog.innerText()).includes('래미안 원베일리을(를) 삭제하면 해당 항목의 알림도 함께 중지됩니다.'));
+  // Figma 6-4995(1280px 이상) / 29-16508·28-15713(그 아래): 폭·안쪽 여백·그림자·아이콘 상자·제목 크기가 다르다.
+  const look = await dialog.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const icon = el.querySelector('[data-testid="dialog-icon"]');
+    const title = el.querySelector('h2');
+    return {
+      width: el.getBoundingClientRect().width, padding: style.paddingTop, shadow: style.boxShadow,
+      iconSize: icon?.getBoundingClientRect().width, iconRadius: icon ? getComputedStyle(icon).borderRadius : null,
+      titleSize: title ? getComputedStyle(title).fontSize : null,
+    };
+  });
+  const expectLook = isDesktop
+    ? { width: 400, padding: '32px', shadow: '0px 16px 48px', iconSize: 56, titleSize: '18px' }
+    : { width: 320, padding: '24px', shadow: '0px 20px 60px', iconSize: 48, titleSize: '16px' };
+  ok(`${label} 3: 다이얼로그 크기(폭 ${expectLook.width}, 여백 ${expectLook.padding}, 그림자, 아이콘 ${expectLook.iconSize}, 제목 ${expectLook.titleSize})`,
+    Math.round(look.width) === expectLook.width && look.padding === expectLook.padding && look.shadow.includes(expectLook.shadow)
+    && Math.round(look.iconSize) === expectLook.iconSize && look.titleSize === expectLook.titleSize, JSON.stringify(look));
   await dialog.getByRole('button', { name: '취소' }).click();
   ok(`${label} 3: 취소 → 그대로, 요청 없음`, (await page.locator('li[data-favorite-key="property:1"]').count()) === 1 && deletes(calls).length === 0);
 

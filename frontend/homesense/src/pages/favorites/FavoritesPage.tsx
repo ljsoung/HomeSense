@@ -7,7 +7,7 @@ import { EmptyHeartIcon } from '../../components/icons/EmptyHeartIcon';
 import { SortLinesIcon } from '../../components/icons/SortLinesIcon';
 import { TrashIcon } from '../../components/icons/TrashIcon';
 import { MainLayout } from '../../components/layout/MainLayout';
-import { MODAL_DANGER_BUTTON_CLASS, MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
+import { MODAL_DANGER_BUTTON_CLASS, MODAL_FOOTER_ROW_CLASS, MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
 import { useToast } from '../../components/ui/useToast';
 import {
   addFavoriteRegion,
@@ -376,12 +376,16 @@ export function FavoritesPage() {
         describedBy="favorites-delete-description"
         title="삭제하시겠어요?"
         icon={
-          <div className="flex size-14 items-center justify-center rounded-full bg-[#fef2f2] text-[#fb2c36]">
+          // 아이콘 상자 — 1280px 이상 56px 원(6-4995), 그 아래 48px radius 16(29-16508·28-15713). 휴지통은 24px.
+          <div
+            data-testid="dialog-icon"
+            className="flex size-12 items-center justify-center rounded-[16px] bg-[#fef2f2] text-[#fb2c36] xl:size-14 xl:rounded-full"
+          >
             <TrashIcon aria-hidden="true" className="size-6" />
           </div>
         }
         footer={
-          <div className="flex flex-col gap-2 md:flex-row-reverse md:gap-3">
+          <div className={MODAL_FOOTER_ROW_CLASS}>
             <button type="button" onClick={confirmDelete} className={MODAL_DANGER_BUTTON_CLASS}>
               삭제
             </button>
@@ -391,7 +395,9 @@ export function FavoritesPage() {
           </div>
         }
       >
-        <p id="favorites-delete-description" className="text-[14px] leading-[22.75px] text-[#4a5565]">
+        {/* 문구는 화면 크기와 상관없이 데스크톱 Figma 것 하나다. 태블릿·모바일 Figma("관심 매물 삭제" / "{이름}를 관심 매물에서
+            삭제할까요?")에는 알림 설정이 함께 지워진다는 안내가 없고(FK CASCADE로 실제로 지워진다), 제목은 지역 삭제에 쓸 수 없다. */}
+        <p id="favorites-delete-description" className="text-[13px] leading-[21.125px] text-[#4a5565] xl:text-[14px] xl:leading-[22.75px]">
           {deleteTarget?.name}을(를) 삭제하면 해당 항목의 알림도 함께 중지됩니다.
         </p>
       </Modal>

@@ -1,6 +1,6 @@
 // MY-02 관심 매물·지역 관리를 3개 뷰포트에서 스크린샷으로 저장 — Figma 6-4695/6-4995/6-5286(데스크톱),
 // 28-16161/29-16508/29-16879(태블릿), 27-15395/28-15713/28-16055(모바일)과 육안 대조·PR 첨부용. 테스트 아님(단정문 없음).
-// 백엔드 불필요(route로 흉내). 결과: ./out/my02-{desktop,tablet,mobile}-{list,regions,dialog,empty}.png
+// 백엔드 불필요(route로 흉내). 결과: ./out/my02-{desktop,tablet,mobile}-{list,regions,dialog,dialog-region,empty}.png
 import { chromium } from 'playwright';
 import { mkdirSync } from 'fs';
 import { BASE } from './base.mjs';
@@ -76,6 +76,12 @@ for (const vp of viewports) {
   await page.getByRole('button', { name: '래미안 원베일리 관심 매물 삭제' }).click();
   await page.getByRole('alertdialog').waitFor();
   await page.screenshot({ path: `./out/my02-${vp.name}-dialog.png` });
+  await page.keyboard.press('Escape');
+  await page.getByRole('alertdialog').waitFor({ state: 'detached' });
+  if (vp.name !== 'desktop') await page.getByRole('tab', { name: /관심 지역/ }).click();
+  await page.getByRole('button', { name: '금광면 관심 지역 삭제' }).click();
+  await page.getByRole('alertdialog').waitFor();
+  await page.screenshot({ path: `./out/my02-${vp.name}-dialog-region.png` });
   await context.close();
 
   const empty = await open(vp, true);
