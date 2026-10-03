@@ -70,12 +70,16 @@ export const CONFIRM_SECONDARY_BUTTON_CLASS =
 /**
  * 확인형 위험 버튼(MY-02 삭제). 색은 Figma(1280px 이상 #ef4444, 그 아래 #fb2c36) 대신 #e7000b — 흰 글자 대비가 Figma 두 색은
  * 3.76:1·3.81:1로 4.5:1에 못 미치고 #e7000b는 4.77:1(NFR-8). 굵기는 Figma대로 1280px 이상 Bold.
+ * 투명 테두리 1px는 가로 배치에서 취소 버튼(테두리 1px)과 폭을 똑같이 나누려고 둔다 — 없으면 2px 좁아진다.
  */
 export const CONFIRM_DANGER_BUTTON_CLASS =
-  'flex h-[43px] w-full items-center justify-center rounded-[14px] bg-[#e7000b] text-[14px] font-semibold text-white hover:bg-[#c10007] disabled:cursor-not-allowed disabled:opacity-50 xl:h-[47px] xl:font-bold';
+  'flex h-[43px] w-full items-center justify-center rounded-[14px] border border-transparent bg-[#e7000b] text-[14px] font-semibold text-white hover:bg-[#c10007] disabled:cursor-not-allowed disabled:opacity-50 xl:h-[47px] xl:font-bold';
 
-/** 확인형 두 버튼 영역 — 간격 1280px 이상 12px, 그 아래 10px. 768px 미만은 세로로 쌓는다. */
-export const CONFIRM_FOOTER_ROW_CLASS = 'flex flex-col gap-2.5 md:flex-row-reverse xl:gap-3';
+/**
+ * 확인형 두 버튼 영역 — 모든 크기에서 가로(Figma 28-15713·29-16508도 가로 auto-layout으로 두 버튼이 폭을 나눠 가진다).
+ * 간격 1280px 이상 12px, 그 아래 10px. 확인 버튼이 오른쪽이다(DOM은 확인 → 취소 순서라 초기 포커스가 확인 버튼).
+ */
+export const CONFIRM_FOOTER_ROW_CLASS = 'flex flex-row-reverse gap-2.5 xl:gap-3 [&>*]:min-w-0 [&>*]:flex-1';
 
 /**
  * 공용 모달 대화상자 — DTL-01 거래상세 모달이 처음 쓰고, MY-01 계정 다이얼로그·MY-02 삭제 다이얼로그가 이어서 쓴다.

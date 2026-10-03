@@ -276,6 +276,11 @@ async function scenarioDelete(label, viewport, isDesktop) {
   ok(`${label} 3: 다이얼로그 크기(폭 ${expectLook.width}, 여백 ${expectLook.padding}, 그림자, 아이콘 ${expectLook.iconSize}, 제목 ${expectLook.titleSize})`,
     Math.round(look.width) === expectLook.width && look.padding === expectLook.padding && look.shadow.includes(expectLook.shadow)
     && Math.round(look.iconSize) === expectLook.iconSize && look.titleSize === expectLook.titleSize, JSON.stringify(look));
+  // 확인 다이얼로그 버튼은 모든 크기(390 포함)에서 가로 — 같은 줄, 취소 왼쪽·삭제 오른쪽, 폭을 나눠 가짐(Figma 28-15713).
+  const cancelBox = await dialog.getByRole('button', { name: '취소' }).boundingBox();
+  const confirmBox = await dialog.getByRole('button', { name: '삭제' }).boundingBox();
+  ok(`${label} 3: 확인 다이얼로그 버튼 가로 배치(${viewport.width}px)`, Math.abs(cancelBox.y - confirmBox.y) < 1 && cancelBox.x < confirmBox.x
+    && Math.abs(cancelBox.width - confirmBox.width) < 1, JSON.stringify({ cancelBox, confirmBox }));
   await dialog.getByRole('button', { name: '취소' }).click();
   ok(`${label} 3: 취소 → 그대로, 요청 없음`, (await page.locator('li[data-favorite-key="property:1"]').count()) === 1 && deletes(calls).length === 0);
 
