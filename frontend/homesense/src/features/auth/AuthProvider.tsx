@@ -13,6 +13,7 @@ import {
   setSessionExpiredListener,
   storeTokens,
   syncWithStoredAccount,
+  type RecheckStart,
 } from './session';
 import { getMe } from '../user/api';
 import type { UserResponse } from '../user/types';
@@ -37,11 +38,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 보호 화면의 가드가 로그인 화면이 아니라 HOME-01로 보낸다(가드는 첫 비로그인 전환에서 이동하고 언마운트된다).
   const pendingLogouts = useRef(0);
 
-  const becomeAnonymous = useCallback((byUser: boolean) => {
+  /**
+   * 로그인 상태를 벗어나는 유일한 경로 — 로그아웃·탈퇴, 세션 만료(재발급 실패), 복원 실패, 다시 확인이 모두 여기를 거친다.
+   *
+   * 직접 로그아웃 기록(`signedOutByUser`)은 한 번 true가 되면 다음 로그인 상태 확정(로그인·가입·복원 성공) 전까지
+   * 낮추지 않는다. 로그아웃 응답으로 로컬 로그아웃이 끝난 뒤(진행 중 로그아웃 0건) 같은 렌더 안에서 다른 경로가
+   * 비로그인 전환을 한 번 더 하면, 낮췄을 때 가드가 마지막 값(false)만 보고 로그인 화면으로 보낸다(Codex P2 후속).
+   *
+   * `recheck`는 다시 확인(`beginRecheck`)에서 부를 때만 준다. 'checking'이면 저장소에 토큰이 있어 복원 경로로 다시
+   * 확인하므로 비로그인 대신 확인 중으로 두고, 복원 effect가 다시 돌도록 `checkRound`를 올린다. 이 경로에서
+   * `markTabUnauthenticated()`가 다시 실행되지만 끄지 않았다 — `beginRecheck`가 같은 동기 흐름에서 이미 불렀고
+   * 저장소가 그사이 바뀌지 않아 결과가 같다.
+   */
+  const becomeAnonymous = useCallback((byUser: boolean, recheck?: RecheckStart) => {
     markTabUnauthenticated();
     setUser(null);
-    setSignedOutByUser(byUser || pendingLogouts.current > 0);
-    setStatus('anonymous');
+    const signedOut = byUser || pendingLogouts.current > 0;
+    setSignedOutByUser((previous) => previous || signedOut);
+    setStatus(recheck ?? 'anonymous');
+    if (recheck) setCheckRound((round) => round + 1);
   }, []);
 
   // 사용 중 재발급(httpClient 401 인터셉터)이 세션 종료로 끝나면 비로그인으로 바꾼다. session.ts가 세대
@@ -56,14 +71,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 인터셉터가 다른 계정 토큰을 막았을 때도 같은 경로로 온다(session.ts `beginRecheck`). 세대는 이미 올라가
   // 있어, 이전 세션에서 진행 중이던 복원·재발급 결과는 상태를 바꾸지 못한다.
   // 이 탭의 로그아웃이 서버 폐기를 기다리는 동안 다른 탭이 토큰을 지우면 여기서 먼저 비로그인이 된다 — 그때도
-  // 직접 로그아웃으로 기록한다(`pendingLogouts`, Codex P2). 가드는 이 첫 전환에서 이동한다.
+  // 직접 로그아웃으로 기록한다(`becomeAnonymous`가 `pendingLogouts`를 본다, Codex P2).
   useEffect(() => {
-    setRecheckListener((next) => {
-      setUser(null);
-      setSignedOutByUser(pendingLogouts.current > 0);
-      setStatus(next);
-      setCheckRound((round) => round + 1);
-    });
+    setRecheckListener((next) => becomeAnonymous(false, next));
     const onStorage = (event: StorageEvent) => {
       if (event.storageArea !== localStorage) return;
       if (event.key !== null && event.key !== ACCESS_TOKEN_KEY) return; // key가 null이면 clear()
@@ -74,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('storage', onStorage);
       setRecheckListener(null);
     };
-  }, []);
+  }, [becomeAnonymous]);
 
   useEffect(() => {
     if (status !== 'checking') {
@@ -96,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       setUser(result.user);
+      setSignedOutByUser(false); // 로그인 상태 확정 — 직접 로그아웃 기록을 내린다(`becomeAnonymous` 설명).
       setStatus('authenticated');
     });
     return () => {

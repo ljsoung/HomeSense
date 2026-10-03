@@ -393,7 +393,9 @@ const VIEWPORTS = [
   ['태블릿', { width: 768, height: 1024 }, false],
   ['데스크톱', { width: 1280, height: 900 }, false],
 ];
-for (const [label, viewport, mobile] of VIEWPORTS) {
+// VIEWPORTS=모바일,태블릿 처럼 일부만 실행한다(브라우저가 중간에 죽는 환경에서 뷰포트별로 나눠 돌릴 때).
+const only = process.env.VIEWPORTS?.split(',');
+for (const [label, viewport, mobile] of VIEWPORTS.filter(([name]) => !only || only.includes(name))) {
   await scenarioAnonymousRedirect(label, viewport);
   await scenarioChecking(label, viewport);
   await scenarioContent(label, viewport, mobile);
