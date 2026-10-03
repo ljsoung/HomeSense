@@ -3,8 +3,8 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { ArrowLeftIcon } from '../../components/icons/ArrowLeftIcon';
 import { ArrowRightIcon } from '../../components/icons/ArrowRightIcon';
 import { ChevronDownIcon } from '../../components/icons/ChevronDownIcon';
-import { FilterIcon } from '../../components/icons/FilterIcon';
-import { HeartIcon } from '../../components/icons/HeartIcon';
+import { EmptyHeartIcon } from '../../components/icons/EmptyHeartIcon';
+import { SortLinesIcon } from '../../components/icons/SortLinesIcon';
 import { TrashIcon } from '../../components/icons/TrashIcon';
 import { MainLayout } from '../../components/layout/MainLayout';
 import { MODAL_DANGER_BUTTON_CLASS, MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
@@ -449,7 +449,7 @@ function BothEmpty() {
   return (
     <div className="flex flex-col items-center rounded-[16px] border border-[#f3f4f6] bg-white px-6 py-20 text-center shadow-[0_1px_4px_rgba(0,0,0,0.05)]">
       <div aria-hidden="true" className="flex size-20 items-center justify-center rounded-[24px] bg-[#e8f2f0] text-brand">
-        <HeartIcon className="size-9" />
+        <EmptyHeartIcon className="size-9" />
       </div>
       <p className="mt-6 text-[18px] leading-[27px] font-extrabold text-[#101828]">아직 등록한 관심 매물·지역이 없어요</p>
       <p className="mt-2 text-[14px] leading-[22.75px] text-[#99a1af]">
@@ -598,7 +598,7 @@ function SortSelect({
 }) {
   return (
     <div className="relative inline-flex shrink-0 items-center self-center">
-      <FilterIcon aria-hidden="true" className="pointer-events-none absolute left-3 size-3.5 text-[#6a7282]" />
+      <SortLinesIcon aria-hidden="true" className="pointer-events-none absolute left-3 size-3.5 text-[#6a7282]" />
       <select
         aria-label="정렬"
         value={value}

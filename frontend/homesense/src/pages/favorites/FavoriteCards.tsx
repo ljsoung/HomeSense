@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { BellIcon } from '../../components/icons/BellIcon';
 import { HomeIcon } from '../../components/icons/HomeIcon';
 import { MapPinIcon } from '../../components/icons/MapPinIcon';
-import { TrashIcon } from '../../components/icons/TrashIcon';
+import { TrashSmallIcon } from '../../components/icons/TrashSmallIcon';
 import { DataTrustBadge } from '../../components/ui/DataTrustBadge';
 import type { HousingType } from '../../features/complex/types';
 import type { FavoritePropertySummaryResponse, FavoriteRegionSummaryResponse } from '../../features/favorite/types';
@@ -162,7 +162,7 @@ function DeleteButton({ layout, label, onClick }: { layout: FavoritesLayout; lab
         aria-label={label}
         className="relative z-10 flex shrink-0 items-center gap-1 text-[10px] leading-[15px] font-medium text-[#6a7282] before:absolute before:-inset-x-2 before:-inset-y-[15px] before:content-[''] hover:text-[#c10007] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
       >
-        <TrashIcon aria-hidden="true" className="size-3" />
+        <TrashSmallIcon aria-hidden="true" className="size-3" />
         삭제
       </button>
     );
