@@ -55,10 +55,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 다른 탭이 저장소 토큰을 바꾸면(다른 계정 로그인, 로그아웃) 이 탭의 로그인 상태를 다시 확인한다. 요청
   // 인터셉터가 다른 계정 토큰을 막았을 때도 같은 경로로 온다(session.ts `beginRecheck`). 세대는 이미 올라가
   // 있어, 이전 세션에서 진행 중이던 복원·재발급 결과는 상태를 바꾸지 못한다.
+  // 이 탭의 로그아웃이 서버 폐기를 기다리는 동안 다른 탭이 토큰을 지우면 여기서 먼저 비로그인이 된다 — 그때도
+  // 직접 로그아웃으로 기록한다(`pendingLogouts`, Codex P2). 가드는 이 첫 전환에서 이동한다.
   useEffect(() => {
     setRecheckListener((next) => {
       setUser(null);
-      setSignedOutByUser(false);
+      setSignedOutByUser(pendingLogouts.current > 0);
       setStatus(next);
       setCheckRound((round) => round + 1);
     });
