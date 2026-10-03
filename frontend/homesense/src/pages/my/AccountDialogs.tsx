@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { FieldHint } from '../../components/ui/FieldHint';
-import { MODAL_DANGER_BUTTON_CLASS, MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
+import { MODAL_DANGER_BUTTON_CLASS, MODAL_FOOTER_ROW_CLASS, MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
 import { TextField } from '../../components/ui/TextField';
 import { useToast } from '../../components/ui/useToast';
 import { useAuth } from '../../features/auth/useAuth';
@@ -123,7 +123,7 @@ function WithdrawDialog({ onClose }: { onClose: () => void }) {
       title="회원탈퇴"
       describedBy={noticeId}
       footer={
-        <div className="flex flex-col gap-2 md:flex-row-reverse">
+        <div className={MODAL_FOOTER_ROW_CLASS}>
           <button type="submit" form={formId} disabled={!canSubmit} className={MODAL_DANGER_BUTTON_CLASS}>
             {submitting ? '탈퇴 처리 중…' : '탈퇴하기'}
           </button>
