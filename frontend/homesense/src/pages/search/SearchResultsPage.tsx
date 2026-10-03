@@ -32,6 +32,7 @@ import { useExecuteSearch } from '../../features/search/useExecuteSearch';
 import type { PageMeta } from '../../types/api';
 import { getErrorMessage } from '../../lib/apiError';
 import { useFavoriteToggle } from '../home/useFavoriteToggle';
+import { MEDIA_MD_DOWN, useMediaQuery } from '../../lib/useMediaQuery';
 
 const extractErrorMessage = getErrorMessage;
 
@@ -49,15 +50,7 @@ const scrollCache = new Map<
 >();
 
 function useIsMobile() {
-  const query = '(max-width: 767px)';
-  const [isMobile, setIsMobile] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    const handler = () => setIsMobile(mql.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
-  return isMobile;
+  return useMediaQuery(MEDIA_MD_DOWN);
 }
 
 /**

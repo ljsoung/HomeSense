@@ -1,7 +1,13 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { FieldHint } from '../../components/ui/FieldHint';
-import { MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
+import {
+  CONFIRM_SECONDARY_BUTTON_CLASS,
+  MODAL_DANGER_BUTTON_CLASS,
+  MODAL_FOOTER_ROW_CLASS,
+  MODAL_SECONDARY_BUTTON_CLASS,
+  Modal,
+} from '../../components/ui/Modal';
 import { TextField } from '../../components/ui/TextField';
 import { useToast } from '../../components/ui/useToast';
 import { useAuth } from '../../features/auth/useAuth';
@@ -12,13 +18,11 @@ import { getErrorMessage } from '../../lib/apiError';
 
 export type AccountDialog = 'choice' | 'withdraw' | null;
 
+// 선택 다이얼로그는 확인형(제목·짧은 본문·버튼) — 버튼 높이 경계를 확인형과 같이 1280px로 둔다(Modal CONFIRM_*).
 const PRIMARY_BUTTON_CLASS =
-  'flex h-[43px] w-full items-center justify-center rounded-[14px] bg-brand text-[14px] font-semibold text-white hover:bg-[#0c4a44] disabled:cursor-not-allowed disabled:opacity-50 md:h-[47px]';
-// 탈퇴 버튼 — 흰 글자와 #e7000b는 대비 약 4.8:1(NFR-8 4.5:1 이상).
-const DANGER_BUTTON_CLASS =
-  'flex h-[43px] w-full items-center justify-center rounded-[14px] bg-[#e7000b] text-[14px] font-semibold text-white hover:bg-[#c10007] disabled:cursor-not-allowed disabled:opacity-50 md:h-[47px]';
+  'flex h-[43px] w-full items-center justify-center rounded-[14px] bg-brand text-[14px] font-semibold text-white hover:bg-[#0c4a44] disabled:cursor-not-allowed disabled:opacity-50 xl:h-[47px]';
 const DANGER_OUTLINE_BUTTON_CLASS =
-  'flex h-[43px] w-full items-center justify-center rounded-[14px] border border-[#fecaca] bg-white text-[14px] font-semibold text-[#c10007] hover:bg-[#fef2f2] disabled:cursor-not-allowed disabled:opacity-50 md:h-[47px]';
+  'flex h-[43px] w-full items-center justify-center rounded-[14px] border border-[#fecaca] bg-white text-[14px] font-semibold text-[#c10007] hover:bg-[#fef2f2] disabled:cursor-not-allowed disabled:opacity-50 xl:h-[47px]';
 
 interface AccountDialogsProps {
   dialog: AccountDialog;
@@ -55,6 +59,7 @@ function ChoiceDialog({ open, onClose, onWithdraw }: { open: boolean; onClose: (
       onClose={loggingOut ? () => {} : onClose}
       title="로그아웃·회원탈퇴"
       describedBy={descriptionId}
+      variant="confirm"
       footer={
         <div className="flex flex-col gap-2">
           <button type="button" onClick={() => void logoutWithNotice()} disabled={loggingOut} className={PRIMARY_BUTTON_CLASS}>
@@ -63,7 +68,7 @@ function ChoiceDialog({ open, onClose, onWithdraw }: { open: boolean; onClose: (
           <button type="button" onClick={onWithdraw} disabled={loggingOut} className={DANGER_OUTLINE_BUTTON_CLASS}>
             회원탈퇴
           </button>
-          <button type="button" onClick={onClose} disabled={loggingOut} className={MODAL_SECONDARY_BUTTON_CLASS}>
+          <button type="button" onClick={onClose} disabled={loggingOut} className={CONFIRM_SECONDARY_BUTTON_CLASS}>
             취소
           </button>
         </div>
@@ -119,6 +124,7 @@ function WithdrawDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
+    // 내용형(기본) — 안내 목록·체크박스·비밀번호 입력을 담아 768px 이상에서 폭 400을 쓴다.
     <Modal
       open
       role="alertdialog"
@@ -126,8 +132,8 @@ function WithdrawDialog({ onClose }: { onClose: () => void }) {
       title="회원탈퇴"
       describedBy={noticeId}
       footer={
-        <div className="flex flex-col gap-2 md:flex-row-reverse">
-          <button type="submit" form={formId} disabled={!canSubmit} className={DANGER_BUTTON_CLASS}>
+        <div className={MODAL_FOOTER_ROW_CLASS}>
+          <button type="submit" form={formId} disabled={!canSubmit} className={MODAL_DANGER_BUTTON_CLASS}>
             {submitting ? '탈퇴 처리 중…' : '탈퇴하기'}
           </button>
           <button type="button" onClick={onClose} disabled={submitting} className={MODAL_SECONDARY_BUTTON_CLASS}>

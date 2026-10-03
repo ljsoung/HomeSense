@@ -176,7 +176,7 @@ class FavoriteServiceMariaDbIT {
             throws Exception {
         User user = userRepository.saveAndFlush(
                 User.createUser("fav-race-region@test.com", "encoded", "경쟁회원2"));
-        LegalDistrictCode region = legalDistrictCodeRepository.saveAndFlush(region("1168099999"));
+        LegalDistrictCode region = legalDistrictCodeRepository.saveAndFlush(region("1168099900"));
         Long userId = user.getUserId();
         String legalDongCd = region.getLegalDongCd();
 

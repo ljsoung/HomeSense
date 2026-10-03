@@ -428,6 +428,21 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
   await context.close();
 }
 
+// 8-1) 거래상세 모달은 내용형 — 768px에서 확인형(320px)으로 줄지 않는다(공용 Modal 확인형/내용형 구분, 2026-10-03).
+{
+  const { context, page } = await newPage(768, 1000);
+  await mock(page);
+  await page.goto(`${BASE}/complexes/${MOCK_ID}`);
+  const row = page.locator('tbody tr').first();
+  await row.waitFor();
+  await row.click();
+  const dialog = page.getByRole('dialog', { name: '거래 상세' });
+  await dialog.getByText('매도자').waitFor();
+  const width = Math.round((await dialog.boundingBox()).width);
+  ok(`768 모달: 내용형이라 320px보다 넓음(${width}px)`, width > 320);
+  await context.close();
+}
+
 // 9) 실제 백엔드 스모크 — 3개 폭. 가로 스크롤 없음, 순서, 사이드바 sticky(1280만), 내비 활성.
 for (const [width, height] of [[360, 780], [768, 1024], [1280, 900]]) {
   const { context, page, errors } = await newPage(width, height);

@@ -46,6 +46,8 @@ const SCRIPTS = [
   'dtl01-detail-check',
   // MY-01 마이페이지 홈 — 보호 라우트, 위젯 상태, 로그아웃·탈퇴 다이얼로그(390/768/1280). 백엔드 불필요.
   'my01-mypage-check',
+  // MY-02 관심 매물·지역 관리 — 세로 섹션/탭, 지연 삭제·실행취소, 지역 추가, 이동, 키보드(390/768/1280). 백엔드 불필요.
+  'my02-favorites-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;

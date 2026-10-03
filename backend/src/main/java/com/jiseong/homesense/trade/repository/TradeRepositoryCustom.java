@@ -30,4 +30,12 @@ interface TradeRepositoryCustom {
      * 보여주는 정합성 버그가 생기므로, 이 메서드가 유일한 소스여야 한다.
      */
     Map<Long, Trade> findRecentTradesByComplexIds(List<Long> complexIds);
+
+    /**
+     * {@link #findRecentTradesByComplexIds}와 같은 선정 규칙(취소 제외, MAX(dealDate) → MAX(tradeId))을
+     * 매매(SALE) 거래 안에서만 적용한다. MY-02 관심 매물 카드의 "최근 거래가"가 쓴다 — 전세 보증금이
+     * 최근 거래가로 섞이면 매매 시세와 구분되지 않고, 같은 카드의 변동률(매매만 집계)과도 기준이 어긋난다.
+     * 매매 거래가 없는 complex_id는 결과 Map에 키가 없다.
+     */
+    Map<Long, Trade> findRecentSaleTradesByComplexIds(List<Long> complexIds);
 }

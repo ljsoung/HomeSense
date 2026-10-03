@@ -43,7 +43,7 @@ function ComplexDetailPage({ rawId }: { rawId: string | undefined }) {
   const rawDeal = searchParams.get('deal');
   const dealType = dealTypeFromParam(rawDeal);
   const { detail, saleHistory, selectedHistory, retryDetail, retryHistory } = useComplexDetailData(complexId, dealType);
-  const { favoritedIds, toggleFavorite, pendingFavoriteId, processingIds } = useFavoriteToggle();
+  const { favoritedIds, toggleFavorite, pendingFavoriteId, processingIds } = useFavoriteToggle({ listLinkInToast: true });
   const [openTradeId, setOpenTradeId] = useState<number | null>(null);
 
   // 알 수 없는 ?deal= 값은 매매로 보고 URL도 정리한다(기록을 남기지 않는 replace).
