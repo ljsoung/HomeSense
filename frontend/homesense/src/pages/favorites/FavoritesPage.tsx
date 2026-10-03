@@ -7,7 +7,7 @@ import { EmptyHeartIcon } from '../../components/icons/EmptyHeartIcon';
 import { SortLinesIcon } from '../../components/icons/SortLinesIcon';
 import { TrashIcon } from '../../components/icons/TrashIcon';
 import { MainLayout } from '../../components/layout/MainLayout';
-import { MODAL_DANGER_BUTTON_CLASS, MODAL_FOOTER_ROW_CLASS, MODAL_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
+import { CONFIRM_DANGER_BUTTON_CLASS, CONFIRM_FOOTER_ROW_CLASS, CONFIRM_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
 import { useToast } from '../../components/ui/useToast';
 import {
   addFavoriteRegion,
@@ -373,6 +373,7 @@ export function FavoritesPage() {
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         role="alertdialog"
+        variant="confirm"
         describedBy="favorites-delete-description"
         title="삭제하시겠어요?"
         icon={
@@ -385,11 +386,11 @@ export function FavoritesPage() {
           </div>
         }
         footer={
-          <div className={MODAL_FOOTER_ROW_CLASS}>
-            <button type="button" onClick={confirmDelete} className={MODAL_DANGER_BUTTON_CLASS}>
+          <div className={CONFIRM_FOOTER_ROW_CLASS}>
+            <button type="button" onClick={confirmDelete} className={CONFIRM_DANGER_BUTTON_CLASS}>
               삭제
             </button>
-            <button type="button" onClick={() => setDeleteTarget(null)} className={MODAL_SECONDARY_BUTTON_CLASS}>
+            <button type="button" onClick={() => setDeleteTarget(null)} className={CONFIRM_SECONDARY_BUTTON_CLASS}>
               취소
             </button>
           </div>
