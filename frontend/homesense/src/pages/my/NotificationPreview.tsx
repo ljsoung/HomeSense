@@ -54,7 +54,8 @@ export function NotificationPreview({ state, onRetry }: { state: Loadable<Notifi
                 <TargetDot />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-[#1e2939]">
-                    {notification.message}
+                    {/* message는 NULL 허용 컬럼이라 키째 빠질 수 있다 — 빈 행 대신 NOT NULL인 title을 보인다. */}
+                    {notification.message ?? notification.title}
                   </span>
                   <time dateTime={notification.sentAt} className="mt-0.5 text-[11px] leading-[17px] text-[#99a1af]">
                     {formatRelativeTime(notification.sentAt, now)}
