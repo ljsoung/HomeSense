@@ -1,4 +1,5 @@
-// UIC-03 SearchBar 자동완성 — 이미 보낸 요청의 늦은 응답이 최신 상태를 덮어쓰지 않는지 검증한다.
+// UIC-03 SearchBar 자동완성 — 이미 보낸 요청의 늦은 응답이 최신 상태를 덮어쓰지 않는지, 입력을 바꾼 직후
+// 이전 검색어의 후보를 고를 수 없는지(4번) 검증한다.
 // 로컬 백엔드는 응답이 빨라 경합이 저절로 재현되지 않으므로, page.route로 특정 query의 응답을
 // "게이트"에 묶어 두고 원하는 시점에 풀어 순서를 확정적으로 만든다(고정 지연보다 결정적이다 —
 // 디바운스 300ms 창 안에 늦은 응답이 도착하도록 정확히 맞출 수 있다).
@@ -136,6 +137,30 @@ const browser = await chromium.launch();
   await page.waitForURL(/\/search\?/, { timeout: 5000 });
   ok('마우스 클릭으로 선택 시 regionCode로 이동', page.url().includes('regionCode='));
   ok('콘솔 pageerror 없음(정상 경로)', errors.length === 0);
+  await context.close();
+}
+
+// 4) 입력을 바꾼 직후(다음 응답 전) 이전 검색어의 후보를 고를 수 없다(Codex P2). "수원시" 응답을 붙잡아
+//    요청 중 상태를 만든다. 수정 전에는 "수원" 후보가 그대로 떠 있고 활성 후보도 남아, Enter가 수원 후보의
+//    regionCode로 검색했다.
+{
+  const { context, page, errors, input } = await newHomePage(browser);
+  const held = await holdQuery(page, '수원시');
+  await input.click();
+  await input.fill('수원');
+  await page.waitForSelector('[role="option"]', { timeout: 5000 });
+  await input.press('ArrowDown');
+  ok('바꾸기 전 활성 후보 있음', Boolean(await input.getAttribute('aria-activedescendant')));
+
+  await input.fill('수원시');
+  ok('입력을 바꾼 직후 이전 후보가 보이지 않음(클릭 불가)', (await page.locator('[role="option"]').count()) === 0);
+  ok('입력을 바꾼 직후 활성 후보 초기화', (await input.getAttribute('aria-activedescendant')) === null);
+  await input.press('Enter');
+  await page.waitForURL(/\/search\?/, { timeout: 5000 });
+  const params = new URL(page.url()).searchParams;
+  ok('Enter는 이전 후보(regionCode)가 아니라 지금 입력(keyword)으로 검색', !params.has('regionCode') && params.get('keyword') === '수원시');
+  held.release();
+  ok('콘솔 pageerror 없음(이전 후보)', errors.length === 0);
   await context.close();
 }
 
