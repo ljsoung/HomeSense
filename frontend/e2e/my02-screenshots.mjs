@@ -4,10 +4,9 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'fs';
 import { BASE } from './base.mjs';
+import { okBody } from './mockApi.mjs';
 
 mkdirSync('./out', { recursive: true });
-const dropNulls = (_key, value) => (value === null ? undefined : value);
-const okBody = (data) => JSON.stringify({ success: true, data, timestamp: '' }, dropNulls);
 const USER = { userId: 7, email: 'jiseong@homesense.kr', nickname: '지성', createdAt: '2026-09-15T10:20:30' };
 const property = (id, name, amount, rate, registeredAt, area = 84.98, floor = 9) => ({
   favoritePropertyId: id, complexId: id * 10, complexName: name, sido: '서울특별시', sigungu: '서초구', dongRi: '반포동',

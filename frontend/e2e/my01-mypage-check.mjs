@@ -9,14 +9,13 @@
 // 8. 가로 스크롤 없음
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
+import { errBody, okBody } from './mockApi.mjs';
 
 let pass = 0;
 let fail = 0;
 function ok(name, cond, detail = '') {
   if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}${detail ? ' :: ' + detail : ''}`); }
 }
-const okBody = (data, pageMeta) => JSON.stringify({ success: true, data, error: null, ...(pageMeta ? { pageMeta } : {}), timestamp: '' });
-const errBody = (code, message) => JSON.stringify({ success: false, data: null, error: { code, message }, timestamp: '' });
 
 const ACCESS_KEY = 'homesense.accessToken';
 const REFRESH_KEY = 'homesense.refreshToken';

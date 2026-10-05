@@ -4,9 +4,9 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'fs';
 import { BASE } from './base.mjs';
+import { okBody } from './mockApi.mjs';
 
 mkdirSync('./out', { recursive: true });
-const okBody = (data) => JSON.stringify({ success: true, data, timestamp: '' });
 const USER = { userId: 7, email: 'jiseong@homesense.kr', nickname: '지성', createdAt: '2026-09-15T10:20:30' };
 const COMPLEX_ID = 900001;
 const DETAIL = {

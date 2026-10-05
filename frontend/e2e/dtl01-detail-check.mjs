@@ -3,6 +3,7 @@
 // 실제 백엔드 스모크의 단지 id는 REAL_ID(기본 10059, 로컬 DB의 수원한일타운아파트)로 바꿀 수 있다.
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
+import { errBody, okBody } from './mockApi.mjs';
 
 const REAL_ID = Number(process.env.REAL_ID ?? 10059);
 let pass = 0;
@@ -79,13 +80,13 @@ const WOLSE = [
 ];
 
 function envelope(data) {
-  return { status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, timestamp: '' }) };
+  return { status: 200, contentType: 'application/json', body: okBody(data) };
 }
 function failure(status, code, message) {
   return {
     status,
     contentType: 'application/json',
-    body: JSON.stringify({ success: false, data: null, error: { code, message }, timestamp: '' }),
+    body: errBody(code, message),
   };
 }
 
