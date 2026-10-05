@@ -4,6 +4,7 @@ import { ComplexDetailRoute } from '../pages/complex/ComplexDetailPage';
 import { LoginPage } from '../pages/auth/LoginPage';
 import { PasswordResetPage } from '../pages/auth/PasswordResetPage';
 import { SignupPage } from '../pages/auth/SignupPage';
+import { FavoritesPage } from '../pages/favorites/FavoritesPage';
 import { HomePage } from '../pages/home/HomePage';
 import { PrivacyPolicyPage } from '../pages/legal/PrivacyPolicyPage';
 import { MyPage, MyPageSkeleton } from '../pages/my/MyPage';
@@ -34,15 +35,16 @@ export function AppRouter() {
             </RequireAuth>
           }
         />
-        {/* MY-02~05는 아직 준비 중 — MY-01 메뉴 링크가 끊기지 않게 보호 라우트 아래 자리 표시를 둔다. */}
         <Route
           path={MY_ROUTES.favorites}
           element={
             <RequireAuth>
-              <MyPreparingPage programId="MY-02" title="관심 매물·지역 관리" />
+              <FavoritesPage />
             </RequireAuth>
           }
         />
+        {/* MY-03~05는 아직 준비 중 — MY-01·MY-02 링크가 끊기지 않게 보호 라우트 아래 자리 표시를 둔다. MY-03은
+            MY-02 알림조건 배지가 `?favoritePropertyId={id}`로 들어온다(구현 시 그 대상을 사전 선택해야 한다). */}
         <Route
           path={MY_ROUTES.notificationSettings}
           element={

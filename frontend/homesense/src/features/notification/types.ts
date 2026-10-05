@@ -1,4 +1,4 @@
-export type NotificationType = 'PRICE_CHANGE' | 'NEW_TRADE';
+﻿export type NotificationType = 'PRICE_CHANGE' | 'NEW_TRADE';
 
 /**
  * GET /api/notifications 항목 — NotificationResponse.java 실제 필드 그대로. record 컴포넌트 이름이 isRead라
@@ -15,4 +15,19 @@ export interface NotificationResponse {
   tradeId: number | null;
   isRead: boolean;
   sentAt: string;
+}
+
+/**
+ * GET /api/notifications/settings 항목 — NotificationSettingResponse.java 실제 필드 그대로. favoritePropertyId와
+ * favoriteRegionId 중 정확히 하나만 채워진다. 대상 이름은 없어 관심 매물·지역 목록과 ID로 조인한다(SVC-NTF-01 설계).
+ * priceChangeThresholdPct는 0.0~100.0(%)이다.
+ */
+export interface NotificationSettingResponse {
+  notificationSettingId: number;
+  /** 대상이 아닌 쪽은 서버가 키를 빼서(non_null) undefined로 온다. */
+  favoritePropertyId?: number | null;
+  favoriteRegionId?: number | null;
+  priceChangeThresholdPct: number;
+  newTradeAlertYn: boolean;
+  emailAlertYn: boolean;
 }

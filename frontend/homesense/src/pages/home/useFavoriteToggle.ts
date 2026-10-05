@@ -7,6 +7,7 @@ import { currentSessionGeneration } from '../../features/auth/session';
 import { useAuth } from '../../features/auth/useAuth';
 import { assertNever } from '../../lib/assertNever';
 import { getErrorMessage, SessionAccountChangedError, SessionNotConfirmedError } from '../../lib/apiError';
+import { MY_ROUTES } from '../../routes/paths';
 
 const PENDING_FAVORITE_KEY = 'homesense.pendingFavoriteComplexId';
 
@@ -33,7 +34,15 @@ interface DeferredClick {
  * redirect.ts 자체를 이 기능 전용 필드로 확장하지 않았다(다른 보호된 라우트도 같은 유틸을 공유하는
  * 범용 계약이라, 즐겨찾기 전용 필드를 얹으면 그 계약이 HomeSense의 한 기능에 결합된다).
  */
-export function useFavoriteToggle() {
+interface FavoriteToggleOptions {
+  /**
+   * 등록 완료 토스트에 MY-02로 가는 "목록 보기" 버튼을 단다. UI정의서 MY-02 접근 경로("DTL-01에서 관심등록 완료 후
+   * 목록 보기")라 단지 상세만 켠다 — 홈·검색 카드의 토스트는 예전 그대로다.
+   */
+  listLinkInToast?: boolean;
+}
+
+export function useFavoriteToggle({ listLinkInToast = false }: FavoriteToggleOptions = {}) {
   const { status } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -172,12 +181,16 @@ export function useFavoriteToggle() {
           // 응답 전에 계정이 바뀌었으면 A의 favoritePropertyId를 B의 하트 상태에 넣지 않고 성공 토스트도 띄우지 않는다.
           if (!stillSameAccount()) return;
           setFavorites((prev) => new Map(prev).set(complexId, result.favoritePropertyId));
-          showToast('관심 매물로 등록되었습니다.', 'success');
+          showToast(
+            '관심 매물로 등록되었습니다.',
+            'success',
+            listLinkInToast ? { action: { label: '목록 보기', onClick: () => navigate(MY_ROUTES.favorites) } } : undefined,
+          );
         } catch (error) {
           await reportFailure(error, stillSameAccount);
         }
       }),
-    [showToast, runExclusive, reportFailure, captureAccount],
+    [showToast, runExclusive, reportFailure, captureAccount, listLinkInToast, navigate],
   );
 
   const removeFavorite = useCallback(

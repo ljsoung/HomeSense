@@ -34,5 +34,13 @@ export function useLoadable<T>(fetcher: () => Promise<T>) {
   }, [fetcher, round]);
 
   const retry = useCallback(() => setRound((value) => value + 1), []);
-  return { state, retry };
+  // 다시 불러오지 않고 성공 데이터를 바꾼다(MY-02: 삭제 확정 항목 제거, 추가 뒤 받은 새 목록으로 교체 — 로딩 표시 없이).
+  const setData = useCallback((next: T | ((prev: T) => T)) => {
+    setState((prev) => {
+      if (typeof next !== 'function') return { status: 'success', data: next };
+      if (prev.status !== 'success') return prev;
+      return { status: 'success', data: (next as (prev: T) => T)(prev.data) };
+    });
+  }, []);
+  return { state, retry, setData };
 }

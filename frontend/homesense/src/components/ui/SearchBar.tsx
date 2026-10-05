@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { autocompleteRegions } from '../../features/region/api';
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { RegionAutocompleteResponse } from '../../features/region/types';
+import { useRegionAutocomplete } from '../../features/region/useRegionAutocomplete';
 import { KEYWORD_MAX_LENGTH } from '../../features/search/searchParams';
 import { SearchIcon } from '../icons/SearchIcon';
 import { XIcon } from '../icons/XIcon';
@@ -17,17 +17,6 @@ interface SearchBarProps {
    */
   variant?: 'hero' | 'inline';
   autoFocus?: boolean;
-}
-
-const DEBOUNCE_MS = 300;
-const MIN_QUERY_LENGTH = 2;
-
-/**
- * 자동완성 요청에 보내는 값, `suggestionsQueryRef`에 기록하는 값, 재포커스 시 비교하는 값이 모두
- * 같은 정규화를 거치도록 한 곳에 둔다 — 한쪽만 바뀌면 재포커스 비교가 조용히 어긋난다.
- */
-function normalizeQuery(raw: string): string {
-  return raw.trim();
 }
 
 /**
@@ -47,14 +36,7 @@ export function SearchBar({
 }: SearchBarProps) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [suggestions, setSuggestions] = useState<RegionAutocompleteResponse[]>([]);
-  const [open, setOpen] = useState(false);
-  const [highlighted, setHighlighted] = useState(-1);
   const [focused, setFocused] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  // `suggestions`가 어떤 입력값으로 조회된 결과인지 — 포커스 복귀 시 현재 값과 다른 옛 제안을
-  // 다시 여는 것을 막는다(예: blur 중 URL 동기화로 값이 바뀐 경우).
-  const suggestionsQueryRef = useRef<string | null>(null);
 
   // `focused`가 아니면 자동완성을 아예 조회·오픈하지 않는다 — 재검색 바가 URL의 기존 keyword/
   // regionLabel로 미리 채워진 채 마운트될 때(SRCH-01 재검색 입력창), 사용자가 손대지 않았는데도
@@ -62,62 +44,24 @@ export function SearchBar({
   // 실측(Playwright)으로 확인됐다 — 포커스 여부로 "사용자가 실제로 이 입력을 조작 중인지"를
   // 구분해서 막는다.
   //
-  // cleanup에서 타이머뿐 아니라 이미 보낸 요청도 abort한다 — 값이 바뀌거나 blur된 뒤 도착한 이전
-  // 값의 느린 응답이 최신 제안을 덮어쓰거나, blur로 닫힌 목록을 포커스 없는 상태에서 다시 여는
-  // 것을 막는다. abort된 요청의 then/catch는 signal.aborted로 걸러 상태를 건드리지 않는다
-  // (axios가 abort를 reject로 처리해도 catch가 목록을 비우지 않게).
-  useEffect(() => {
-    if (!focused) return;
-    const query = normalizeQuery(value);
-    let controller: AbortController | null = null;
-    const timer = setTimeout(() => {
-      if (query.length < MIN_QUERY_LENGTH) {
-        setSuggestions([]);
-        suggestionsQueryRef.current = null;
-        setOpen(false);
-        return;
-      }
-      abortRef.current?.abort();
-      const current = new AbortController();
-      controller = current;
-      abortRef.current = current;
-      autocompleteRegions(query, current.signal)
-        .then((results) => {
-          if (current.signal.aborted) return;
-          setSuggestions(results);
-          suggestionsQueryRef.current = query;
-          setOpen(results.length > 0);
-          setHighlighted(-1);
-        })
-        .catch(() => {
-          if (current.signal.aborted) return;
-          setSuggestions([]);
-          suggestionsQueryRef.current = null;
-          setOpen(false);
-        });
-    }, DEBOUNCE_MS);
-    return () => {
-      clearTimeout(timer);
-      controller?.abort();
-    };
-  }, [value, focused]);
-
-  const closeSuggestions = () => {
-    setOpen(false);
-    setHighlighted(-1);
-  };
+  // 디바운스·요청 취소와 "보이는 후보 = 지금 입력의 응답"은 useRegionAutocomplete(MY-02 관심 지역 추가와 공유)가
+  // 맡는다 — 입력을 바꾸면 이전 검색어의 후보·활성 후보가 곧바로 사라져, 그 사이 클릭이나 Enter로 지금 입력과
+  // 무관한 지역이 선택되지 않는다(Codex P2). 포커스를 되찾으면 지금 입력의 응답이 남아 있을 때만 목록을 다시 연다.
+  const autocomplete = useRegionAutocomplete(value, focused);
+  const { items: suggestions, open, activeIndex: highlighted } = autocomplete;
 
   const selectRegion = (region: RegionAutocompleteResponse) => {
-    closeSuggestions();
+    if (!autocomplete.isVisible(region)) return;
+    autocomplete.close();
     onSelectRegion(region);
   };
 
   const submit = () => {
-    if (open && highlighted >= 0 && suggestions[highlighted]) {
-      selectRegion(suggestions[highlighted]);
+    if (autocomplete.activeItem) {
+      selectRegion(autocomplete.activeItem);
       return;
     }
-    closeSuggestions();
+    autocomplete.close();
     onSubmitKeyword(value);
   };
 
@@ -125,15 +69,15 @@ export function SearchBar({
     if (event.key === 'ArrowDown') {
       if (!open) return;
       event.preventDefault();
-      setHighlighted((prev) => (prev + 1) % suggestions.length);
+      autocomplete.moveActive(1);
     } else if (event.key === 'ArrowUp') {
       if (!open) return;
       event.preventDefault();
-      setHighlighted((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+      autocomplete.moveActive(-1);
     } else if (event.key === 'Escape') {
       if (open) {
         event.preventDefault();
-        closeSuggestions();
+        autocomplete.close();
       }
     } else if (event.key === 'Enter') {
       event.preventDefault();
@@ -160,12 +104,12 @@ export function SearchBar({
           onKeyDown={handleKeyDown}
           onFocus={() => {
             setFocused(true);
-            if (suggestions.length > 0 && suggestionsQueryRef.current === normalizeQuery(value)) setOpen(true);
+            autocomplete.reopen();
           }}
           onBlur={() => {
             setFocused(false);
             // 옵션 클릭(mousedown)이 blur보다 먼저 처리되도록 살짝 지연한다.
-            setTimeout(closeSuggestions, 120);
+            setTimeout(autocomplete.close, 120);
           }}
           placeholder={placeholder}
           className="w-full min-w-0 text-[14px] text-[#101828] placeholder:text-[#99a1af] focus:outline-none"
@@ -186,7 +130,7 @@ export function SearchBar({
         )}
         {trailing}
       </div>
-      {open && suggestions.length > 0 && (
+      {open && (
         <ul
           id={listboxId}
           role="listbox"
@@ -199,7 +143,7 @@ export function SearchBar({
               role="option"
               aria-selected={index === highlighted}
               onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setHighlighted(index)}
+              onMouseEnter={() => autocomplete.setActiveIndex(index)}
               onClick={() => selectRegion(region)}
               className={`cursor-pointer px-3.5 py-2 text-[13px] ${index === highlighted ? 'bg-[#f0f9f7] text-brand' : 'text-[#364153]'}`}
             >

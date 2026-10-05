@@ -96,6 +96,20 @@ class TradeRepositoryCustomImpl implements TradeRepositoryCustom {
 
     @Override
     public Map<Long, Trade> findRecentTradesByComplexIds(List<Long> complexIds) {
+        return findRepresentativeTrades(complexIds, null);
+    }
+
+    @Override
+    public Map<Long, Trade> findRecentSaleTradesByComplexIds(List<Long> complexIds) {
+        return findRepresentativeTrades(complexIds, DealCategory.SALE);
+    }
+
+    /**
+     * 대표 거래 선정(두 공개 메서드가 공유). dealCategory가 null이면 거래유형을 가리지 않는다 — 기존
+     * findRecentTradesByComplexIds()의 동작 그대로다. 값이 있으면 바깥 행과 두 상관 서브쿼리 모두에 같은
+     * 조건을 걸어, "그 유형 안에서의 최신 거래"를 고른다(서브쿼리에만 걸면 다른 유형의 최신일과 비교하게 된다).
+     */
+    private Map<Long, Trade> findRepresentativeTrades(List<Long> complexIds, DealCategory dealCategory) {
         if (complexIds.isEmpty()) {
             return Map.of();
         }
@@ -103,25 +117,34 @@ class TradeRepositoryCustomImpl implements TradeRepositoryCustom {
         QTrade subTrade = new QTrade("subTrade");
         QTrade tieBreakTrade = new QTrade("tieBreakTrade");
 
+        BooleanBuilder subFilter = new BooleanBuilder(subTrade.cancelYn.isFalse());
+        BooleanBuilder tieBreakFilter = new BooleanBuilder(tieBreakTrade.cancelYn.isFalse());
+        BooleanBuilder outerFilter = new BooleanBuilder(trade.cancelYn.isFalse());
+        if (dealCategory != null) {
+            subFilter.and(subTrade.dealCategory.eq(dealCategory));
+            tieBreakFilter.and(tieBreakTrade.dealCategory.eq(dealCategory));
+            outerFilter.and(trade.dealCategory.eq(dealCategory));
+        }
+
         // ComplexRepositoryCustomImpl.search()와 같은 2단 동률 판정(MAX(dealDate) → MAX(tradeId))을
         // 단지별로 반복 호출하는 대신 outer Trade 행 자체에 상관 서브쿼리로 걸어, complexIds 전체의
         // 대표 거래를 한 번의 쿼리로 뽑는다.
         var maxDealDateSubquery = JPAExpressions
                 .select(subTrade.dealDate.max())
                 .from(subTrade)
-                .where(subTrade.complex.complexId.eq(trade.complex.complexId).and(subTrade.cancelYn.isFalse()));
+                .where(subTrade.complex.complexId.eq(trade.complex.complexId).and(subFilter));
 
         var representativeTradeIdSubquery = JPAExpressions
                 .select(tieBreakTrade.tradeId.max())
                 .from(tieBreakTrade)
                 .where(tieBreakTrade.complex.complexId.eq(trade.complex.complexId)
-                        .and(tieBreakTrade.cancelYn.isFalse())
+                        .and(tieBreakFilter)
                         .and(tieBreakTrade.dealDate.eq(maxDealDateSubquery)));
 
         List<Trade> rows = queryFactory
                 .selectFrom(trade)
                 .where(trade.complex.complexId.in(complexIds)
-                        .and(trade.cancelYn.isFalse())
+                        .and(outerFilter)
                         .and(trade.tradeId.eq(representativeTradeIdSubquery)))
                 .fetch();
 
