@@ -20,6 +20,10 @@ interface RegionAdderProps {
  * 고른 뒤 입력을 고치면 선택이 풀린다. 후보 위에서 Enter는 선택, 선택된 상태에서 Enter는 추가.
  * 안내 문구(후보 없음·중복·서버 오류)는 aria-live 영역으로 읽힌다.
  */
+/** 관심 지역 후보는 읍·면·동 단위만(서버 400 규칙과 같다). 렌더마다 같은 함수여야 해 모듈 수준에 둔다. */
+const selectEupmyeondong = (items: RegionAutocompleteResponse[]) =>
+  items.filter((region) => isEupmyeondongCode(region.legalDongCd));
+
 export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
   const inputId = useId();
   const listboxId = useId();
@@ -27,56 +31,40 @@ export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState('');
   const [selected, setSelected] = useState<RegionAutocompleteResponse | null>(null);
-  const [suggestions, setSuggestions] = useState<RegionAutocompleteResponse[]>([]);
-  const [open, setOpen] = useState(false);
-  const [highlighted, setHighlighted] = useState(-1);
   const [focused, setFocused] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // 고른 뒤에는 조회하지 않는다 — 입력값이 고른 지역의 전체 경로로 바뀌어도 목록이 다시 열리지 않게.
-  useRegionAutocomplete(value, focused && selected === null, (update) => {
-    if (update.kind === 'cleared') {
-      setSuggestions([]);
-      setOpen(false);
-      setHighlighted(-1);
-      setMessage((prev) => (prev === REGION_NOT_FOUND_MESSAGE ? null : prev));
-      return;
-    }
-    const candidates = update.results.filter((region) => isEupmyeondongCode(region.legalDongCd));
-    setSuggestions(candidates);
-    setOpen(candidates.length > 0);
-    setHighlighted(-1);
-    setMessage(candidates.length === 0 ? REGION_NOT_FOUND_MESSAGE : null);
-  });
+  // 후보·활성 후보는 지금 입력의 응답에서만 나온다(useRegionAutocomplete, Codex P2) — 입력을 바꾸면 이전 검색어의
+  // 후보를 클릭하거나 Enter로 고를 수 없다.
+  const autocomplete = useRegionAutocomplete(value, focused && selected === null, { select: selectEupmyeondong });
+  const { items: suggestions, open, activeIndex: highlighted } = autocomplete;
 
-  const close = () => {
-    setOpen(false);
-    setHighlighted(-1);
-  };
+  // 안내 문구는 지금 상태에서 계산한다: 서버 오류 → 지금 고른 지역이 이미 등록됨 → 지금 검색어의 응답이 0건.
+  // 요청 중이거나 응답이 이전 검색어의 것이면 "찾을 수 없습니다"를 보이지 않는다.
+  const isDuplicate = selected !== null && registeredCodes.has(selected.legalDongCd);
+  const notFound = selected === null && autocomplete.result !== null && !autocomplete.result.failed && suggestions.length === 0;
+  const message = serverError ?? (isDuplicate ? REGION_DUPLICATE_MESSAGE : notFound ? REGION_NOT_FOUND_MESSAGE : null);
 
   const choose = (region: RegionAutocompleteResponse) => {
-    close();
+    if (!autocomplete.isVisible(region)) return;
+    autocomplete.close();
     setSelected(region);
     setValue(region.fullPath);
-    setMessage(registeredCodes.has(region.legalDongCd) ? REGION_DUPLICATE_MESSAGE : null);
+    setServerError(null);
   };
 
   const submit = async () => {
-    if (!selected || submitting) return;
-    if (registeredCodes.has(selected.legalDongCd)) {
-      setMessage(REGION_DUPLICATE_MESSAGE);
-      return;
-    }
+    if (!selected || submitting || isDuplicate) return;
     setSubmitting(true);
-    setMessage(null);
+    setServerError(null);
     try {
       await onAdd(selected);
       setSelected(null);
       setValue('');
-      setSuggestions([]);
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      setServerError(getErrorMessage(error));
       inputRef.current?.focus();
     } finally {
       setSubmitting(false);
@@ -92,23 +80,22 @@ export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
     if (event.key === 'ArrowDown') {
       if (!open) return;
       event.preventDefault();
-      setHighlighted((prev) => (prev + 1) % suggestions.length);
+      autocomplete.moveActive(1);
     } else if (event.key === 'ArrowUp') {
       if (!open) return;
       event.preventDefault();
-      setHighlighted((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+      autocomplete.moveActive(-1);
     } else if (event.key === 'Escape') {
       if (open) {
         event.preventDefault();
-        close();
+        autocomplete.close();
       }
-    } else if (event.key === 'Enter' && open && highlighted >= 0 && suggestions[highlighted]) {
+    } else if (event.key === 'Enter' && autocomplete.activeItem) {
       event.preventDefault();
-      choose(suggestions[highlighted]);
+      choose(autocomplete.activeItem);
     }
   };
 
-  const isDuplicate = selected !== null && registeredCodes.has(selected.legalDongCd);
   const canAdd = selected !== null && !isDuplicate && !submitting;
 
   return (
@@ -136,19 +123,19 @@ export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
               onChange={(event) => {
                 setValue(event.target.value);
                 if (selected && event.target.value !== selected.fullPath) setSelected(null);
-                setMessage(null);
+                setServerError(null);
               }}
               onKeyDown={handleKeyDown}
               onFocus={() => setFocused(true)}
               onBlur={() => {
                 setFocused(false);
                 // 후보 클릭(mousedown)이 blur보다 먼저 처리되도록 살짝 늦춘다(UIC-03과 같다).
-                setTimeout(close, 120);
+                setTimeout(autocomplete.close, 120);
               }}
               className="w-full min-w-0 text-[14px] text-[#101828] placeholder:font-medium placeholder:text-[#99a1af] focus:outline-none"
             />
           </div>
-          {open && suggestions.length > 0 && (
+          {open && (
             <ul
               id={listboxId}
               role="listbox"

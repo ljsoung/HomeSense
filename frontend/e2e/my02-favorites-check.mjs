@@ -5,6 +5,7 @@
 // 3. 삭제: 취소 → 그대로 / 확인 → 숨김·토스트 → 실행취소 → DELETE 없음 / 확인 → 5초 뒤 DELETE 1회
 //    대기 중 다른 항목 삭제 → 앞 건 즉시 DELETE, 대기 중 화면 이동 → 즉시 DELETE, 실패 → 되살림 + 서버 문구
 // 4. 지역 추가: 리 단위 후보 제외, 성공(맨 위·정렬 등록순 복귀·POST 본문), 중복(요청 없음), 후보 없음
+//    4-1. 입력을 바꾼 직후(다음 응답 붙잡음) 이전 후보 없음·활성 후보 초기화·Enter로 선택 안 됨
 // 5. 이동: 매물 → DTL-01, 지역 → SRCH-01(regionCode), 배지 → MY-03 ?favoritePropertyId=, 모바일 하단 탭 "찜" 활성
 // 6. 키보드만으로 삭제·실행취소·지역 추가, 삭제 뒤 포커스가 다음 항목으로
 // 7. 가로 스크롤 없음
@@ -71,7 +72,10 @@ const AUTOCOMPLETE = {
 const browser = await chromium.launch();
 
 /** options.empty: 두 목록을 비운다. deleteMode: 'ok'|'fail'|'notFound'. clock: page.clock 설치. */
-async function open(viewport, { empty = false, deleteMode = 'ok', clock = false, query = '', settingsMode = 'ok' } = {}) {
+/** holdQuery: 그 검색어의 자동완성 응답을 releaseHold()까지 붙잡는다(요청 중 상태를 만든다). */
+async function open(viewport, { empty = false, deleteMode = 'ok', clock = false, query = '', settingsMode = 'ok', holdQuery = null } = {}) {
+  let releaseHold = () => {};
+  const hold = new Promise((resolve) => { releaseHold = resolve; });
   const context = await browser.newContext({ viewport });
   await context.addInitScript(() => {
     if (!sessionStorage.getItem('__seeded')) {
@@ -98,6 +102,7 @@ async function open(viewport, { empty = false, deleteMode = 'ok', clock = false,
     }
     if (path === '/api/regions') {
       const q = url.searchParams.get('query') ?? '';
+      if (q === holdQuery) await hold;
       const key = Object.keys(AUTOCOMPLETE).find((k) => q.startsWith(k));
       return json(200, okBody(key ? AUTOCOMPLETE[key] : []));
     }
@@ -129,7 +134,7 @@ async function open(viewport, { empty = false, deleteMode = 'ok', clock = false,
   if (clock) await page.clock.install();
   await page.goto(`${BASE}/favorites${query}`);
   await page.getByRole('heading', { level: 1, name: /관심 매물·지역/ }).waitFor({ timeout: 10000 });
-  return { context, page, calls, db };
+  return { context, page, calls, db, releaseHold };
 }
 
 const deletes = (calls) => calls.filter((c) => c.method === 'DELETE');
@@ -374,6 +379,34 @@ async function scenarioAddRegion(label, viewport, isDesktop) {
   await context.close();
 }
 
+// 4-1. 입력을 바꾼 직후(다음 응답 전) 이전 검색어의 후보를 고를 수 없다(Codex P2). "역삼동" 응답을 붙잡아 요청 중 상태를 만든다.
+async function scenarioStaleCandidate(label, viewport, isDesktop) {
+  const { context, page, calls, releaseHold } = await open(viewport, { holdQuery: '역삼동' });
+  await page.getByText('래미안 원베일리').waitFor({ timeout: 5000 });
+  await showRegions(page, isDesktop);
+  const input = page.getByRole('combobox', { name: /관심 지역 추가/ });
+  await input.fill('역삼');
+  await page.getByRole('option', { name: '서울특별시 강남구 역삼동' }).waitFor({ timeout: 3000 });
+  await input.press('ArrowDown');
+  ok(`${label} 4-1: 바꾸기 전 활성 후보 있음`, Boolean(await input.getAttribute('aria-activedescendant')));
+
+  await input.fill('역삼동');
+  // 후보 목록으로 범위를 좁힌다 — 태블릿·모바일의 정렬 <select>의 <option>도 option 역할이라 페이지 전체로 세면 안 된다.
+  ok(`${label} 4-1: 입력을 바꾼 직후 이전 후보가 보이지 않음(클릭 불가)`,
+    (await page.getByRole('listbox', { name: '관심 지역 후보' }).count()) === 0
+    && (await page.getByRole('option', { name: '서울특별시 강남구 역삼동' }).count()) === 0);
+  ok(`${label} 4-1: 활성 후보 초기화`, (await input.getAttribute('aria-activedescendant')) === null);
+  ok(`${label} 4-1: 요청 중에는 "지역을 찾을 수 없습니다" 없음`, (await page.getByText('지역을 찾을 수 없습니다').count()) === 0);
+  await input.press('Enter');
+  ok(`${label} 4-1: Enter로 이전 후보가 선택되지 않음`, (await input.inputValue()) === '역삼동'
+    && (await page.getByRole('button', { name: '추가' }).isDisabled()) && calls.every((c) => c.method !== 'POST'));
+
+  releaseHold();
+  ok(`${label} 4-1: 응답이 오면 지금 검색어의 후보가 보임`, await page.getByRole('option', { name: '서울특별시 강남구 역삼동' })
+    .waitFor({ timeout: 3000 }).then(() => true, () => false));
+  await context.close();
+}
+
 async function scenarioNavigation(label, viewport, isDesktop) {
   const { context, page } = await open(viewport);
   await page.getByText('래미안 원베일리').waitFor({ timeout: 5000 });
@@ -448,6 +481,7 @@ for (const [label, viewport, isDesktop] of [
   await scenarioSettingsFail(label, viewport);
   await scenarioDelete(label, viewport, isDesktop);
   await scenarioAddRegion(label, viewport, isDesktop);
+  await scenarioStaleCandidate(label, viewport, isDesktop);
   await scenarioNavigation(label, viewport, isDesktop);
   await scenarioKeyboard(label, viewport, isDesktop);
 }
