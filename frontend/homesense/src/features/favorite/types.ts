@@ -25,9 +25,9 @@ export interface FavoritePropertySummaryResponse {
   favoritePropertyId: number;
   complexId: number;
   complexName: string;
-  sido: string;
-  sigungu: string;
-  dongRi: string;
+  sido?: string | null;
+  sigungu?: string | null;
+  dongRi?: string | null;
   housingType: HousingType;
   registeredAt: string;
   recentDealCategory?: 'SALE' | 'RENT' | null;

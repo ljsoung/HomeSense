@@ -22,7 +22,9 @@ export interface InterestRegionSummaryResponse {
   favoriteRegionId: number;
   legalDongCd: string;
   fullPath: string;
-  avgPrice: number | null;
-  changeRate: number | null;
+  /** 최근 1개월 매매가 없으면 없다(키 생략). */
+  avgPrice?: number | null;
+  /** 최근 1개월 또는 직전 1개월 매매가 없거나 직전 평균이 0이면 없다(키 생략). */
+  changeRate?: number | null;
   tradeCount: number;
 }

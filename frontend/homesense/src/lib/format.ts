@@ -49,9 +49,9 @@ export function formatDottedDate(isoDate: string): string {
  */
 export function describeDealAmount(
   dealCategory: DealCategory,
-  rentType: RentType | undefined,
+  rentType: RentType | null | undefined,
   amount: number,
-  monthlyRentAmount: number | undefined,
+  monthlyRentAmount: number | null | undefined,
 ): string {
   if (dealCategory === 'SALE') {
     return formatKoreanPrice(amount);
@@ -67,8 +67,10 @@ export function describeDealAmount(
  * 하나)을 그대로 재사용한다 — RecentViewResponse도 같은 세 원시 필드(sido/sigungu/dongRi)를
  * 노출하도록 백엔드가 맞춰졌으므로(CPX-RCV-RGN 카드 표시 필드 보강) 새 조합 로직을 만들지 않고
  * 이 함수 하나를 두 컴포넌트가 공유한다. 두 필드 모두 nullable(단지 기본정보 xlsx 원본 미기재
- * 가능)이라 없는 쪽은 건너뛰어 어색한 홑공백이 남지 않게 한다.
+ * 가능)이라 없는 쪽은 건너뛰어 어색한 홑공백이 남지 않게 한다. 서버가 null 필드를 키째 빼므로 없는 부분은
+ * undefined로도 온다 — 둘 다 같은 "부분 없음"으로 받는다(값 하나를 그리는 포매터와 달리 이 함수의 목적이 있는
+ * 부분만 잇는 것이라 잘못된 호출을 감추지 않는다).
  */
-export function formatAddress(sigungu: string | null, dongRi: string | null): string {
+export function formatAddress(sigungu: string | null | undefined, dongRi: string | null | undefined): string {
   return [sigungu, dongRi].filter((part): part is string => Boolean(part)).join(' ');
 }
