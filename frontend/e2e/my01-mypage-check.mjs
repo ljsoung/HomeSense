@@ -36,9 +36,10 @@ function favorite(id, name, amount, category) {
 // 응답 순서와 무관하게 최근 등록(ID 큰) 2건 — 9(자이), 5(힐스테이트).
 const FAVORITES = [favorite(3, '래미안', 90000, 'SALE'), favorite(9, '자이', 125000, 'SALE'), favorite(5, '힐스테이트', null, null)];
 const NOTIFICATIONS = [
-  { notificationId: 31, notificationType: 'PRICE_CHANGE', title: '자이 시세 변동', message: '최근 거래가가 5% 올랐어요', complexId: 90, legalDongCd: null, tradeId: null, isRead: false, sentAt: kstAgo(3 * 3600_000 + 60_000) },
-  { notificationId: 30, notificationType: 'NEW_TRADE', title: '종로구 신규 거래', message: '새 거래가 등록됐어요', complexId: null, legalDongCd: '1111017400', tradeId: 5, isRead: true, sentAt: kstAgo(2 * 86_400_000 + 60_000) },
-  { notificationId: 29, notificationType: 'NEW_TRADE', title: '숭인동 신규 거래', message: '새 거래가 등록됐어요', complexId: null, legalDongCd: '1111017400', tradeId: 4, isRead: true, sentAt: kstAgo(10 * 86_400_000) },
+  // BAT-NTF-01 응답 모양: 발생 시각은 createdAt, 이메일 발송 전이라 sentAt 키가 없다(non_null). title은 한 줄 요약.
+  { notificationId: 31, notificationType: 'PRICE_CHANGE', title: '자이 실거래가 5.0% 상승', message: '최근 3개월 평균 3.3㎡당 4,520만원 → 신규 매매 2건 평균 3.3㎡당 4,746만원', complexId: 90, legalDongCd: null, tradeId: null, isRead: false, createdAt: kstAgo(3 * 3600_000 + 60_000) },
+  { notificationId: 30, notificationType: 'NEW_TRADE', title: '서울특별시 종로구 숭인동 신규 실거래 2건', message: '2026.10.03 계약 · 전용 84.97㎡ · 9층 · 매매 9억 5,000만원 외 1건', complexId: null, legalDongCd: '1111017400', tradeId: 5, isRead: true, createdAt: kstAgo(2 * 86_400_000 + 60_000) },
+  { notificationId: 29, notificationType: 'NEW_TRADE', title: '서울특별시 종로구 숭인동 신규 실거래 1건', complexId: null, legalDongCd: '1111017400', tradeId: 4, isRead: true, createdAt: kstAgo(10 * 86_400_000) },
 ];
 
 const browser = await chromium.launch();
@@ -165,6 +166,7 @@ async function scenarioContent(label, viewport, mobile) {
   const notiLinks = notiSection.locator('ul a');
   ok(`${label} 4: 최근 알림 3건`, (await notiLinks.count()) === 3);
   const notiTexts = await notiLinks.allInnerTexts();
+  ok(`${label} 4: 행 문구는 title(한 줄 요약), message 상세는 안 보임`, notiTexts[0].includes('자이 실거래가 5.0% 상승') && !notiTexts[0].includes('최근 3개월') && notiTexts[2].includes('신규 실거래 1건'), notiTexts.join('|'));
   ok(`${label} 4: 상대 시간(3시간 전·2일 전·날짜)`, notiTexts[0].includes('3시간 전') && notiTexts[1].includes('2일 전') && /\d{4}\.\d{2}\.\d{2}/.test(notiTexts[2]), notiTexts.join('|'));
   const dotColors = await notiLinks.evaluateAll((links) => links.map((a) => getComputedStyle(a.querySelector('span[aria-hidden]')).backgroundColor));
   ok(`${label} 4: 알림 점은 한 색(Primary)`, dotColors.length === 3 && dotColors.every((c) => c === 'rgb(15, 92, 84)'), dotColors.join('|'));
