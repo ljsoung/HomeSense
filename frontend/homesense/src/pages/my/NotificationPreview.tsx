@@ -11,10 +11,9 @@ import { CardBody, RowSkeleton, SectionCard, WidgetError } from './SectionCard';
 import type { Loadable } from './useLoadable';
 
 /**
- * 점은 Figma(MY-01·MY-04)에서 알림 대상의 종류를 뜻한다 — 관심 매물 = Primary, 관심 지역 = amber. 하지만 지금은
- * 응답만으로 대상을 가를 수 없어 한 색(Primary)으로 통일한다: NotificationResponse의 complexId·legalDongCd·tradeId는
- * 상호 배타가 아니고(관심 지역의 신규 거래 알림에도 complexId가 실릴 수 있다), 알림을 만드는 BAT-NTF-01이 아직 없어
- * 어떤 조합이 오는지 정해진 계약도 없다(CLAUDE.md SCR-MY-01 절). 읽음 여부는 MY-01에서 표시하지 않는다.
+ * 점은 Figma(MY-01·MY-04)에서 알림 대상의 종류를 뜻한다 — 관심 매물 = Primary, 관심 지역 = amber. 지금은 한 색(Primary)으로
+ * 둔다. BAT-NTF-01이 조합을 정해(관심 매물 = complexId 있음, 관심 지역 = complexId 없이 legalDongCd) 두 색으로 나눌 수
+ * 있게 됐지만, 나눌지는 후속 결정이다(CLAUDE.md 백로그 7번). 읽음 여부는 MY-01에서 표시하지 않는다.
  */
 function TargetDot() {
   return <span aria-hidden="true" className="mt-1.5 size-2 shrink-0 rounded-full bg-brand" />;
@@ -24,8 +23,8 @@ function TargetDot() {
  * MY-01 최근 알림 미리보기 — 최근 3건. 행과 "전체 보기"는 MY-04로 간다. 이 화면에서는 읽음 처리(PATCH)를 하지 않는다
  * (UI정의서 MY-01에 읽음 처리 정의 없음 — 읽음은 MY-04의 책임).
  * 행 모양은 Figma(7:5373): 점 → 알림 문구(13/18 Medium) 아래 상대 시간(11/17) → 오른쪽 chevron. Figma 행에는 글자가 한
- * 줄뿐이라 `message`만 보이고 `title`은 쓰지 않는다 — 알림을 만드는 BAT-NTF-01이 아직 없어 두 필드에 무엇이 담길지
- * 정해지지 않았다. 그 배치가 생기면 다시 본다(CLAUDE.md SCR-MY-01 절).
+ * 줄뿐이라 `title`을 보인다 — BAT-NTF-01이 title을 "○○ 실거래가 2.1% 상승"·"○○ 신규 실거래 3건" 같은 한 줄 요약으로,
+ * message를 거래·평균가 상세로 만든다. 시각은 발생 시각(createdAt)이다 — sentAt은 이메일 발송 전에는 없다.
  */
 export function NotificationPreview({ state, onRetry }: { state: Loadable<NotificationResponse[]>; onRetry: () => void }) {
   // 상대 시간의 기준 시각 — 렌더마다 바뀌지 않게 처음 그릴 때 한 번 정한다(화면을 다시 열면 새로 정해진다).
@@ -54,11 +53,10 @@ export function NotificationPreview({ state, onRetry }: { state: Loadable<Notifi
                 <TargetDot />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-[#1e2939]">
-                    {/* message는 NULL 허용 컬럼이라 키째 빠질 수 있다 — 빈 행 대신 NOT NULL인 title을 보인다. */}
-                    {notification.message ?? notification.title}
+                    {notification.title}
                   </span>
-                  <time dateTime={notification.sentAt} className="mt-0.5 text-[11px] leading-[17px] text-[#99a1af]">
-                    {formatRelativeTime(notification.sentAt, now)}
+                  <time dateTime={notification.createdAt} className="mt-0.5 text-[11px] leading-[17px] text-[#99a1af]">
+                    {formatRelativeTime(notification.createdAt, now)}
                   </time>
                 </span>
                 <ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 self-center text-[#99a1af]" />

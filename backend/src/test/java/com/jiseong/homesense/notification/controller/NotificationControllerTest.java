@@ -142,11 +142,14 @@ class NotificationControllerTest {
         when(notificationService.getNotifications(eq(1L), eq(NotificationType.NEW_TRADE), any()))
                 .thenReturn(new PageImpl<>(List.of(new NotificationResponse(
                         1L, NotificationType.NEW_TRADE, "제목", "내용", 10L, null, 20L, false,
-                        LocalDateTime.now())), PageRequest.of(0, 20), 1));
+                        LocalDateTime.of(2026, 10, 6, 3, 10), null)), PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get("/api/notifications").param("type", "NEW_TRADE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].notificationId").value(1))
+                .andExpect(jsonPath("$.data[0].createdAt").value("2026-10-06T03:10:00"))
+                // 발송 전(sent_at NULL) 알림은 sentAt 키가 빠진다(non_null 직렬화, BAT-NTF-01 D1)
+                .andExpect(jsonPath("$.data[0].sentAt").doesNotExist())
                 .andExpect(jsonPath("$.pageMeta.totalElements").value(1));
     }
 

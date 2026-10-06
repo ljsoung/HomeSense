@@ -33,4 +33,9 @@ describe('formatRelativeTime', () => {
   it('읽을 수 없는 값은 날짜 부분만 돌려준다', () => {
     expect(formatRelativeTime('2026-09-01Tbad', NOW)).toBe('2026.09.01');
   });
+
+  it('값이 없으면 예외 대신 빈 문자열이다(서버가 뺀 null 필드)', () => {
+    expect(formatRelativeTime(undefined, NOW)).toBe('');
+    expect(formatRelativeTime(null, NOW)).toBe('');
+  });
 });

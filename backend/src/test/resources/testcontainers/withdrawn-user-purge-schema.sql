@@ -233,7 +233,7 @@ CREATE TABLE notification (
     legal_dong_cd       CHAR(10)         NULL,
     trade_id            BIGINT UNSIGNED  NULL,
     is_read             BOOLEAN          NOT NULL,
-    sent_at             DATETIME         NOT NULL,
+    sent_at             DATETIME         NULL,
     created_at          DATETIME         NOT NULL,
     PRIMARY KEY (notification_id),
     CONSTRAINT fk_notification_user FOREIGN KEY (user_id)

@@ -1,9 +1,11 @@
 package com.jiseong.homesense.batch.scheduler;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -11,9 +13,12 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +32,7 @@ import org.springframework.web.client.RestClientException;
 
 import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
+import com.jiseong.homesense.batch.collector.BatchInterruptedException;
 import com.jiseong.homesense.batch.collector.DatasetPage;
 import com.jiseong.homesense.batch.collector.DatasetRegistry;
 import com.jiseong.homesense.batch.collector.OpenApiResponseException;
@@ -38,6 +44,8 @@ import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.loader.LoadResult;
 import com.jiseong.homesense.batch.loader.TradeIngestionPipeline;
+import com.jiseong.homesense.batch.notifier.NotificationTriggerContext;
+import com.jiseong.homesense.batch.notifier.WatchConditionEvaluator;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
 import com.jiseong.homesense.common.config.RetryQueueProperties;
@@ -70,6 +78,9 @@ class BatchExecutionOrchestratorTest {
     @Mock
     private TradeIngestionPipeline tradeIngestionPipeline;
 
+    @Mock
+    private WatchConditionEvaluator watchConditionEvaluator;
+
     // 실제 조합(housingType×dealCategory)마다 등록된 데이터셋을 그대로 알고 있어야 하는 테스트(구조적
     // 오류의 대표 데이터셋 귀속)가 있어 목이 아니라 실제 구현을 쓴다 — RealEstateApiCollectorTest와 동일 관례.
     private final DatasetRegistry datasetRegistry = new DatasetRegistry();
@@ -91,7 +102,7 @@ class BatchExecutionOrchestratorTest {
         retryQueueManager = new RetryQueueManager(new RetryQueueProperties(List.of(0L, 0L, 0L), 999_999L));
         orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
                 batchLogRepository, properties, eventPublisher, new ApiCallThrottle(), retryQueueManager,
-                auditLogger, tradeIngestionPipeline);
+                auditLogger, tradeIngestionPipeline, watchConditionEvaluator);
     }
 
     private static ApiResponseXml success(String datasetId) {
@@ -339,5 +350,125 @@ class BatchExecutionOrchestratorTest {
         verify(collector, times(4)).collect(any(), any(), any(), any());
         verify(batchLogRepository, times(5)).save(any(BatchLog.class));
         verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    // ---- BAT-NTF-01 트리거 ----
+
+    @Test
+    void 순회가_끝나면_이번_런에_적재된_단지와_법정동으로_알림_평가를_부른다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(20L), Set.of("4111110200")))
+                .thenReturn(new LoadResult(0, 0, 0, 0));
+        LocalDateTime before = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        ArgumentCaptor<NotificationTriggerContext> ctx = ArgumentCaptor.forClass(NotificationTriggerContext.class);
+        verify(watchConditionEvaluator).evaluateAfterLoad(ctx.capture());
+        assertThat(ctx.getValue().complexIds()).containsExactlyInAnyOrder(10L, 20L);
+        assertThat(ctx.getValue().legalDongCds()).containsExactlyInAnyOrder("4111110100", "4111110200");
+        // 런 시작 시각은 순회 전에 잡고 초 단위로 자른다(trade.created_at과 비교, D2)
+        assertThat(ctx.getValue().runStartedAt()).isBetween(before, LocalDateTime.now());
+        assertThat(ctx.getValue().runStartedAt().getNano()).isZero();
+        verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    @Test
+    void 런마다_적재_집합을_새로_모은다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")))
+                .thenReturn(new LoadResult(0, 0, 0, 0));
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        ArgumentCaptor<NotificationTriggerContext> ctx = ArgumentCaptor.forClass(NotificationTriggerContext.class);
+        verify(watchConditionEvaluator, times(2)).evaluateAfterLoad(ctx.capture());
+        assertThat(ctx.getAllValues().get(1).complexIds()).isEmpty();
+        assertThat(ctx.getAllValues().get(1).legalDongCds()).isEmpty();
+    }
+
+    @Test
+    void 조기_중단돼도_그때까지_적재된_거래로_알림_평가를_부른다() {
+        when(collector.collect(any(), any(), any(), any()))
+                .thenReturn(success("15126469"))
+                .thenThrow(new OpenApiResultCodeException("15126469", "30", ErrorCodeJudgment.ABORT_BATCH));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        ArgumentCaptor<NotificationTriggerContext> ctx = ArgumentCaptor.forClass(NotificationTriggerContext.class);
+        verify(watchConditionEvaluator).evaluateAfterLoad(ctx.capture());
+        assertThat(ctx.getValue().complexIds()).containsExactly(10L);
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void 알림_평가가_실패해도_완료_이벤트는_발행된다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(watchConditionEvaluator.evaluateAfterLoad(any())).thenThrow(new IllegalStateException("평가 실패"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(batchLogRepository, times(4)).save(any(BatchLog.class));
+        verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    @Test
+    void 백필은_알림_평가를_부르지_않는다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+
+        orchestrator.orchestrateBackfill(List.of(SGG_CD), List.of(TARGET_MONTH));
+
+        verify(watchConditionEvaluator, never()).evaluateAfterLoad(any());
+    }
+
+    @Test
+    void 순회가_다른_예외로_끝나도_그때까지_적재된_거래로_평가하고_원래_예외는_그대로_던진다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")));
+        // 거래는 이미 커밋됐는데 batch_log 저장이 실패해 순회 밖으로 예외가 새는 경우
+        IllegalStateException saveFailure = new IllegalStateException("batch_log 저장 실패");
+        when(batchLogRepository.save(any(BatchLog.class))).thenThrow(saveFailure);
+
+        assertThatThrownBy(() -> orchestrator.orchestrate(TARGET_MONTH)).isSameAs(saveFailure);
+
+        ArgumentCaptor<NotificationTriggerContext> ctx = ArgumentCaptor.forClass(NotificationTriggerContext.class);
+        verify(watchConditionEvaluator).evaluateAfterLoad(ctx.capture());
+        assertThat(ctx.getValue().complexIds()).containsExactly(10L);
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void 인터럽트로_끝나도_평가하는_동안은_인터럽트를_비우고_끝나면_되돌린다() {
+        when(collector.collect(any(), any(), any(), any()))
+                .thenReturn(success("15126469"))
+                .thenAnswer(invocation -> {
+                    // ApiCallThrottle·RetryQueueManager처럼 인터럽트 상태를 다시 세우고 던진다
+                    Thread.currentThread().interrupt();
+                    throw new BatchInterruptedException("스로틀 대기 중 인터럽트됨", new InterruptedException());
+                });
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")));
+        boolean[] interruptedDuringEvaluation = {true};
+        doAnswer(invocation -> {
+            interruptedDuringEvaluation[0] = Thread.currentThread().isInterrupted();
+            return null;
+        }).when(watchConditionEvaluator).evaluateAfterLoad(any());
+
+        try {
+            assertThatThrownBy(() -> orchestrator.orchestrate(TARGET_MONTH))
+                    .isInstanceOf(BatchInterruptedException.class);
+            verify(watchConditionEvaluator).evaluateAfterLoad(any());
+            assertThat(interruptedDuringEvaluation[0]).as("평가 중에는 인터럽트 상태가 비어 있다").isFalse();
+            assertThat(Thread.currentThread().isInterrupted()).as("평가 후 인터럽트 상태를 되돌린다").isTrue();
+        } finally {
+            Thread.interrupted(); // 다음 테스트에 인터럽트가 새지 않게
+        }
     }
 }

@@ -218,29 +218,29 @@ class NotificationServiceTest {
     @Test
     void getNotifications_필터가_없으면_전체_조회한다() {
         Notification notification = mock(Notification.class);
-        when(notification.getSentAt()).thenReturn(LocalDateTime.now());
+        when(notification.getCreatedAt()).thenReturn(LocalDateTime.now());
         Pageable pageable = PageRequest.of(0, 10);
         Page<Notification> page = new PageImpl<>(List.of(notification), pageable, 1);
-        when(notificationRepository.findByUser_UserIdOrderBySentAtDesc(1L, pageable)).thenReturn(page);
+        when(notificationRepository.findByUser_UserIdOrderByCreatedAtDescNotificationIdDesc(1L, pageable)).thenReturn(page);
 
         Page<NotificationResponse> result = notificationService.getNotifications(1L, null, pageable);
 
         assertThat(result.getContent()).hasSize(1);
         verify(notificationRepository, never())
-                .findByUser_UserIdAndNotificationTypeOrderBySentAtDesc(any(), any(), any());
+                .findByUser_UserIdAndNotificationTypeOrderByCreatedAtDescNotificationIdDesc(any(), any(), any());
     }
 
     @Test
     void getNotifications_필터가_있으면_유형별로_조회한다() {
         Pageable pageable = PageRequest.of(0, 10);
         Page<Notification> page = new PageImpl<>(List.of(), pageable, 0);
-        when(notificationRepository.findByUser_UserIdAndNotificationTypeOrderBySentAtDesc(
+        when(notificationRepository.findByUser_UserIdAndNotificationTypeOrderByCreatedAtDescNotificationIdDesc(
                 1L, NotificationType.NEW_TRADE, pageable)).thenReturn(page);
 
         Page<NotificationResponse> result = notificationService.getNotifications(1L, NotificationType.NEW_TRADE, pageable);
 
         assertThat(result.getContent()).isEmpty();
-        verify(notificationRepository, never()).findByUser_UserIdOrderBySentAtDesc(any(), any());
+        verify(notificationRepository, never()).findByUser_UserIdOrderByCreatedAtDescNotificationIdDesc(any(), any());
     }
 
     // ---- markAsRead ----

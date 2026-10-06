@@ -114,6 +114,9 @@ class TradeChunkLoader {
                 draft.matchMethod() == null ? null : draft.matchMethod().name(),
                 draft.matchConfidence(),
                 dedupHash,
+                // created_at/updated_at. BAT-NTF-01은 created_at >= 런 시작 시각(오케스트레이터의 LocalDateTime.now())으로
+                // "이번 런 신규"를 가린다 — 이 값을 SQL NOW()나 다른 시간 소스로 바꾸면 그 비교도 같이 바꿔야 한다
+                // (WatchConditionEvaluatorMariaDbIT.실제_적재_경로로_들어온_거래가_런_시작_이후_신규로_잡힌다).
                 LocalDateTime.now());
         return affectedRows <= 1;
     }

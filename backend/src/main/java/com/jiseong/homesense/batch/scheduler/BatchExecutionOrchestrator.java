@@ -1,10 +1,16 @@
 package com.jiseong.homesense.batch.scheduler;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.context.ApplicationEventPublisher;
@@ -26,6 +32,8 @@ import com.jiseong.homesense.batch.errorhandler.RetryOutcome;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
 import com.jiseong.homesense.batch.loader.LoadResult;
 import com.jiseong.homesense.batch.loader.TradeIngestionPipeline;
+import com.jiseong.homesense.batch.notifier.NotificationTriggerContext;
+import com.jiseong.homesense.batch.notifier.WatchConditionEvaluator;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
 import com.jiseong.homesense.common.logging.AuditLogger;
@@ -50,6 +58,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 class BatchExecutionOrchestrator {
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     private static final DateTimeFormatter DEAL_YMD_FORMATTER = DateTimeFormatter.ofPattern("yyyyMM");
 
     /**
@@ -70,18 +80,37 @@ class BatchExecutionOrchestrator {
     private final RetryQueueManager retryQueueManager;
     private final AuditLogger auditLogger;
     private final TradeIngestionPipeline tradeIngestionPipeline;
+    private final WatchConditionEvaluator watchConditionEvaluator;
 
     private int consecutiveAbortBatchCount = 0;
+
+    /** 이번 런에 적재된 거래가 참조한 단지·법정동 — BAT-NTF-01 평가 범위. 런마다 초기화한다. */
+    private final Set<Long> touchedComplexIds = new LinkedHashSet<>();
+    private final Set<String> touchedLegalDongCds = new LinkedHashSet<>();
 
     /**
      * targetMonth를 기준으로 "전월 + 당월" 2개월을 계약월 축으로 삼아 재수집한다 — 국토부 자료가
      * 계약일 기준으로 소급 등록되는 특성(지연 신고) 때문에 당월 한 달만 보면 최근 신고분을 놓친다.
      */
     void orchestrate(YearMonth targetMonth) {
+        // BAT-NTF-01의 "이번 런에 신규 INSERT된 거래" 기준. trade.created_at과 같은 시간 소스여야 한다 —
+        // TradeChunkLoader가 LocalDateTime.now()(JVM 기본 타임존)를 넣으므로 여기서도 그대로 쓴다(D2).
+        LocalDateTime runStartedAt = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
+        LocalDate runDate = LocalDate.now(KST);
         List<String> sggCds = legalDistrictCodeRepository.findDistinctActiveSggCd();
         List<YearMonth> targetMonths = List.of(targetMonth.minusMonths(1), targetMonth);
 
-        boolean completed = runCombinations(sggCds, targetMonths);
+        touchedComplexIds.clear();
+        touchedLegalDongCds.clear();
+        boolean completed = false;
+        try {
+            completed = runCombinations(sggCds, targetMonths);
+        } finally {
+            // 순회가 어떤 경로로 끝나든(정상, CriticalBatchException 조기 중단, 그 밖의 예외 — 인터럽트·batch_log
+            // 저장 실패 등) 그때까지 커밋된 거래는 평가한다. 이번 런에 평가하지 않으면 다음 런 시작 시각이 더 늦어
+            // 그 거래들은 영영 "신규"로 잡히지 않는다(BAT-NTF-01 J1). 평가는 예외를 흡수하므로 원래 예외는 그대로 나간다.
+            evaluateWatchConditions(runStartedAt, runDate);
+        }
         if (!completed) {
             return;
         }
@@ -98,9 +127,35 @@ class BatchExecutionOrchestrator {
      * 백필 실행을 정규 사이클 완료로 오인시키지 않기 위함이다.
      */
     void orchestrateBackfill(List<String> sggCds, List<YearMonth> months) {
+        // 백필은 BAT-NTF-01을 부르지 않는다 — 대량 소급 적재가 알림 폭주를 일으키지 않게 한다(D10).
         boolean completed = runCombinations(sggCds, months);
         if (completed) {
             log.info("BAT-SCH-01 백필 조합 순회 완료: 대상 코드 수={}, 대상 월 수={}", sggCds.size(), months.size());
+        }
+    }
+
+    /**
+     * BAT-NTF-01 호출. 알림 평가가 실패해도 이미 끝난 수집 결과(batch_log)와 완료 이벤트, 순회에서 나온 원래 예외에
+     * 영향을 주지 않도록 예외를 여기서 흡수한다(NFR-5, D9).
+     *
+     * <p>순회가 인터럽트로 끝났다면(BatchInterruptedException — ApiCallThrottle·RetryQueueManager가 인터럽트 상태를 다시
+     * 세운 채 던진다) 그 상태로는 평가의 DB 접근(커넥션 획득)이 곧바로 실패한다. 평가하는 동안만 인터럽트 상태를 비우고
+     * 끝나면 되돌려, 호출자는 여전히 인터럽트를 본다.
+     */
+    private void evaluateWatchConditions(LocalDateTime runStartedAt, LocalDate runDate) {
+        boolean interrupted = Thread.interrupted();
+        try {
+            watchConditionEvaluator.evaluateAfterLoad(new NotificationTriggerContext(
+                    runStartedAt, runDate, touchedComplexIds, touchedLegalDongCds));
+        } catch (RuntimeException e) {
+            log.atError()
+                    .addKeyValue("programId", "BAT-NTF-01")
+                    .setCause(e)
+                    .log("BAT-NTF-01 알림 평가 실패 — 수집 결과에는 영향 없음");
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -307,6 +362,8 @@ class BatchExecutionOrchestrator {
         try {
             LoadResult result = tradeIngestionPipeline.process(housingType, dealCategory, datasetId, bodies);
             batchLog.finish("000", null, true, result.processedCount(), result.errorCount());
+            touchedComplexIds.addAll(result.touchedComplexIds());
+            touchedLegalDongCds.addAll(result.touchedLegalDongCds());
         } catch (RuntimeException e) {
             log.error("BAT-LOD-01 파이프라인 처리 실패, 이 데이터셋만 실패로 기록하고 계속 진행한다: datasetId={}", datasetId, e);
             batchLog.finish("000", truncate(e.getMessage()), false, 0, 0);

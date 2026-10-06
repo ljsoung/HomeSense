@@ -72,7 +72,12 @@ public class Notification {
     @Column(name = "is_read", nullable = false)
     private boolean isRead;
 
-    @Column(name = "sent_at", nullable = false)
+    /**
+     * 발송 완료 시각. BAT-NTF-01은 알림을 만들 때 비워 두고, BAT-MAIL-01이 발송한 뒤 채운다 —
+     * {@code sent_at IS NULL}이 곧 발송 대기열이다(CLAUDE.md "BAT-NTF-01 구현 결정 사항" D1).
+     * 목록 정렬·표시 시각은 이 값이 아니라 {@link #createdAt}을 쓴다.
+     */
+    @Column(name = "sent_at")
     private LocalDateTime sentAt;
 
     @CreatedDate
@@ -81,7 +86,7 @@ public class Notification {
 
     @Builder
     private Notification(User user, NotificationType notificationType, String title, String message,
-                          Complex complex, LegalDistrictCode legalDistrictCode, Trade trade, LocalDateTime sentAt) {
+                          Complex complex, LegalDistrictCode legalDistrictCode, Trade trade) {
         this.user = user;
         this.notificationType = notificationType;
         this.title = title;
@@ -90,7 +95,6 @@ public class Notification {
         this.legalDistrictCode = legalDistrictCode;
         this.trade = trade;
         this.isRead = false;
-        this.sentAt = sentAt;
     }
 
     public void markAsRead() {

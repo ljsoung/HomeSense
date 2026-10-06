@@ -2,7 +2,9 @@
 
 /**
  * GET /api/notifications 항목 — NotificationResponse.java 실제 필드 그대로. record 컴포넌트 이름이 isRead라
- * JSON 키도 isRead다(TradeResponse.isCancelled와 같다). sentAt은 타임존 없는 LocalDateTime 문자열이다.
+ * JSON 키도 isRead다(TradeResponse.isCancelled와 같다). createdAt(알림 발생 시각, 목록 정렬 기준)과 sentAt은 타임존 없는
+ * LocalDateTime 문자열이다. sentAt은 이메일 발송 완료 시각이라 BAT-MAIL-01이 보내기 전에는 키째 빠진다 — 시각 표시에는
+ * createdAt을 쓴다(CLAUDE.md "BAT-NTF-01" D1).
  * complexId/legalDongCd/tradeId는 알림 유형에 맞는 딥링크 대상만 채워진다(상호 배타 아님). message와 세 대상은
  * NULL 허용 컬럼이고 서버가 null 필드를 키째 빼므로(`non_null`) `?: T | null`로 둔다.
  */
@@ -15,7 +17,8 @@ export interface NotificationResponse {
   legalDongCd?: string | null;
   tradeId?: number | null;
   isRead: boolean;
-  sentAt: string;
+  createdAt: string;
+  sentAt?: string | null;
 }
 
 /**

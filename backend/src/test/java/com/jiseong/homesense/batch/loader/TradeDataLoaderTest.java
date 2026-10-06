@@ -66,7 +66,7 @@ class TradeDataLoaderTest {
 
         LoadResult result = loader.loadBatch(drafts);
 
-        assertThat(result).isEqualTo(new LoadResult(10, 0, 8, 2));
+        assertThat(result).isEqualTo(new LoadResult(10, 0, 8, 2, Set.of(1L, 2L), Set.of("1168010100")));
         verify(tradeChunkLoader, times(1)).loadChunk(anyList());
         verify(eventPublisher, times(1)).publishEvent(
                 new TradeCacheEvictionEvent(Set.of(1L, 2L), Set.of("1168010100")));
@@ -100,7 +100,7 @@ class TradeDataLoaderTest {
 
         LoadResult result = loader.loadBatch(drafts);
 
-        assertThat(result).isEqualTo(new LoadResult(1, 500, 1, 0));
+        assertThat(result).isEqualTo(new LoadResult(1, 500, 1, 0, Set.of(3L), Set.of()));
         verify(eventPublisher, times(1)).publishEvent(new TradeCacheEvictionEvent(Set.of(3L), Set.of()));
     }
 

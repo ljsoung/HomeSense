@@ -11,15 +11,16 @@ const favorite = (id, name, amount) => ({
   favoritePropertyId: id, complexId: id * 10, complexName: name, sido: '서울특별시', sigungu: '서초구', dongRi: '반포동',
   housingType: 'APT', recentDealCategory: 'SALE', recentDealDate: '2026-09-01', recentAmount: amount, changeRate: null, hasNotificationSetting: false,
 });
-const notification = (id, message, msAgo, isRead) => ({
-  notificationId: id, notificationType: 'PRICE_CHANGE', title: '시세 변동', message, complexId: 10, legalDongCd: null, tradeId: null, isRead, sentAt: kstAgo(msAgo),
+// BAT-NTF-01 응답 모양: createdAt(발생 시각), 발송 전이라 sentAt 키 없음. 행에는 title이 보인다.
+const notification = (id, title, msAgo, isRead) => ({
+  notificationId: id, notificationType: 'PRICE_CHANGE', title, message: '최근 3개월 평균 3.3㎡당 상세', complexId: 10, legalDongCd: null, tradeId: null, isRead, createdAt: kstAgo(msAgo),
 });
 const USER = { userId: 7, email: 'jiseong@homesense.kr', nickname: '지성', createdAt: '2026-09-15T10:20:30' };
 const FAVORITES = [favorite(9, '래미안 원베일리', 425000), favorite(5, '아크로리버파크', 389000)];
 const NOTIFICATIONS = [
-  notification(31, '래미안 원베일리 매매가가 3.2% 올랐어요', 3 * 3600_000, false),
-  notification(30, '반포동에 신규 거래 2건이 등록됐어요', 26 * 3600_000, true),
-  notification(29, '아크로리버파크 매매가가 1.1% 내렸어요', 3 * 86_400_000, true),
+  notification(31, '래미안 원베일리 실거래가 3.2% 상승', 3 * 3600_000, false),
+  notification(30, '서울특별시 서초구 반포동 신규 실거래 2건', 26 * 3600_000, true),
+  notification(29, '아크로리버파크 실거래가 1.1% 하락', 3 * 86_400_000, true),
 ];
 
 const browser = await chromium.launch();
