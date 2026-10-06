@@ -16,8 +16,11 @@ const DAY = 24 * HOUR;
 /**
  * "방금 전 / N분 전 / N시간 전 / N일 전", 7일 이상 지나면 "YYYY.MM.DD"(서버 문자열의 날짜 부분 그대로).
  * 시계 차이로 미래 시각이 오면 "방금 전"으로 본다. 읽을 수 없는 값은 원문의 날짜 부분을 돌려준다.
+ * 값이 없으면(null·undefined — 서버가 null 필드를 키째 뺀다) 빈 문자열이다. 예전엔 바로 slice를 불러 예외가
+ * 화면 전체를 죽였다(MY-01 sentAt, 2026-10-06 코드리뷰 P1) — 이제 시각 표시만 빈다.
  */
-export function formatRelativeTime(value: string, now: number = Date.now()): string {
+export function formatRelativeTime(value: string | null | undefined, now: number = Date.now()): string {
+  if (value == null) return '';
   const time = parseServerDateTime(value);
   const datePart = value.slice(0, 10).replaceAll('-', '.');
   if (Number.isNaN(time)) return datePart;
