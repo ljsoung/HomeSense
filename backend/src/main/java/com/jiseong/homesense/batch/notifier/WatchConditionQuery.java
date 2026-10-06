@@ -145,6 +145,10 @@ class WatchConditionQuery {
     /**
      * 관심 지역 prefix별 기준 평균 재료. 법정동별로 GROUP BY한 뒤 prefix마다 합친다 — 한 법정동이 여러 prefix
      * (예: 동과 그 상위 시군구)에 동시에 들 수 있어 prefix마다 따로 더한다.
+     *
+     * <p>묶음 쿼리마다 일치한 법정동의 "전체" 집계가 돌아오므로, 상위·하위 prefix가 서로 다른 묶음에 들어가면 같은
+     * 법정동이 두 묶음에서 같은 값으로 다시 온다. 이를 더하면 표본이 두 번 세어지므로 법정동마다 한 번만 담는다
+     * (코드리뷰 P2, WatchConditionEvaluatorMariaDbIT.상위와_하위_prefix가_다른_묶음에_있어도_…).
      */
     Map<String, PriceAggregate> baselineByPrefix(Collection<String> prefixes, LocalDate from, LocalDate to,
                                                  LocalDateTime runStartedAt) {
@@ -161,7 +165,7 @@ class WatchConditionQuery {
                             + " GROUP BY t.legal_dong_cd",
                     params,
                     rs -> {
-                        byCode.merge(rs.getString("legal_dong_cd"), aggregate(rs), PriceAggregate::plus);
+                        byCode.putIfAbsent(rs.getString("legal_dong_cd"), aggregate(rs));
                     });
         }
         Map<String, PriceAggregate> byPrefix = new HashMap<>();

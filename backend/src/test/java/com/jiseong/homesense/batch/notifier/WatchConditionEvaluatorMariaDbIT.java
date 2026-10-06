@@ -9,6 +9,7 @@ import java.sql.Statement;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -108,6 +109,8 @@ class WatchConditionEvaluatorMariaDbIT {
     private TradeDataLoader tradeDataLoader;
     @Autowired
     private DataSource dataSource;
+    @Autowired
+    private WatchConditionQuery watchConditionQuery;
 
     private WithdrawalTestSeed seed;
     private long userA;
@@ -318,6 +321,29 @@ class WatchConditionEvaluatorMariaDbIT {
                 .isEqualTo("YES");
         NotificationTriggerResult result = evaluator.evaluateAfterLoad(context(RUN));
         assertThat(result.newTradeCreated() + result.priceChangeCreated()).isEqualTo(5);
+    }
+
+    /**
+     * 관심 지역 prefix가 LIKE 묶음({@link WatchConditionQuery#LIKE_CHUNK}개) 하나를 넘고, 하위 prefix(숭인동)와 상위
+     * prefix(종로구)가 서로 다른 묶음에 들어가면 숭인동 집계가 두 쿼리에서 모두 돌아온다. 그래도 한 번만 세야 한다 —
+     * 두 번 더하면 표본 수가 부풀어 최소 표본을 넘기고 상위 지역의 기준 평균이 치우친다.
+     */
+    @Test
+    void 상위와_하위_prefix가_다른_묶음에_있어도_같은_법정동_집계를_두_번_세지_않는다() {
+        List<String> prefixes = new ArrayList<>();
+        prefixes.add("11110174"); // 숭인동 — 첫 묶음
+        for (int i = 0; i < WatchConditionQuery.LIKE_CHUNK - 1; i++) {
+            prefixes.add(String.format("99%06d", i)); // 거래 없는 채움 prefix
+        }
+        prefixes.add("11110"); // 종로구 — 두 번째 묶음
+        LocalDate from = RUN_DATE.minusMonths(3);
+
+        Map<String, PriceAggregate> byPrefix = watchConditionQuery.baselineByPrefix(
+                prefixes, from, RUN_DATE.plusDays(1), RUN);
+
+        // 기준 매매: 숭인동 3건(기간 밖 1건 제외), 창신동 2건
+        assertThat(byPrefix.get("11110174").count()).isEqualTo(3);
+        assertThat(byPrefix.get("11110").count()).isEqualTo(5);
     }
 
     private Map<String, Object> find(List<Map<String, Object>> rows, String type, Long complexId, String legalDongCd) {
