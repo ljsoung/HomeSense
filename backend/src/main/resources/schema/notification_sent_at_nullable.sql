@@ -1,0 +1,13 @@
+-- BAT-NTF-01(2026-10-06): notification.sent_at NOT NULL → NULL 허용 — 이미 테이블이 있는 DB용(재실행 안전).
+-- 새로 만드는 DB는 schema_all.sql에 이미 NULL 허용으로 들어 있다.
+--
+-- 왜 필요한가: BAT-NTF-01은 알림을 sent_at 없이 만들고(NULL = BAT-MAIL-01 발송 대기), 발송 후에야 채운다.
+-- 예전 schema_all.sql로 만든 DB는 sent_at이 NOT NULL로 남아 있어 알림 INSERT가 전부 거부된다 — schema_all.sql의
+-- CREATE TABLE을 고쳐도 기존 DB는 바뀌지 않는다. 이 프로젝트에는 자동 마이그레이션 도구가 없으므로, 이 커밋이
+-- 들어간 백엔드를 기동하기 전에 대상 DB마다 한 번 실행한다(WatchConditionEvaluator가 실행 전에 이 컬럼을 확인해,
+-- 적용되지 않았으면 평가를 건너뛰고 ERROR 로그를 남긴다).
+--
+-- 실행: mysql -h <host> -P 3307 -u <user> -p homesense < backend/src/main/resources/schema/notification_sent_at_nullable.sql
+-- 확인: SHOW COLUMNS FROM notification LIKE 'sent_at';  → Null = YES
+-- 데이터는 바뀌지 않는다. 이미 NULL 허용이면 아무 변화 없이 끝난다.
+ALTER TABLE notification MODIFY sent_at DATETIME NULL;

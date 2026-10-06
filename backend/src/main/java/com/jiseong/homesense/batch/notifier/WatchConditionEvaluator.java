@@ -75,6 +75,12 @@ public class WatchConditionEvaluator {
         if (ctx.hasNoAffectedTargets()) {
             return NotificationTriggerResult.empty();
         }
+        // 마이그레이션(schema/notification_sent_at_nullable.sql)이 빠진 DB에서는 알림 INSERT가 전부 거부된다 — 설정마다
+        // 실패를 쌓는 대신 원인을 바로 알리고 평가를 건너뛴다. 오케스트레이터가 이 예외를 ERROR로 남기고 흡수한다.
+        if (!query.isNotificationSentAtNullable()) {
+            throw new IllegalStateException("notification.sent_at이 NOT NULL이라 알림을 만들 수 없다 — "
+                    + "backend/src/main/resources/schema/notification_sent_at_nullable.sql을 이 DB에 적용해야 한다");
+        }
 
         List<WatchTarget> targets = new ArrayList<>(query.findPropertyTargets(ctx.complexIds()));
         targets.addAll(query.findRegionTargets(LegalDongHierarchy.ancestorsAndSelf(ctx.legalDongCds())));

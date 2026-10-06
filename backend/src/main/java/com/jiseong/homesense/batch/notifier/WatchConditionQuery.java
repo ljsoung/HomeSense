@@ -49,6 +49,18 @@ class WatchConditionQuery {
 
     private final NamedParameterJdbcTemplate jdbc;
 
+    /**
+     * notification.sent_at이 NULL 허용인지(현재 연결된 스키마 기준). 예전 schema_all.sql로 만든 DB는 NOT NULL로 남아
+     * 알림 INSERT가 전부 거부되므로, 평가 전에 확인한다. 컬럼을 찾지 못하면 false.
+     */
+    boolean isNotificationSentAtNullable() {
+        List<String> nullable = jdbc.getJdbcTemplate().queryForList("""
+                SELECT IS_NULLABLE FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification' AND COLUMN_NAME = 'sent_at'
+                """, String.class);
+        return nullable.size() == 1 && "YES".equalsIgnoreCase(nullable.get(0));
+    }
+
     /** 이번 런에 거래가 적재된 단지를 관심 매물로 둔 ACTIVE 회원의 알림 설정. */
     List<WatchTarget> findPropertyTargets(Collection<Long> complexIds) {
         return inChunks(complexIds, chunk -> jdbc.query("""

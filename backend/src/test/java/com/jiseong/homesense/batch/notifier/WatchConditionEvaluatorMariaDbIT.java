@@ -1,6 +1,7 @@
 package com.jiseong.homesense.batch.notifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
@@ -12,13 +13,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.sql.DataSource;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -101,6 +106,8 @@ class WatchConditionEvaluatorMariaDbIT {
     private NotificationService notificationService;
     @Autowired
     private TradeDataLoader tradeDataLoader;
+    @Autowired
+    private DataSource dataSource;
 
     private WithdrawalTestSeed seed;
     private long userA;
@@ -287,6 +294,30 @@ class WatchConditionEvaluatorMariaDbIT {
         assertThat(propertyNew.get("title")).isEqualTo("숭인 힐스테이트 신규 실거래 1건");
         assertThat(((Number) propertyNew.get("trade_id")).longValue())
                 .isEqualTo(((Number) stored.get("trade_id")).longValue());
+    }
+
+    /**
+     * 예전 schema_all.sql로 만든 DB(sent_at NOT NULL)를 재현한다. 마이그레이션 전에는 평가가 원인을 담은 예외로 멈추고
+     * 알림을 하나도 만들지 않으며, 저장소의 실제 마이그레이션 파일을 적용하면 정상적으로 알림을 만든다.
+     */
+    @Test
+    void 기존_DB에_sent_at_마이그레이션이_없으면_평가를_멈추고_적용하면_알림을_만든다() {
+        jdbc.execute("ALTER TABLE notification MODIFY sent_at DATETIME NOT NULL");
+        try {
+            assertThatThrownBy(() -> evaluator.evaluateAfterLoad(context(RUN)))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("notification_sent_at_nullable.sql");
+            assertThat(seed.count("SELECT COUNT(*) FROM notification")).isZero();
+        } finally {
+            new ResourceDatabasePopulator(new ClassPathResource("schema/notification_sent_at_nullable.sql"))
+                    .execute(dataSource);
+        }
+
+        assertThat(jdbc.queryForObject("SELECT IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = "
+                + "DATABASE() AND TABLE_NAME = 'notification' AND COLUMN_NAME = 'sent_at'", String.class))
+                .isEqualTo("YES");
+        NotificationTriggerResult result = evaluator.evaluateAfterLoad(context(RUN));
+        assertThat(result.newTradeCreated() + result.priceChangeCreated()).isEqualTo(5);
     }
 
     private Map<String, Object> find(List<Map<String, Object>> rows, String type, Long complexId, String legalDongCd) {
