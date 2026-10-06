@@ -1,9 +1,11 @@
 package com.jiseong.homesense.batch.scheduler;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -30,6 +32,7 @@ import org.springframework.web.client.RestClientException;
 
 import com.jiseong.homesense.batch.collector.ApiCallThrottle;
 import com.jiseong.homesense.batch.collector.ApiResponseXml;
+import com.jiseong.homesense.batch.collector.BatchInterruptedException;
 import com.jiseong.homesense.batch.collector.DatasetPage;
 import com.jiseong.homesense.batch.collector.DatasetRegistry;
 import com.jiseong.homesense.batch.collector.OpenApiResponseException;
@@ -422,5 +425,50 @@ class BatchExecutionOrchestratorTest {
         orchestrator.orchestrateBackfill(List.of(SGG_CD), List.of(TARGET_MONTH));
 
         verify(watchConditionEvaluator, never()).evaluateAfterLoad(any());
+    }
+
+    @Test
+    void 순회가_다른_예외로_끝나도_그때까지_적재된_거래로_평가하고_원래_예외는_그대로_던진다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")));
+        // 거래는 이미 커밋됐는데 batch_log 저장이 실패해 순회 밖으로 예외가 새는 경우
+        IllegalStateException saveFailure = new IllegalStateException("batch_log 저장 실패");
+        when(batchLogRepository.save(any(BatchLog.class))).thenThrow(saveFailure);
+
+        assertThatThrownBy(() -> orchestrator.orchestrate(TARGET_MONTH)).isSameAs(saveFailure);
+
+        ArgumentCaptor<NotificationTriggerContext> ctx = ArgumentCaptor.forClass(NotificationTriggerContext.class);
+        verify(watchConditionEvaluator).evaluateAfterLoad(ctx.capture());
+        assertThat(ctx.getValue().complexIds()).containsExactly(10L);
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void 인터럽트로_끝나도_평가하는_동안은_인터럽트를_비우고_끝나면_되돌린다() {
+        when(collector.collect(any(), any(), any(), any()))
+                .thenReturn(success("15126469"))
+                .thenAnswer(invocation -> {
+                    // ApiCallThrottle·RetryQueueManager처럼 인터럽트 상태를 다시 세우고 던진다
+                    Thread.currentThread().interrupt();
+                    throw new BatchInterruptedException("스로틀 대기 중 인터럽트됨", new InterruptedException());
+                });
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")));
+        boolean[] interruptedDuringEvaluation = {true};
+        doAnswer(invocation -> {
+            interruptedDuringEvaluation[0] = Thread.currentThread().isInterrupted();
+            return null;
+        }).when(watchConditionEvaluator).evaluateAfterLoad(any());
+
+        try {
+            assertThatThrownBy(() -> orchestrator.orchestrate(TARGET_MONTH))
+                    .isInstanceOf(BatchInterruptedException.class);
+            verify(watchConditionEvaluator).evaluateAfterLoad(any());
+            assertThat(interruptedDuringEvaluation[0]).as("평가 중에는 인터럽트 상태가 비어 있다").isFalse();
+            assertThat(Thread.currentThread().isInterrupted()).as("평가 후 인터럽트 상태를 되돌린다").isTrue();
+        } finally {
+            Thread.interrupted(); // 다음 테스트에 인터럽트가 새지 않게
+        }
     }
 }

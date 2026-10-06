@@ -102,10 +102,15 @@ class BatchExecutionOrchestrator {
 
         touchedComplexIds.clear();
         touchedLegalDongCds.clear();
-        boolean completed = runCombinations(sggCds, targetMonths);
-        // 조기 중단(CriticalBatchException)이어도 그때까지 커밋된 거래는 평가한다 — 이번 런에 평가하지 않으면
-        // 다음 런 시작 시각이 더 늦어 그 거래들은 영영 "신규"로 잡히지 않는다(BAT-NTF-01 J1).
-        evaluateWatchConditions(runStartedAt, runDate);
+        boolean completed = false;
+        try {
+            completed = runCombinations(sggCds, targetMonths);
+        } finally {
+            // 순회가 어떤 경로로 끝나든(정상, CriticalBatchException 조기 중단, 그 밖의 예외 — 인터럽트·batch_log
+            // 저장 실패 등) 그때까지 커밋된 거래는 평가한다. 이번 런에 평가하지 않으면 다음 런 시작 시각이 더 늦어
+            // 그 거래들은 영영 "신규"로 잡히지 않는다(BAT-NTF-01 J1). 평가는 예외를 흡수하므로 원래 예외는 그대로 나간다.
+            evaluateWatchConditions(runStartedAt, runDate);
+        }
         if (!completed) {
             return;
         }
@@ -130,10 +135,15 @@ class BatchExecutionOrchestrator {
     }
 
     /**
-     * BAT-NTF-01 호출. 알림 평가가 실패해도 이미 끝난 수집 결과(batch_log)와 완료 이벤트에 영향을 주지 않도록
-     * 예외를 여기서 흡수한다(NFR-5, D9).
+     * BAT-NTF-01 호출. 알림 평가가 실패해도 이미 끝난 수집 결과(batch_log)와 완료 이벤트, 순회에서 나온 원래 예외에
+     * 영향을 주지 않도록 예외를 여기서 흡수한다(NFR-5, D9).
+     *
+     * <p>순회가 인터럽트로 끝났다면(BatchInterruptedException — ApiCallThrottle·RetryQueueManager가 인터럽트 상태를 다시
+     * 세운 채 던진다) 그 상태로는 평가의 DB 접근(커넥션 획득)이 곧바로 실패한다. 평가하는 동안만 인터럽트 상태를 비우고
+     * 끝나면 되돌려, 호출자는 여전히 인터럽트를 본다.
      */
     private void evaluateWatchConditions(LocalDateTime runStartedAt, LocalDate runDate) {
+        boolean interrupted = Thread.interrupted();
         try {
             watchConditionEvaluator.evaluateAfterLoad(new NotificationTriggerContext(
                     runStartedAt, runDate, touchedComplexIds, touchedLegalDongCds));
@@ -142,6 +152,10 @@ class BatchExecutionOrchestrator {
                     .addKeyValue("programId", "BAT-NTF-01")
                     .setCause(e)
                     .log("BAT-NTF-01 알림 평가 실패 — 수집 결과에는 영향 없음");
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
