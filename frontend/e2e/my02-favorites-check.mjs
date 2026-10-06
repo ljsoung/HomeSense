@@ -13,17 +13,14 @@
 // 1에 Figma 대조 항목 포함: 썸네일 크기(60×46·90×70·64×64), 모바일 라벨 열·삭제 터치 영역·삭제 글자색
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
+import { errBody, okBody } from './mockApi.mjs';
 
 let pass = 0;
 let fail = 0;
 function ok(name, cond, detail = '') {
   if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}${detail ? ' :: ' + detail : ''}`); }
 }
-// 실 서버처럼 null 필드를 JSON에서 뺀다(spring.jackson.default-property-inclusion=non_null) — null로 보내면 `=== null` 검사가
-// undefined를 놓치는 버그가 가려진다(2026-10-02 실 백엔드 확인에서 발견).
-const dropNulls = (_key, value) => (value === null ? undefined : value);
-const okBody = (data) => JSON.stringify({ success: true, data, timestamp: '' }, dropNulls);
-const errBody = (code, message) => JSON.stringify({ success: false, data: null, error: { code, message }, timestamp: '' });
+// 목업 본문은 mockApi.mjs로 만든다 — 실 서버처럼 null 필드를 JSON에서 뺀다(non_null).
 
 const USER = { userId: 7, email: 'jiseong@homesense.kr', nickname: '지성', createdAt: '2026-09-15T10:20:30' };
 

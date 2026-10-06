@@ -14,6 +14,9 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 - 프런트 dev 서버가 떠 있어야 한다: `frontend/homesense`에서 `npm run dev`(기본 http://localhost:5173).
   모든 스크립트가 `base.mjs`의 `BASE`(기본 http://localhost:5173)를 쓴다. 다른 포트로 띄웠다면
   `BASE=http://localhost:5183 node run-all.mjs`처럼 환경변수로 덮는다(스크립트마다 기본값을 따로 두지 않는다).
+- 목업 응답 본문은 `mockApi.mjs`의 `okBody`/`errBody`로 만든다. 실 서버(`non_null` 직렬화)처럼 null인 필드를 키째
+  빼므로, 목업에서 "값 없음"을 나타낼 때도 null을 넣으면 된다. 목업이 null을 그대로 보내면 프론트의 `!== null` 같은
+  잘못된 검사가 통과해 실제 화면에서만 나는 "NaN만원"·"undefined층" 회귀를 잡지 못한다.
 - 백엔드 필요 여부는 스크립트마다 다르다:
   - AUTH-02/SCR-LEGAL-01 스크립트 대부분과 `auth03-figma-parity-check`/`auth03-transient-token-error-check`/
     `auth03-form-cooldown-check`는 API를 `page.route()`로 목킹해 백엔드가 필요 없다.
@@ -53,7 +56,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 | auth03-figma-parity-check | AUTH-03: 실제 Figma AUTH-03 프레임과 대조해 찾은 화면 전용 요소 검증 — 진행 스테퍼·아이콘 배지·뒤로가기 링크 색상·이메일 표시 칩·오라클 방지 안내문·60초 재발송 카운트다운·링크 만료 배지+30분 경고박스+동적 서버 메시지 공존. 백엔드 불필요, `run-all.mjs` 목록에는 없음(단독 실행) |
 | auth03-transient-token-error-check | AUTH-03: `validate-token` 실패 원인별 분기(진짜 400 vs 전송 계층 오류) — 9/9, 백엔드 불필요 |
 | auth03-form-cooldown-check | AUTH-03: 이메일 입력 폼의 쿨다운 클라이언트 락 — 9/9, 백엔드 불필요 |
-| srch01-basic-check | SCR-SRCH-01: regionCode/keyword 검색 렌더링, 조건 없음 시 API 미호출, URL로 복원한 검색어도 요청 전에 서버(SearchKeywordPolicy, 코드포인트 기준 2~50자)와 같은 규칙으로 검사 — 1글자·이모지 1개·51자면 API를 부르지 않고 입력창 아래와 본문에 안내(일반 오류 화면 아님), 50자 경계와 앞뒤 공백 trim은 검색 실행, 공백만이면 조건 없음, regionCode와 함께면 regionCode 우선. 홈 히어로에서 1글자 검색 시 결과 화면이 요청 없이 안내하고 검색 기록도 남기지 않음, 재검색 바에서 1글자·이모지 1개 제출 시 새 검색 요청·검색 기록 요청 0건, URL 그대로, 안내 표시, 입력을 고치면 안내가 사라짐(이모지 제출은 수정 전 코드에서 실패). 매매↔전세 전환 무오류+URL 반영, 정렬 변경 시 검색 로그 미호출, 자유 텍스트 재검색 시 로그 정확히 1회(payload 키워드 일치), 데스크톱 페이지 이동 시 목록 교체(누적 아님). 수정 전 코드에서 16건 실패 확인 — 37/37 |
+| srch01-basic-check | SCR-SRCH-01: regionCode/keyword 검색 렌더링, 조건 없음 시 API 미호출, URL로 복원한 검색어도 요청 전에 서버(SearchKeywordPolicy, 코드포인트 기준 2~50자)와 같은 규칙으로 검사 — 1글자·이모지 1개·51자면 API를 부르지 않고 입력창 아래와 본문에 안내(일반 오류 화면 아님), 50자 경계와 앞뒤 공백 trim은 검색 실행, 공백만이면 조건 없음, regionCode와 함께면 regionCode 우선. 홈 히어로에서 1글자 검색 시 결과 화면이 요청 없이 안내하고 검색 기록도 남기지 않음, 재검색 바에서 1글자·이모지 1개 제출 시 새 검색 요청·검색 기록 요청 0건, URL 그대로, 안내 표시, 입력을 고치면 안내가 사라짐(이모지 제출은 수정 전 코드에서 실패). 매매↔전세 전환 무오류+URL 반영, 정렬 변경 시 검색 로그 미호출, 자유 텍스트 재검색 시 로그 정확히 1회(payload 키워드 일치), 데스크톱 페이지 이동 시 목록 교체(누적 아님). 수정 전 코드에서 16건 실패 확인, 서버가 null 필드를 뺀 결과 카드(1280/390, 층·건축년도 생략·"undefined" 없음) — 43/43 |
 | srch01-mobile-check | SCR-SRCH-01(392px): 필터 버튼→바텀시트 열림, Esc·백드롭 닫힘, 스크롤 잠금, IntersectionObserver 무한스크롤 30+ 누적, 카드 클릭→DTL-01→뒤로가기 시 누적 목록·스크롤 위치 복원 — 10/10. StrictMode 캐시 오염 버그와 스크롤 복원 값 오류 버그를 이 스크립트가 실측으로 잡았다(CLAUDE.md SCR-SRCH-01 절). **테스트 함정**: `.first()`/`.last()`로 카드를 클릭하면 Playwright가 자동 스크롤해 "그 자리에서 클릭"을 재현 못 한다 — 뷰포트 안에 실제로 보이는 카드를 브라우저 컨텍스트에서 직접 찾아 순수 DOM `.click()`으로 눌러야 한다 |
 | srch01-favorite-and-desktop-back-check | SCR-SRCH-01: 비로그인 하트 클릭 시 `/login` 이동, 데스크톱 2페이지 이동 후 카드 클릭→뒤로가기 시 같은 페이지·같은 목록 유지, HOME-01 히어로 검색 회귀 — 7/7 |
 | srch01-slider-boundary-and-wolse-check | SCR-SRCH-01: 슬라이더 하한 경계(상한만 옮겨도 하한 파라미터가 요청에 없음을 네트워크로 확인, 면적/금액/건축년도 3종 모두), 1990년 이전 준공 단지가 기본 상태에 포함됨(하한 미적용 방증), 월세 카드가 "보증금 X · 월세 Y만원"으로 표시되고 ㎡당 가격이 빠짐, 슬라이더 라벨이 "보증금"으로 바뀜 — 9/9 |
@@ -78,6 +81,7 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 | modal-widths | 공용 Modal을 쓰는 다이얼로그 5개(MY-02 매물·지역 삭제, DTL-01 거래상세, MY-01 선택·회원탈퇴)를 390/768/1024/1280에서 열어 너비·버튼 배치를 출력하고 `./out/modal-{이름}-{너비}.png`에 저장(모킹, 백엔드 불필요, 테스트 아님) — Modal 확인형/내용형 전후 비교용 |
 | srch01-screenshots | SCR-SRCH-01: 데스크톱/태블릿/모바일 3개 뷰포트 스크린샷을 `./out/`에 저장(테스트 아님, 단정문 없음) — Figma 육안 대조용 |
 | home01-card-check | HOME-01: SRCH-01이 공유 컴포넌트 `ComplexCard`의 `list` variant를 재작업하면서 `grid` variant(HOME-01 인기 단지)에 실수로 영향을 주지 않았는지 1280/768/392 세 뷰포트에서 확인 — 카드에 "건축"(년도)·"만원/㎡"(평단가) 문구가 없음(list 전용 항목 미유입), 하트 버튼이 절대 위치 오버레이 유지, 비로그인 하트 클릭 시 `/login` 이동 — 18/18 |
+| home01-null-fields-check | HOME-01: 서버가 null 필드를 키째 뺀 응답(모킹, 백엔드 불필요, 1280/390) — 관심 지역 요약에서 거래 없는 지역은 "거래 없음"·"—"(스크린리더 "변동 정보 없음"), 변동률만 없는 지역은 평균가 표시·변동률 "—", 인기 단지 카드(grid)에서 층·시군구가 없으면 해당 부분 생략, 화면 전체에 NaN·undefined·null 문자열 없음 — 18/18 |
 | home01-card-screenshots | HOME-01: 데스크톱/태블릿/모바일 3개 뷰포트 스크린샷을 `./out/`에 저장(테스트 아님) — Figma 4:1232/24:7860/24:7370 육안 대조용 |
 | my01-screenshots | MY-01: 1280/768/390 스크린샷을 `./out/my01-{desktop,tablet,mobile}.png`에 저장(모킹, 백엔드 불필요, 테스트 아님) — Figma 7:5373/26:15193/26:14966 육안 대조·PR 첨부용 |
 

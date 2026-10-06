@@ -119,6 +119,8 @@ com.homesense
 ```
 목록 조회는 `data`와 함께 `PageMeta(page, size, totalElements, totalPages)`를 포함합니다. `pageMeta` 필드는 목록 조회가 아닌 응답에서는 항상 null이고, `application.properties`의 `spring.jackson.default-property-inclusion=non_null` 설정 때문에 null 필드는 직렬화에서 아예 빠지므로 그 응답의 JSON에는 `pageMeta` 키 자체가 나타나지 않습니다. `PageMeta.from(Page<?>)`는 Spring Data `Page`가 쓰는 0-base `page` 번호를 그대로 노출합니다 — Controller가 요청 파라미터를 `Pageable`로 바꿀 때도 0-base로 맞추면 요청·응답이 일관됩니다. `ApiResponse.success(Page<T>)` 오버로드가 `data`(=`page.getContent()`)와 `pageMeta`를 한 번에 채워 줍니다.
 
+**서버 응답의 nullable 필드는 생략될 수 있으므로 프론트 타입은 `?: T | null`, 검사는 `!= null`로 한다. e2e 목업은 공용 헬퍼(`frontend/e2e/mockApi.mjs`)로 null 키를 뺀다.** `non_null` 때문에 값이 없는 필드는 null이 아니라 키 자체가 없다(undefined). `!== null`·`=== null`로 검사하면 빠진 키가 통과해 "NaN만원"·"undefined층"이 그려진다(2026-10-05 수정, "서버가 뺀 null 필드 처리" 절).
+
 **프로그램 설계서 여러 곳(CPX/TRD/NTF의 Controller 표 등)이 페이지네이션 응답 타입을 `PageResponse<T>`로 표기하지만, 이 클래스는 프로젝트 어디에도 존재하지 않고 앞으로도 도입하지 않습니다.** `ApiResponse.success(Page<T>)` 오버로드 하나로 이미 충분하기 때문입니다 — 새 페이지네이션 API를 짤 때 설계서의 `PageResponse<T>` 표기를 보고 그 이름의 DTO를 새로 만들지 마세요. 실제로 CPX(`ComplexController.search()`)와 TRD(`TradeController.search()`)는 이미 `ApiResponse<List<T>>`(`ApiResponse.success(Page<T>)` 재사용)로 구현돼 있고, NTF(`NotificationController.getNotifications()`)도 이를 그대로 따랐습니다(ADM/STT 도메인은 5단계 선택 범위라 아직 구현되지 않았습니다 — 그 도메인을 시작할 때도 이 관례를 그대로 적용하세요).
 
 ### 예외 처리
@@ -2262,6 +2264,40 @@ UIC-08 `EmptyState`/`Spinner`, UIC-09 `DataTrustBadge`)도 같은 이유로 이 
 
 **남은 한계:** (1) 로그인 후 재생(비로그인 하트 클릭 → 로그인 → 자동 등록)은 목록을 불러오기 전에 바로 등록을 보낸다. 이미 등록된 단지면 서버가 409로 알려 주고 토스트가 뜬다 — 의도 재생 규칙은 적용하지 않았다(이번 범위는 확인 중 클릭). (2) `storage` 이벤트를 받기 전, 확인 중이 아닌 탭이 보내는 **GET**은 `sub` 비교로 막히지만(확정된 탭), 탭이 확정 전일 때의 GET은 저장소 토큰으로 나간다 — 조회라 상태를 바꾸지 않고, 그 응답은 다시 확인이 끝나면 버려지거나 새 계정 기준으로 다시 그려진다.
 
+### 서버가 뺀 null 필드 처리 (2026-10-05, `fix/frontend/null-omitted-fields`)
+
+**규약: 서버 응답의 nullable 필드는 생략될 수 있으므로 타입은 `?: T | null`, 검사는 `!= null`. e2e 목업은 공용 헬퍼(`frontend/e2e/mockApi.mjs`의 `okBody`/`errBody`)로 null 키를 뺀다.** 값 하나를 그리는 포매터(`formatKoreanPrice`·`formatArea`·`formatChangeRate` 등)는 undefined를 받지 않는다 — 호출하는 쪽에서 값 유무를 판단하고 없을 때의 표시를 정한다. 예외로 "있는 부분만 잇는" 헬퍼(`formatAddress`의 시군구·동리, `describeDealAmount`의 rentType·monthlyRentAmount)는 이미 null을 "부분 없음"으로 받던 매개변수라 undefined도 같은 뜻으로 받게 넓혔다. 빈 값 표시는 MY-02 기준: 거래 없음은 "거래 없음", 변동률이 없으면 "—"(스크린리더 "변동 정보 없음").
+
+**nullable 응답 필드 목록(백엔드 DTO 기준, null이 되는 조건):**
+
+| DTO(프론트 타입) | 필드 | null이 되는 조건 |
+| --- | --- | --- |
+| `ComplexSummaryResponse` | `sido`·`sigungu`·`dongRi`·`householdCount`·`buildingCount`·`approvalDate` | complex 컬럼이 NULL 허용(단지 기본정보 원본 미기재). 2026-10-05 로컬: sigungu 216건(세종), dongRi·buildingCount 9건 |
+| 〃 | `matchMethod`·`floor` | 대표 거래의 매칭 방식·층이 없을 때(컬럼 NULL 허용, 로컬 데이터에는 아직 없음) |
+| 〃 | `rentType`·`monthlyRentAmount` | 대표 거래가 매매면 항상 없음 |
+| `ComplexDetailResponse`(+`BasicInfo`·`ExtendedInfo`) | 단지 컬럼 대부분, `legalDongCd`, `matchMethod`, 좌표 | 단지 컬럼 NULL 허용, 매칭 대기 단지, 대표 거래 없음, 지오코딩 전 — 이미 전부 선택 필드였다 |
+| `TradeResponse`·`TradeDetailResponse` | `rentType`·`floor`·금액 3종·`dealingType`·`cancelDate`·`aptDong`·등기일자·매도/매수자·`landLeaseYn` | 매매/전월세 구분(전월세는 거래유형·등기·해제·동이 원천에 없음), 미해제 — 이미 선택 필드였다 |
+| `RecentViewResponse` | `sido`·`sigungu`·`dongRi` | 단지 컬럼 NULL 허용(price·area·floor도 내려오지만 화면이 안 써 타입에 없음) |
+| `InterestRegionSummaryResponse` | `avgPrice` | 최근 1개월 매매 0건 |
+| 〃 | `changeRate` | 최근 1개월 또는 직전 1개월 매매 0건, 직전 평균 0 |
+| `FavoritePropertySummaryResponse` | `sido`·`sigungu`·`dongRi` | 단지 컬럼 NULL 허용 |
+| 〃 | `recentDealCategory`·`recentDealDate`·`recentAmount`·`recentArea`·`recentFloor`·`changeRate` | 취소되지 않은 매매 거래 없음(층은 그 거래에 층이 없을 때도), 변동률은 위와 같은 조건 — 이미 선택 필드였다 |
+| `FavoriteRegionSummaryResponse` | `sidoName`·`sigunguName`·`avgPrice`·`changeRate`·`pricePerPyeong` | 법정동 이름 NULL 허용, 최근 1개월 매매 0건 — 이미 선택 필드였다 |
+| `NotificationResponse` | `message`·`complexId`·`legalDongCd`·`tradeId` | 컬럼 NULL 허용, 알림 대상에 따라 일부만 채움 |
+| `NotificationSettingResponse` | `favoritePropertyId`·`favoriteRegionId` | 둘 중 하나만 채움 — 이미 선택 필드였다 |
+
+항상 있는 것(바꾸지 않음): 대표 거래의 금액(`TradeFieldMapper`가 매매 dealAmount·전월세 deposit을 필수로 받는다 — 컬럼은 NULL 허용이지만 로컬 0건)·면적·날짜, `FavoriteRegionSummaryResponse.eupmyeondongName`(등록 시 읍면동 행만 허용), 사용자·인증 응답 전부. `TradeSummaryResponse`(`GET /api/trades/search`)는 프론트 소비처가 없어 타입이 없다.
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| 바꾼 타입 | `ComplexSummaryResponse` 10개 필드, `RecentViewResponse` 3, `InterestRegionSummaryResponse` 2, `FavoritePropertySummaryResponse` 3, `NotificationResponse` 4를 `?: T \| null`로. tsc가 3개 파일 9곳을 찾았다(`ComplexCard` 4, `InterestRegionSummary` 4, `RecentViews` 1) | 위 목록 | 백엔드가 `non_null`을 끄면(모든 응답 모양이 바뀐다) 이 규약을 다시 본다 |
+| tsc가 못 잡은 곳 | `ComplexCard`의 `floor !== null`(템플릿 문자열 `${floor}층`, 두 variant), `approvalDate.slice(0, 4)`(값이 없으면 런타임 오류 — 타입을 바꾸자 tsc가 잡았다). 앱 코드의 `=== null`·`!== null` 전수(2026-10-05): 응답 값을 직접 비교하는 곳은 위 둘과 `favoritesModel.compareRate`뿐이었고, 후자는 호출부가 `changeRate ?? null`로 바꿔 넘겨 안전했다 | grep | — |
+| HOME-01 관심 지역 카드 빈 값 | 평균가가 없으면 "거래 없음", 변동률이 없으면 배지 자리에 "—"(회색, 스크린리더 "변동 정보 없음"). 두 값을 따로 판단한다 — 예전엔 둘 중 하나만 없어도 둘 다 숨겼다("데이터 없음") | Figma에 빈 값 모양이 없어 MY-02 지역 카드와 같은 방식(지시) | Figma에 빈 상태가 생기면 따른다 |
+| MY-01 최근 알림 행 | `message`가 없으면 `title`을 보인다(`message`는 NULL 허용 컬럼, `title`은 NOT NULL) | 빈 행이 그려지는 것을 막는다. 알림 데이터가 아직 없어(BAT-NTF-01 미구현) 화면에 나타난 적은 없다 | BAT-NTF-01이 title/message 내용을 정하면 다시 본다 |
+| e2e 목업 | `mockApi.mjs`(`dropNulls`·`okBody`·`errBody`)로 모았다 — my01·my02·dtl01·srch01·auth-interceptor·auth-status-checking·modal-widths·스크린샷 2개. 회원가입·AUTH-03 스크립트는 목업에 nullable 데이터 필드가 없어(최상위 data/error null뿐) 그대로 뒀다 | 목업이 null을 그대로 보내면 회귀를 못 잡는다(MY-02에서 처음 발견) | — |
+
+검증: vitest `ComplexCard.test.tsx`(4)·`InterestRegionSummary.test.tsx`(3) — develop의 두 컴포넌트로 되돌리면 5건 실패. e2e `home01-null-fields-check`(신규, 18/18 — 되돌리면 12건 실패, "−NaN% NaN만원"·"· undefined층"), `srch01-basic-check`에 층 없는 결과 카드 케이스(1280/390, 6건). 실 백엔드: 역삼동(최근 1개월 매매 0건)을 관심 지역으로 등록하면 HOME-01 카드가 "거래 없음"·"—"(1280/390, 응답에 avgPrice·changeRate 키 없음 확인). vitest 135건, tsc, lint(기존 경고 3건), 빌드, run-all 39/39(크래시 없음) 통과.
+
 ### 반응형 렌더 규칙 — 화면 크기별 두 벌 렌더 금지 (2026-09-29)
 
 **새 화면은 컴포넌트 트리 하나로 렌더한다.**
@@ -2308,7 +2344,7 @@ UI정의서 v2.1 5.5절 MY-01(FR-1.4)을 구현했다. 경로 상수는 `src/rou
 | 프로필 오류 | 401이 아닌 실패만 상단 배너(서버 메시지 + 다시 시도)로 알린다. 401은 가드가 로그인 화면으로 보내므로 배너를 띄우지 않는다 | UI정의서 MY-01 예외 처리 | — |
 | 확인 중 화면 | `RequireAuth`에 `checkingFallback`을 추가했다. MY-01은 레이아웃이 같은 스켈레톤(`MyPageSkeleton`)을 넘긴다 | 확인 중에 리다이렉트하지 않고 화면 모양을 유지한다 | — |
 | 레이아웃·토큰(2026-10-01 Figma 대조 반영) | 한 벌 렌더(반응형 렌더 규칙). 지성이 Figma 7:5373·26:15193·26:14966에서 추출한 값을 그대로 썼다: 본문 최대 폭 1000(패딩 포함)·패딩 48/32·섹션 간격 28(모바일 24/16·20), 보이는 제목 "마이페이지" 26/39(모바일 22/33) ExtraBold, 카드 radius 16·테두리 #f3f4f6·그림자 0 1px 4px 5%(프로필만 6%), 섹션 제목(메뉴·관심 매물·최근 알림)은 카드 밖 위 14/21 Bold #99a1af(모바일 "메뉴"만 13/20·간격 8), "전체 보기"는 13/20 SemiBold brand + 화살표 14. 메뉴는 md(768) 이상 4열 타일(간격 16, 여백 32/16, 아이콘 칸 48/16·#e8f2f0, 라벨 13/18 #1c1c1e), 모바일은 카드 하나 안 1열 목록(행 16/20, 아이콘 칸 36/14, 라벨 14/21 + chevron). 위젯은 md 이상 2열(간격 24)로 바꿨다(처음엔 xl 이상). 목록 행 16/20·간격 14·구분선 #f3f4f6, 썸네일 56×42/14, 단지명 13/20 Bold, 가격 12/18 #99a1af. 하단 탭 여백은 MainLayout(`pb-16`). 검증: e2e `my01-mypage-check`(제목 크기·아바타·메뉴 열·위젯 열·라벨 색), 스크린샷 `my01-screenshots` | UI정의서 6.2절의 "2열→1열"은 Figma와 달라 Figma를 따랐다(코드 주석에만 기록). `ArrowRightIcon`(14)·`ChevronRightIcon`(16)은 Figma 크기와 같아 그대로 썼다 | Figma가 바뀌면 |
-| Figma와 의도적으로 다르게 둔 것 | (1) 로그아웃 타일 라벨 #6a7282(Figma #9ca3af는 흰 배경 대비 2.54:1, 지성 결정). (2) 모바일 프로필의 가입일을 보인다(Figma는 숨김 — UI정의서 필수 항목, 기존 결정). (3) 데스크톱·태블릿 부제(14/21 #99a1af)를 넣지 않았다 — 문구를 받지 못했다. (4) 최근 알림 행은 Figma처럼 한 줄 문구라 `message`만 보이고 `title`은 쓰지 않는다 — BAT-NTF-01이 없어 두 필드의 내용이 정해지지 않았다. (5) "전체 관심 매물 보기" 뒤의 개수 표시를 없앴다(Figma에 없음, 함께 쓰던 `FavoritePreview.total`도 제거). (6) 위젯 섹션 제목 앞 아이콘(하트·종)을 없앴다(Figma는 글자만) | — | (3) 부제 문구를 받으면 넣는다(모바일은 숨김). (4) BAT-NTF-01이 title/message 내용을 정하면 다시 본다 |
+| Figma와 의도적으로 다르게 둔 것 | (1) 로그아웃 타일 라벨 #6a7282(Figma #9ca3af는 흰 배경 대비 2.54:1, 지성 결정). (2) 모바일 프로필의 가입일을 보인다(Figma는 숨김 — UI정의서 필수 항목, 기존 결정). (3) 데스크톱·태블릿 부제(14/21 #99a1af)를 넣지 않았다 — 문구를 받지 못했다. (4) 최근 알림 행은 Figma처럼 한 줄 문구라 `message`만 보이고 `title`은 쓰지 않는다 — BAT-NTF-01이 없어 두 필드의 내용이 정해지지 않았다. **[2026-10-05] `message`가 없으면(NULL 허용 컬럼, 키 생략) `title`을 대신 보인다.** (5) "전체 관심 매물 보기" 뒤의 개수 표시를 없앴다(Figma에 없음, 함께 쓰던 `FavoritePreview.total`도 제거). (6) 위젯 섹션 제목 앞 아이콘(하트·종)을 없앴다(Figma는 글자만) | — | (3) 부제 문구를 받으면 넣는다(모바일은 숨김). (4) BAT-NTF-01이 title/message 내용을 정하면 다시 본다 |
 | **대비 미달(결정 필요)** | Figma 회색 #99a1af 글자를 그대로 썼다: 이메일·가입일, 가격 줄, 알림 상대 시간(흰 카드 위 2.60:1), 섹션 제목(페이지 배경 #f7f8fa 위 2.45:1). NFR-8 기준 4.5:1에 못 미친다. 로그아웃 라벨처럼 올릴지(예: #6a7282 4.84:1) 지성 결정이 필요하다 — 같은 #99a1af가 다른 화면에도 63곳 쓰여 화면 단위가 아니라 공통 결정이 낫다 | 대조값은 지성이 준 Figma 값이고, 로그아웃 라벨만 명시적으로 바꾸라고 했다 | 결정이 나면 이 행을 바꾼다 |
 
 **문서와 다른 점(코드 주석에만 기록, 문서 동기화 필요):** UI정의서 6.2절 MY-01 그리드 표기("2열→1열", 실제는 Figma대로 4열→1열). 프로그램설계서 3.2절 하단 메모 "MY-01 회원정보 수정은 인라인/모달"(UI정의서 v2.1은 MY-05 이동). 프로그램설계서 3.2절 `withdraw()` 처리 로직에 비밀번호 재확인 단계(`PasswordEncoder.matches()`)와 불일치 시 `InvalidCredentialsException`(401 `INVALID_CREDENTIALS`)을 반영해야 한다 — 지금 설계서에는 이 단계가 없다.
@@ -2369,7 +2405,7 @@ UI정의서 v2.1 5.5절 MY-02(FR-5.1~5.3)를 구현했다. 화면은 `src/pages/
 
 **완결 필요(MY-02에서 등록):**
 - **Figma 대조 — 남은 것은 프레임과 화면 스크린샷을 나란히 놓고 보는 육안 대조 하나다.** 수치 대조·아이콘 원본 교체·다이얼로그 값은 2026-10-02~03에 끝났다. Figma에 프레임이 없는 상태(알림 미설정·꺼짐 배지, 태블릿·모바일 지역 카드)는 위 표에 판단을 적었고 대조 대상이 아니다. 스크린샷 스크립트: `frontend/e2e/my02-screenshots.mjs`(→ `out/my02-*.png`, 매물·지역 삭제 다이얼로그 포함).
-- **다른 화면의 같은 null 생략 버그(이번에 고치지 않음):** HOME-01 `InterestRegionSummary`의 `region.avgPrice !== null && region.changeRate !== null`(거래 없는 지역에서 "NaN만원"), `ComplexCard`의 `complex.floor !== null`(층 없는 대표 거래에서 "· undefined층"). 각각 `!= null`로 바꾸고 타입을 선택 필드로 정리한다. 전체 응답 타입을 한 번에 점검하는 편이 낫다.
+- ~~**다른 화면의 같은 null 생략 버그(이번에 고치지 않음):** HOME-01 `InterestRegionSummary`의 `region.avgPrice !== null && region.changeRate !== null`(거래 없는 지역에서 "NaN만원"), `ComplexCard`의 `complex.floor !== null`(층 없는 대표 거래에서 "· undefined층"). 각각 `!= null`로 바꾸고 타입을 선택 필드로 정리한다. 전체 응답 타입을 한 번에 점검하는 편이 낫다.~~ **[처리완료 2026-10-05, `fix/frontend/null-omitted-fields`] "서버가 뺀 null 필드 처리" 절.** 2026-10-05 develop 통합 검증의 실 백엔드 시나리오(역삼동 관심 지역 → HOME-01 "−NaN% NaN만원")로 재현됐다.
 - **MY-01 미리보기 정리** — 이제 응답에 `recentArea`·`registeredAt`이 있어 `FavoritePreview`의 TODO(면적 표시, ID 정렬 대신 등록일시)를 처리할 수 있다. 이 브랜치에서는 null 검사만 고쳤다.
 - **지역 자동완성 상위 10건 한계** — "MY-02 백엔드 보강" 절 참고.
 

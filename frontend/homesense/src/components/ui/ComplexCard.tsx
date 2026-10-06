@@ -31,7 +31,9 @@ const SIMILAR_CAPTION = '지번 등 일부 정보가 정확히 일치하지 않�
  * 사진은 가상의 단지명에 맞춰진 것이라 실제 데이터와 매칭될 수 없어 그대로 옮기지 않았다.
  * matchMethod/floor는 둘 다 nullable이라(매칭 실패/원본 미기재) 값이 없으면 각각 배지·층수
  * 세그먼트를 렌더링하지 않는다(2026-09-17, CPX-RCV-RGN 카드 표시 필드 보강으로 필드 자체는
- * 이미 채워짐 — CLAUDE.md SCR-HOME-01 절 참고).
+ * 이미 채워짐 — CLAUDE.md SCR-HOME-01 절 참고). 사용승인일이 없으면 "건축 …년"을 뺀다.
+ * 서버는 null 필드를 키째 빼므로 값 유무는 `!= null`로 본다 — `!== null`이면 빠진 키(undefined)가 통과해
+ * "· undefined층"이 됐다.
  */
 export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePending = false, className = '', variant = 'grid' }: ComplexCardProps) {
   const isSimilar = complex.matchMethod === 'SIMILAR';
@@ -100,8 +102,8 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePe
               <p className="truncate text-[11.5px] text-[#99a1af]">{formatAddress(complex.sigungu, complex.dongRi)}</p>
               <p className="mt-1 text-[11px] text-[#99a1af]">
                 전용 {formatArea(complex.representativeArea)}
-                {complex.floor !== null ? ` · ${complex.floor}층` : ''} · {formatDottedDate(complex.representativeDealDate)} · 건축{' '}
-                {complex.approvalDate.slice(0, 4)}년
+                {complex.floor != null ? ` · ${complex.floor}층` : ''} · {formatDottedDate(complex.representativeDealDate)}
+                {complex.approvalDate != null ? ` · 건축 ${complex.approvalDate.slice(0, 4)}년` : ''}
               </p>
             </div>
 
@@ -145,7 +147,7 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePe
         </p>
         <p className="mt-1.5 text-[11px] text-[#99a1af]">
           전용 {formatArea(complex.representativeArea)}
-          {complex.floor !== null ? ` · ${complex.floor}층` : ''} · {complex.representativeDealDate}
+          {complex.floor != null ? ` · ${complex.floor}층` : ''} · {complex.representativeDealDate}
         </p>
       </div>
     </div>

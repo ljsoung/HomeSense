@@ -15,28 +15,31 @@ export type MatchMethod = 'EXACT' | 'SIMILAR';
  * 렌더링하지 않는다(DataTrustBadge/ComplexCard 참고).
  *
  * rentType/monthlyRentAmount는 SRCH-01 백엔드 선행작업(2026-09-23, "단지 검색 지역코드·키워드·
- * 거래유형")으로 추가됐다 — dealCategory=SALE이면 `non_null` 직렬화 설정 때문에 이 두 키 자체가
- * 응답 JSON에 없다(라이브 curl로 확인). 그래서 optional(`?`)이 아니라 `| undefined`가 아닌
- * `?:`(선택 프로퍼티)로 선언해 "키 부재"와 "null"을 굳이 구분하지 않고 둘 다 falsy로 취급한다.
+ * 거래유형")으로 추가됐다 — 매매면 둘 다 없다.
+ *
+ * 서버는 `non_null` 직렬화라 null인 필드는 키 자체를 뺀다. 그래서 nullable 필드는 모두 `?: T | null`로 두고
+ * `!= null`로 검사한다(`!== null`은 빠진 키(undefined)를 통과시킨다). 단지 쪽(sido·sigungu·dongRi·세대수·동수·
+ * 사용승인일)은 complex 컬럼이 NULL 허용이라 빠질 수 있다 — 세종은 sigungu가 없다. 대표 거래 금액·면적·날짜는
+ * 파서가 필수로 받거나 NOT NULL 컬럼이라 항상 있다.
  */
 export interface ComplexSummaryResponse {
   complexId: number;
   complexName: string;
-  sido: string;
-  sigungu: string;
-  dongRi: string;
-  householdCount: number;
-  buildingCount: number;
-  approvalDate: string;
+  sido?: string | null;
+  sigungu?: string | null;
+  dongRi?: string | null;
+  householdCount?: number | null;
+  buildingCount?: number | null;
+  approvalDate?: string | null;
   representativeHousingType: HousingType;
   representativeDealCategory: DealCategory;
   representativeDealDate: string;
   representativeAmount: number;
   representativeArea: number;
-  matchMethod: MatchMethod | null;
-  floor: number | null;
-  rentType?: RentType;
-  monthlyRentAmount?: number;
+  matchMethod?: MatchMethod | null;
+  floor?: number | null;
+  rentType?: RentType | null;
+  monthlyRentAmount?: number | null;
 }
 
 /**

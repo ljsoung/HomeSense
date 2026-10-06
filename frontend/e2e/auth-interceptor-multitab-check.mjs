@@ -10,6 +10,7 @@
 import { chromium } from 'playwright';
 
 import { BASE } from './base.mjs';
+import { errBody, okBody } from './mockApi.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond, detail = '') {
@@ -20,8 +21,6 @@ const ACCESS_KEY = 'homesense.accessToken';
 const REFRESH_KEY = 'homesense.refreshToken';
 const REFRESH_DELAY_MS = 800;
 
-const okBody = (data) => JSON.stringify({ success: true, data, error: null, timestamp: '' });
-const errBody = (code, message) => JSON.stringify({ success: false, data: null, error: { code, message }, timestamp: '' });
 
 const browser = await chromium.launch();
 

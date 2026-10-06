@@ -137,9 +137,15 @@ function SummaryPlaceholder({ status }: { status: Exclude<AuthStatus, 'authentic
   }
 }
 
-function RegionCard({ region }: { region: InterestRegionSummaryResponse }) {
+/**
+ * 관심 지역 카드 한 장. 평균가·변동률은 거래가 없으면 서버가 키째 빼므로(`non_null`) `!= null`로 본다 — 예전에는
+ * `!== null`이라 빠진 키가 통과해 "−NaN% / NaN만원"이 그려졌다. 빈 값 표시는 MY-02 지역 카드와 같다: 평균가가
+ * 없으면 "거래 없음", 변동률이 없으면 "—". 두 값은 따로 판단한다 — 이번 달 거래는 있고 직전 1개월 거래가 없으면
+ * 평균가는 보이고 변동률만 "—"다(예전엔 둘 중 하나만 없어도 둘 다 숨겼다).
+ */
+export function RegionCard({ region }: { region: InterestRegionSummaryResponse }) {
   const { sigungu, eupmyeondong } = splitRegionPath(region.fullPath);
-  const hasStats = region.avgPrice !== null && region.changeRate !== null;
+  const { avgPrice, changeRate } = region;
 
   return (
     <div className="flex flex-1 flex-col justify-center rounded-[14px] border border-[#f3f4f6] bg-[#fafafa] p-4">
@@ -148,19 +154,24 @@ function RegionCard({ region }: { region: InterestRegionSummaryResponse }) {
           <p className="text-[11px] text-[#99a1af]">{sigungu}</p>
           <p className="text-[14px] font-bold text-[#101828]">{eupmyeondong}</p>
         </div>
-        {hasStats && region.changeRate !== null && (
+        {changeRate != null ? (
           <span
             className={`flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${
-              region.changeRate >= 0 ? 'bg-[#fef2f2] text-[#e7000b]' : 'bg-[#eff6ff] text-[#155dfc]'
+              changeRate >= 0 ? 'bg-[#fef2f2] text-[#e7000b]' : 'bg-[#eff6ff] text-[#155dfc]'
             }`}
           >
-            {region.changeRate >= 0 ? <TrendingUpIcon className="size-3" /> : <TrendingDownIcon className="size-3" />}
-            {formatChangeRate(region.changeRate)}
+            {changeRate >= 0 ? <TrendingUpIcon className="size-3" /> : <TrendingDownIcon className="size-3" />}
+            {formatChangeRate(changeRate)}
+          </span>
+        ) : (
+          <span className="px-2 py-0.5 text-[11px] font-bold text-[#99a1af]">
+            <span aria-hidden="true">—</span>
+            <span className="sr-only">변동 정보 없음</span>
           </span>
         )}
       </div>
       <p className="pt-2 text-[20px] font-extrabold tracking-[-0.3px] text-[#1c1c1e]">
-        {hasStats && region.avgPrice !== null ? formatKoreanPrice(region.avgPrice) : '데이터 없음'}
+        {avgPrice != null ? formatKoreanPrice(avgPrice) : '거래 없음'}
       </p>
       <p className="pt-1.5 text-[11px] text-[#99a1af]">평균 거래가 · 최근 1개월 {region.tradeCount}건</p>
     </div>

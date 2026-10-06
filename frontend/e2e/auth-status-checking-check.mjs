@@ -7,13 +7,13 @@
 // 서버는 route로 흉내 낸다(백엔드 불필요).
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
+import { okBody } from './mockApi.mjs';
 
 let pass = 0;
 let fail = 0;
 function ok(name, cond, detail = '') {
   if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}${detail ? ' :: ' + detail : ''}`); }
 }
-const okBody = (data) => JSON.stringify({ success: true, data, error: null, timestamp: '' });
 const PERSONALIZED = ['/api/regions/interest-summary', '/api/favorites'];
 
 const browser = await chromium.launch();

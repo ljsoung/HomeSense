@@ -3,9 +3,9 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'fs';
 import { BASE } from './base.mjs';
+import { okBody } from './mockApi.mjs';
 
 mkdirSync('./out', { recursive: true });
-const okBody = (data, pageMeta) => JSON.stringify({ success: true, data, error: null, ...(pageMeta ? { pageMeta } : {}), timestamp: '' });
 const kstAgo = (msAgo) => new Date(Date.now() - msAgo + 9 * 3600_000).toISOString().slice(0, 19);
 const favorite = (id, name, amount) => ({
   favoritePropertyId: id, complexId: id * 10, complexName: name, sido: '서울특별시', sigungu: '서초구', dongRi: '반포동',

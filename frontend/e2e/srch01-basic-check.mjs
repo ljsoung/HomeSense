@@ -2,6 +2,7 @@
 import { chromium } from 'playwright';
 
 import { BASE } from './base.mjs';
+import { okBody } from './mockApi.mjs';
 let pass = 0;
 let fail = 0;
 
@@ -32,7 +33,7 @@ await withPage(async (page) => {
   const logCalls = [];
   await page.route('**/api/search/logs', async (route) => {
     logCalls.push(route.request().postDataJSON());
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: null, error: null, timestamp: '' }) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: okBody(null) });
   });
   await page.goto(`${BASE}/search?regionCode=4111100000&regionLabel=%EA%B2%BD%EA%B8%B0%EB%8F%84%20%EC%88%98%EC%9B%90%EC%8B%9C%20%EC%9E%A5%EC%95%88%EA%B5%AC`);
   await page.waitForSelector('text=총');
@@ -178,7 +179,7 @@ await withPage(async (page) => {
   const logCalls = [];
   await page.route('**/api/search/logs', async (route) => {
     logCalls.push(1);
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true,"data":null,"error":null,"timestamp":""}' });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: okBody(null) });
   });
   await page.goto(`${BASE}/search?regionCode=4111100000&regionLabel=test`);
   await page.waitForSelector('a[href^="/complexes/"]');
@@ -192,7 +193,7 @@ await withPage(async (page) => {
   const logCalls = [];
   await page.route('**/api/search/logs', async (route) => {
     logCalls.push(route.request().postDataJSON());
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true,"data":null,"error":null,"timestamp":""}' });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: okBody(null) });
   });
   await page.goto(`${BASE}/search?keyword=%EB%9E%98%EB%AF%B8%EC%95%88`);
   await page.waitForSelector('a[href^="/complexes/"]', { timeout: 10000 });
@@ -216,6 +217,30 @@ await withPage(async (page) => {
   ok('데스크톱 페이지 이동 시 목록이 누적되지 않고 교체됨(20건 내외 유지)', secondPageCount <= firstPageCount + 5);
   ok('URL에 page=2 반영', page.url().includes('page=2'));
 });
+
+// 7) 서버가 null 필드를 키째 빼는 결과 카드(UIC-05 list) — 층·사용승인일·시군구·매칭 방식이 없는 대표 거래.
+//    예전엔 `floor !== null`이 빠진 키를 통과시켜 "· undefined층"이 그려졌다. 목업은 mockApi(null 키 제거)로 만든다.
+for (const width of [1280, 390]) {
+  await withPage(async (page) => {
+    await page.setViewportSize({ width, height: 900 });
+    const card = {
+      complexId: 900002, complexName: '층없는결과단지', sido: '세종특별자치시', sigungu: null, dongRi: '어진동', householdCount: null,
+      buildingCount: null, approvalDate: null, representativeHousingType: 'APT', representativeDealCategory: 'SALE',
+      representativeDealDate: '2026-09-20', representativeAmount: 61000, representativeArea: 84.9, matchMethod: null, floor: null,
+      rentType: null, monthlyRentAmount: null,
+    };
+    await page.route('**/api/complexes/search*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: okBody([card], { page: 0, size: 20, totalElements: 1, totalPages: 1 }) }),
+    );
+    await page.goto(`${BASE}/search?keyword=${encodeURIComponent('층없는결과')}`);
+    const link = page.locator('a[href="/complexes/900002"]');
+    await link.waitFor({ timeout: 5000 });
+    const text = (await link.innerText()).replace(/\s+/g, ' ');
+    ok(`${width}px: 층 없는 결과 카드에 "undefined"·"null"·"NaN" 없음`, !/undefined|\bnull\b|NaN/.test(text));
+    ok(`${width}px: 층·건축년도 세그먼트 생략, 날짜는 표시`, !text.replace('층없는결과단지', '').includes('층') && !text.includes('건축') && text.includes('2026.09.20'));
+    ok(`${width}px: 시군구 없으면 동리만 주소로`, text.includes('어진동'));
+  });
+}
 
 await browser.close();
 

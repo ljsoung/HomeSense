@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 
 import { BASE } from './base.mjs';
+import { errBody } from './mockApi.mjs';
 let pass = 0;
 let fail = 0;
 function ok(name, cond) { if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}`); } }
@@ -133,7 +134,7 @@ const browser = await chromium.launch();
   await page.route('**/api/complexes/search*', async (route) => {
     callCount++;
     if (callCount === 1) {
-      await route.fulfill({ status: 500, contentType: 'application/json', body: '{"success":false,"data":null,"error":{"code":"INTERNAL_SERVER_ERROR","message":"일시적인 서버 오류가 발생했습니다."},"timestamp":""}' });
+      await route.fulfill({ status: 500, contentType: 'application/json', body: errBody('INTERNAL_SERVER_ERROR', '일시적인 서버 오류가 발생했습니다.') });
     } else {
       await route.continue();
     }
