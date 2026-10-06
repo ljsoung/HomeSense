@@ -7,6 +7,7 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,9 +27,15 @@ import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.jiseong.homesense.batch.loader.LoadResult;
+import com.jiseong.homesense.batch.loader.TradeDataLoader;
 import com.jiseong.homesense.batch.notifier.NotificationTriggerResult.SkipReason;
+import com.jiseong.homesense.batch.parser.dto.TradeDraft;
 import com.jiseong.homesense.notification.dto.NotificationResponse;
 import com.jiseong.homesense.notification.service.NotificationService;
+import com.jiseong.homesense.trade.entity.DealCategory;
+import com.jiseong.homesense.trade.entity.HousingType;
+import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.user.service.WithdrawalTestSeed;
 
 /**
@@ -62,8 +69,13 @@ class WatchConditionEvaluatorMariaDbIT {
     private static final String SUNGIN = "1111017400";
     private static final String CHANGSIN = "1111017500";
 
+    /**
+     * DB 시스템 타임존을 JVM(개발 PC KST, CI UTC)과 겹치지 않는 UTC-10(DST 없음)으로 고정한다 — 적재 SQL이 NOW()로
+     * 바뀌거나 드라이버가 타임존을 변환하면 "실제 적재 경로" 테스트가 어느 환경에서든 실패하게 하기 위해서다.
+     */
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")
+            .withEnv("TZ", "Pacific/Honolulu")
             .withDatabaseName("homesense_it")
             .withUsername("homesense")
             .withPassword("homesense");
@@ -87,6 +99,8 @@ class WatchConditionEvaluatorMariaDbIT {
     private WatchConditionEvaluator evaluator;
     @Autowired
     private NotificationService notificationService;
+    @Autowired
+    private TradeDataLoader tradeDataLoader;
 
     private WithdrawalTestSeed seed;
     private long userA;
@@ -238,6 +252,41 @@ class WatchConditionEvaluatorMariaDbIT {
         // 같은 초에 만들어지므로 ID 역순으로 정렬된다
         assertThat(page).extracting(NotificationResponse::notificationId)
                 .isSortedAccordingTo((x, y) -> Long.compare(y, x));
+    }
+
+    /**
+     * D2의 전제 — 실제 적재 경로(TradeDataLoader → 네이티브 upsert)가 trade.created_at에 쓰는 값과, 오케스트레이터가
+     * 잡는 런 시작 시각({@code LocalDateTime.now()})이 같은 기준인지. 쓰기는 Hibernate 네이티브 쿼리, 비교는
+     * JdbcTemplate으로 바인딩 경로가 다르다. 컨테이너 DB 타임존을 UTC-10으로 고정해(위 MARIADB) JVM 타임존과 항상
+     * 다르므로, 어느 한쪽에서 타임존 변환이 끼거나 적재 쪽을 SQL NOW()로 바꾸면 수 시간 차이로 실패한다.
+     */
+    @Test
+    void 실제_적재_경로로_들어온_거래가_런_시작_이후_신규로_잡힌다() {
+        LocalDateTime runStartedAt = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS);
+        LoadResult loaded = tradeDataLoader.loadBatch(List.of(new TradeDraft(
+                HousingType.APT, DealCategory.SALE, null, "15126469", "11110", "숭인동", "숭인 힐스테이트", "766",
+                new BigDecimal("100.00"), (short) 12, (short) 2010, RUN_DATE.minusDays(1),
+                120_000L, null, null, null, null, null, null, null, null, null, false, null,
+                complex1, SUNGIN, MatchMethod.EXACT, null)));
+
+        Map<String, Object> stored = jdbc.queryForMap(
+                "SELECT trade_id, created_at FROM trade WHERE deal_amount = 120000");
+        LocalDateTime storedCreatedAt = ((java.sql.Timestamp) stored.get("created_at")).toLocalDateTime();
+        assertThat(java.time.Duration.between(storedCreatedAt, LocalDateTime.now()).abs())
+                .as("created_at은 JVM 벽시계 시각으로 저장된다(DB 타임존 변환 없음)")
+                .isLessThan(java.time.Duration.ofMinutes(1));
+
+        NotificationTriggerResult result = evaluator.evaluateAfterLoad(new NotificationTriggerContext(
+                runStartedAt, LocalDate.now(java.time.ZoneId.of("Asia/Seoul")),
+                loaded.touchedComplexIds(), loaded.touchedLegalDongCds()));
+
+        // 픽스처의 AFTER_RUN(2026-10-06 03:05) 거래는 지금보다 과거라 신규가 아니고, 방금 적재한 1건만 신규다
+        assertThat(result.newTradeCreated()).isEqualTo(2); // 관심 매물 + 종로구 관심 지역
+        Map<String, Object> propertyNew = find(jdbc.queryForList("SELECT * FROM notification"), "NEW_TRADE",
+                complex1, null);
+        assertThat(propertyNew.get("title")).isEqualTo("숭인 힐스테이트 신규 실거래 1건");
+        assertThat(((Number) propertyNew.get("trade_id")).longValue())
+                .isEqualTo(((Number) stored.get("trade_id")).longValue());
     }
 
     private Map<String, Object> find(List<Map<String, Object>> rows, String type, Long complexId, String legalDongCd) {
