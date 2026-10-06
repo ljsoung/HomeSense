@@ -59,7 +59,7 @@ public class TradeDataLoader {
 
         log.info("BAT-LOD-01 적재 완료: processedCount={}, errorCount={}, inserted={}, updated={}",
                 total.processedCount(), total.errorCount(), total.inserted(), total.updated());
-        return total;
+        return total.withTouched(touchedComplexIds, touchedLegalDongCds);
     }
 
     private List<List<TradeDraft>> partition(List<TradeDraft> drafts, int size) {
