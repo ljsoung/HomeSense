@@ -96,9 +96,9 @@ public class NotificationService {
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(Long userId, NotificationType typeFilter, Pageable pageable) {
         Page<Notification> notifications = typeFilter != null
-                ? notificationRepository.findByUser_UserIdAndNotificationTypeOrderBySentAtDesc(
+                ? notificationRepository.findByUser_UserIdAndNotificationTypeOrderByCreatedAtDescNotificationIdDesc(
                         userId, typeFilter, pageable)
-                : notificationRepository.findByUser_UserIdOrderBySentAtDesc(userId, pageable);
+                : notificationRepository.findByUser_UserIdOrderByCreatedAtDescNotificationIdDesc(userId, pageable);
         return notifications.map(NotificationResponse::from);
     }
 

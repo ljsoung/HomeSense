@@ -316,6 +316,8 @@ CREATE TABLE notification_setting (
 -- ----------------------------------------------------------------------------
 -- notification (알림)  ENT-NTF-02  [v2.0 변경]
 -- v1.0 대비 officetel_key 컬럼 제거.
+-- 2026-10-06 BAT-NTF-01: sent_at NOT NULL → NULL 허용(발송 완료 시각, NULL=발송 대기).
+-- 기존 DB: ALTER TABLE notification MODIFY sent_at DATETIME NULL;
 -- ----------------------------------------------------------------------------
 CREATE TABLE notification (
     notification_id    BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
@@ -327,7 +329,7 @@ CREATE TABLE notification (
     legal_dong_cd       CHAR(10)         NULL,
     trade_id            BIGINT UNSIGNED  NULL,
     is_read             BOOLEAN          NOT NULL,
-    sent_at             DATETIME         NOT NULL,
+    sent_at             DATETIME         NULL,      -- 발송 완료 시각, NULL=발송 대기(BAT-MAIL-01)
     created_at          DATETIME         NOT NULL,
     PRIMARY KEY (notification_id),
     CONSTRAINT fk_notification_user FOREIGN KEY (user_id)
