@@ -6,7 +6,7 @@ import java.util.Map;
 /**
  * BAT-NTF-01 실행 결과 집계(D8). batch_log는 API 조합 단위 스키마라 쓰지 않고 구조화 로그로만 남긴다.
  *
- * @param evaluatedSettings  평가한 알림 설정 수(대상 이번 런과 연관된 ACTIVE 회원의 설정)
+ * @param evaluatedSettings  평가한 알림 설정 수(이번 런과 연관된 ACTIVE 회원의 설정)
  * @param newTradeCreated    생성한 NEW_TRADE 알림 수
  * @param priceChangeCreated 생성한 PRICE_CHANGE 알림 수
  * @param skipped            스킵 사유별 건수(설정 × 알림 유형 단위)
