@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeftIcon } from '../../components/icons/ArrowLeftIcon';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRightIcon } from '../../components/icons/ArrowRightIcon';
 import { ChevronDownIcon } from '../../components/icons/ChevronDownIcon';
 import { EmptyHeartIcon } from '../../components/icons/EmptyHeartIcon';
 import { SortLinesIcon } from '../../components/icons/SortLinesIcon';
 import { TrashIcon } from '../../components/icons/TrashIcon';
 import { MainLayout } from '../../components/layout/MainLayout';
+import { MobileAppBar } from '../../components/layout/MobileAppBar';
 import { CONFIRM_DANGER_BUTTON_CLASS, CONFIRM_FOOTER_ROW_CLASS, CONFIRM_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
 import { useToast } from '../../components/ui/useToast';
 import {
@@ -21,7 +21,6 @@ import { getNotificationSettings } from '../../features/notification/api';
 import type { NotificationSettingResponse } from '../../features/notification/types';
 import type { RegionAutocompleteResponse } from '../../features/region/types';
 import { MEDIA_MD_DOWN, MEDIA_XL_UP, useMediaQuery } from '../../lib/useMediaQuery';
-import { MY_ROUTES } from '../../routes/paths';
 import { RowSkeleton, WidgetError } from '../my/SectionCard';
 import { useLoadable } from '../my/useLoadable';
 import { PropertyCard, RegionCard } from './FavoriteCards';
@@ -352,7 +351,7 @@ export function FavoritesPage() {
         </div>
       ) : (
         <div className="flex flex-col">
-          <MobileAppBar />
+          <MobileAppBar title="관심 매물·지역" />
           {bothEmpty ? (
             <div className="flex flex-col gap-6 px-4 py-6">
               <BothEmpty />
@@ -420,30 +419,6 @@ function PageHeading({ layout }: { layout: 'desktop' | 'tablet' }) {
         관심 매물·지역 관리
       </h1>
       <p className="mt-1 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
-    </div>
-  );
-}
-
-/**
- * 모바일 앱 바(Figma 27-15395) — 48px, 흰색, 아래 구분선, 뒤로가기 32×32 + 제목 16px Bold. 공용 모바일 헤더(MainLayout)는
- * 그대로 두고 그 아래에 둔다(DTL-01·MY-01도 공용 헤더를 유지했다). Figma 오른쪽 종 아이콘은 넣지 않는다 — UI정의서에 헤더
- * 알림 진입점이 없어 HOME-01에서 뺀 것과 같은 판단(모바일 알림은 하단 탭 "마이").
- * 뒤로가기는 앱 안에서 들어왔으면 이전 화면, 링크로 바로 들어왔으면 마이페이지(DTL-01 뒤로가기와 같은 규칙).
- */
-function MobileAppBar() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  return (
-    <div className="flex h-12 items-center gap-1 border-b border-[#f3f4f6] bg-white px-4">
-      <button
-        type="button"
-        aria-label="뒤로 가기"
-        onClick={() => (location.key === 'default' ? navigate(MY_ROUTES.home) : navigate(-1))}
-        className="-ml-1.5 flex size-8 items-center justify-center rounded-[8px] text-[#4a5565] hover:bg-[#f3f4f6] focus-visible:outline-2 focus-visible:outline-brand"
-      >
-        <ArrowLeftIcon aria-hidden="true" className="size-5" />
-      </button>
-      <h1 className="text-[16px] leading-6 font-bold text-[#101828]">관심 매물·지역</h1>
     </div>
   );
 }
