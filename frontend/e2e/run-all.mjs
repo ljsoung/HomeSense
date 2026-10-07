@@ -50,6 +50,8 @@ const SCRIPTS = [
   'my01-mypage-check',
   // MY-02 관심 매물·지역 관리 — 세로 섹션/탭, 지연 삭제·실행취소, 지역 추가, 이동, 키보드(390/768/1280). 백엔드 불필요.
   'my02-favorites-check',
+  // MY-03 알림 설정 — 대상 다중 선택·임계치 0%·저장 실패·빈 상태·진입 쿼리·키보드·로그인 복귀(390/768/1280). 백엔드 불필요.
+  'my03-notification-settings-check',
 ];
 const only = process.argv.slice(2);
 const targets = only.length ? SCRIPTS.filter((s) => only.includes(s)) : SCRIPTS;
