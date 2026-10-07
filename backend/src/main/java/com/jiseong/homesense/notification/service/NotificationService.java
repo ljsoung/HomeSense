@@ -1,7 +1,11 @@
 package com.jiseong.homesense.notification.service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -19,6 +23,7 @@ import com.jiseong.homesense.notification.dto.UpdateNotificationSettingsCommand;
 import com.jiseong.homesense.notification.entity.Notification;
 import com.jiseong.homesense.notification.entity.NotificationType;
 import com.jiseong.homesense.notification.exception.AccessDeniedException;
+import com.jiseong.homesense.notification.exception.DuplicateNotificationTargetException;
 import com.jiseong.homesense.notification.exception.InvalidNotificationTargetException;
 import com.jiseong.homesense.notification.exception.MissingTargetException;
 import com.jiseong.homesense.notification.exception.NotificationNotFoundException;
@@ -50,47 +55,60 @@ public class NotificationService {
     }
 
     /**
-     * favoritePropertyId/favoriteRegionId 중 정확히 하나가 가리키는 대상(반드시 본인 소유)에 대해
-     * 원자적 upsert(존재하면 UPDATE, 없으면 INSERT)를 수행한다.
+     * 대상별 설정 목록을 한 트랜잭션으로 원자적 upsert한다(존재하면 UPDATE, 없으면 INSERT). 각 항목은
+     * favoritePropertyId/favoriteRegionId 중 정확히 하나를 가리켜야 하고, 그 대상은 반드시 본인 소유여야 한다.
      *
-     * <p>애초에 "조회 → 있으면 UPDATE, 없으면 INSERT"를 애플리케이션 레벨에서 분기하고, 동시 INSERT
-     * 경쟁으로 인한 UNIQUE 위반은 별도 REQUIRES_NEW 트랜잭션(BAT-LOD-01이 한때 쓰던 TradeInsertGateway와
-     * 같은 패턴, 이후 같은 함정이 재발해 TradeRepository#upsert로 교체되며 삭제됐다)으로 격리해 처리하도록
-     * 구현했었다. 하지만 REQUIRES_NEW로 그 트랜잭션의 rollback-only 문제를 피하더라도,
-     * MariaDB 기본 격리수준(REPEATABLE READ)에서는 실패 이후 같은(바깥) 트랜잭션에서의 재조회가 그
-     * 트랜잭션이 이미 확립한 스냅샷에 묶여 경쟁에서 이긴 다른 트랜잭션의 커밋을 여전히 보지 못한다 —
-     * 재조회가 다시 empty를 반환해 재시도가 실패하고 예외가 그대로 전파된다(Codex 코드리뷰 P1 지적,
-     * 새로 추가한 NotificationServiceMariaDbIT가 정확히 이 순서를 재현한다). {@link
-     * NotificationSettingRepository#upsert}(네이티브 {@code INSERT ... ON DUPLICATE KEY UPDATE})는
-     * 단일 원자적 SQL 문장이라 이 스냅샷 문제 자체가 발생하지 않는다 — 조회·재시도·트랜잭션 격리가
-     * 전혀 필요 없다.
+     * <p>모든 항목을 먼저 검증한 뒤에 저장한다 — 대상 지정 오류(400), 같은 대상 중복(400), 없는 대상(404), 남의 대상(403) 중
+     * 하나라도 있으면 아무것도 저장하지 않는다. 예외는 모두 {@code BusinessException}(RuntimeException)이라 이미 저장한
+     * 항목이 있었더라도 트랜잭션 롤백으로 함께 취소된다(검증을 먼저 하는 것은 불필요한 쓰기를 피하려는 것이다).
+     * 소유권 확인은 매물·지역 각각 {@code findAllById} 한 번으로 묶는다(항목 수만큼 조회하지 않는다).
+     *
+     * <p>저장은 {@link NotificationSettingRepository#upsert}(네이티브 {@code INSERT ... ON DUPLICATE KEY UPDATE})다.
+     * 애플리케이션에서 "조회 → 있으면 UPDATE, 없으면 INSERT"로 분기하면, REQUIRES_NEW로 INSERT를 격리해도 MariaDB 기본
+     * 격리수준(REPEATABLE READ)의 스냅샷 때문에 실패 뒤 재조회가 경쟁에서 이긴 커밋을 보지 못했다(Codex 코드리뷰 P1, CLAUDE.md
+     * SVC-NTF-01 절). 단일 원자적 문장이라 같은 대상을 동시에 저장해도(더블클릭·두 탭) UNIQUE 위반이 나지 않는다.
      */
     public void updateSettings(Long userId, UpdateNotificationSettingsCommand cmd) {
-        boolean hasProperty = cmd.favoritePropertyId() != null;
-        boolean hasRegion = cmd.favoriteRegionId() != null;
-        if (hasProperty && hasRegion) {
-            throw new InvalidNotificationTargetException();
-        }
-        if (!hasProperty && !hasRegion) {
-            throw new MissingTargetException();
-        }
-
-        if (hasProperty) {
-            FavoriteProperty favoriteProperty = favoritePropertyRepository.findById(cmd.favoritePropertyId())
-                    .orElseThrow(FavoriteNotFoundException::new);
-            if (!favoriteProperty.getUser().getUserId().equals(userId)) {
-                throw new AccessDeniedException();
+        Set<Long> propertyIds = new LinkedHashSet<>();
+        Set<Long> regionIds = new LinkedHashSet<>();
+        for (UpdateNotificationSettingsCommand.Item item : cmd.settings()) {
+            boolean hasProperty = item.favoritePropertyId() != null;
+            boolean hasRegion = item.favoriteRegionId() != null;
+            if (hasProperty && hasRegion) {
+                throw new InvalidNotificationTargetException();
             }
-        } else {
-            FavoriteRegion favoriteRegion = favoriteRegionRepository.findById(cmd.favoriteRegionId())
-                    .orElseThrow(FavoriteNotFoundException::new);
-            if (!favoriteRegion.getUser().getUserId().equals(userId)) {
-                throw new AccessDeniedException();
+            if (!hasProperty && !hasRegion) {
+                throw new MissingTargetException();
+            }
+            boolean added = hasProperty ? propertyIds.add(item.favoritePropertyId()) : regionIds.add(item.favoriteRegionId());
+            if (!added) {
+                throw new DuplicateNotificationTargetException();
             }
         }
 
-        notificationSettingRepository.upsert(userId, cmd.favoritePropertyId(), cmd.favoriteRegionId(),
-                cmd.priceChangeThresholdPct(), cmd.newTradeAlertYn(), cmd.emailAlertYn(), LocalDateTime.now());
+        verifyOwnership(userId, propertyIds, favoritePropertyRepository.findAllById(propertyIds).stream()
+                .collect(Collectors.toMap(FavoriteProperty::getFavoritePropertyId, p -> p.getUser().getUserId())));
+        verifyOwnership(userId, regionIds, favoriteRegionRepository.findAllById(regionIds).stream()
+                .collect(Collectors.toMap(FavoriteRegion::getFavoriteRegionId, r -> r.getUser().getUserId())));
+
+        LocalDateTime now = LocalDateTime.now();
+        for (UpdateNotificationSettingsCommand.Item item : cmd.settings()) {
+            notificationSettingRepository.upsert(userId, item.favoritePropertyId(), item.favoriteRegionId(),
+                    item.priceChangeThresholdPct(), item.newTradeAlertYn(), item.emailAlertYn(), now);
+        }
+    }
+
+    /** 요청한 대상이 하나라도 없으면 404, 남의 것이면 403. ownerById는 찾은 대상의 id → 소유자 userId. */
+    private static void verifyOwnership(Long userId, Set<Long> requestedIds, Map<Long, Long> ownerById) {
+        for (Long id : requestedIds) {
+            Long ownerId = ownerById.get(id);
+            if (ownerId == null) {
+                throw new FavoriteNotFoundException();
+            }
+            if (!ownerId.equals(userId)) {
+                throw new AccessDeniedException();
+            }
+        }
     }
 
     @Transactional(readOnly = true)

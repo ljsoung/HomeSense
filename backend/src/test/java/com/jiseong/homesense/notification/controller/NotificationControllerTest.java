@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,8 +41,11 @@ import com.jiseong.homesense.notification.dto.NotificationResponse;
 import com.jiseong.homesense.notification.dto.NotificationSettingResponse;
 import com.jiseong.homesense.notification.dto.UpdateNotificationSettingsCommand;
 import com.jiseong.homesense.notification.entity.NotificationType;
+import com.jiseong.homesense.favorite.exception.FavoriteNotFoundException;
 import com.jiseong.homesense.notification.exception.AccessDeniedException;
+import com.jiseong.homesense.notification.exception.DuplicateNotificationTargetException;
 import com.jiseong.homesense.notification.exception.InvalidNotificationTargetException;
+import com.jiseong.homesense.notification.exception.MissingTargetException;
 import com.jiseong.homesense.notification.exception.NotificationNotFoundException;
 import com.jiseong.homesense.notification.service.NotificationService;
 
@@ -92,49 +96,118 @@ class NotificationControllerTest {
                 .andExpect(jsonPath("$.data[0].favoritePropertyId").value(100));
     }
 
+    private static String body(String... items) {
+        return "{\"settings\":[" + String.join(",", items) + "]}";
+    }
+
+    private static String item(String target, String threshold, String newTrade, String email) {
+        StringBuilder sb = new StringBuilder("{").append(target);
+        if (threshold != null) sb.append(",\"priceChangeThresholdPct\":").append(threshold);
+        if (newTrade != null) sb.append(",\"newTradeAlertYn\":").append(newTrade);
+        if (email != null) sb.append(",\"emailAlertYn\":").append(email);
+        return sb.append("}").toString();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions putSettings(String content) throws Exception {
+        return mockMvc.perform(put("/api/notifications/settings").contentType(MediaType.APPLICATION_JSON).content(content));
+    }
+
     @Test
-    void 알림설정_수정에_성공하면_200을_반환한다() throws Exception {
-        mockMvc.perform(put("/api/notifications/settings")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"favoritePropertyId\":100,\"priceChangeThresholdPct\":5.0,"
-                                + "\"newTradeAlertYn\":true,\"emailAlertYn\":false}"))
+    void 알림설정_여러_대상을_한_번에_저장하면_200을_반환하고_목록_그대로_서비스에_넘긴다() throws Exception {
+        putSettings(body(item("\"favoritePropertyId\":100", "5", "true", "false"),
+                        item("\"favoriteRegionId\":200", "0", "false", "true")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        verify(notificationService).updateSettings(eq(1L),
-                eq(new UpdateNotificationSettingsCommand(100L, null, new BigDecimal("5.0"), true, false)));
+        verify(notificationService).updateSettings(eq(1L), eq(new UpdateNotificationSettingsCommand(List.of(
+                new UpdateNotificationSettingsCommand.Item(100L, null, new BigDecimal("5"), true, false),
+                new UpdateNotificationSettingsCommand.Item(null, 200L, new BigDecimal("0"), false, true)))));
     }
 
     @Test
     void 알림설정_수정시_두_대상이_모두_지정되면_400을_반환한다() throws Exception {
         doThrow(new InvalidNotificationTargetException()).when(notificationService).updateSettings(eq(1L), any());
 
-        mockMvc.perform(put("/api/notifications/settings")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"favoritePropertyId\":100,\"favoriteRegionId\":200,"
-                                + "\"priceChangeThresholdPct\":5.0,\"newTradeAlertYn\":true,\"emailAlertYn\":false}"))
+        putSettings(body(item("\"favoritePropertyId\":100,\"favoriteRegionId\":200", "5", "true", "false")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("INVALID_NOTIFICATION_TARGET"));
     }
 
     @Test
-    void 알림설정_수정시_임계치가_범위를_벗어나면_400을_반환한다() throws Exception {
-        mockMvc.perform(put("/api/notifications/settings")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"favoritePropertyId\":100,\"priceChangeThresholdPct\":150,"
-                                + "\"newTradeAlertYn\":true,\"emailAlertYn\":false}"))
+    void 알림설정_수정시_대상이_없으면_400을_반환한다() throws Exception {
+        doThrow(new MissingTargetException()).when(notificationService).updateSettings(eq(1L), any());
+
+        putSettings(body("{\"priceChangeThresholdPct\":5,\"newTradeAlertYn\":true,\"emailAlertYn\":true}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+                .andExpect(jsonPath("$.error.code").value("MISSING_TARGET"));
     }
 
     @Test
-    void 알림설정_수정시_임계치가_소수_둘째자리를_가지면_400을_반환한다() throws Exception {
-        mockMvc.perform(put("/api/notifications/settings")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"favoritePropertyId\":100,\"priceChangeThresholdPct\":0.04,"
-                                + "\"newTradeAlertYn\":true,\"emailAlertYn\":false}"))
+    void 알림설정_수정시_같은_대상이_중복되면_400을_반환한다() throws Exception {
+        doThrow(new DuplicateNotificationTargetException()).when(notificationService).updateSettings(eq(1L), any());
+
+        putSettings(body(item("\"favoritePropertyId\":100", "5", "true", "true"),
+                        item("\"favoritePropertyId\":100", "3", "true", "true")))
                 .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("DUPLICATE_NOTIFICATION_TARGET"));
+    }
+
+    @Test
+    void 알림설정_수정시_남의_대상이면_403_없는_대상이면_404를_반환한다() throws Exception {
+        doThrow(new AccessDeniedException()).when(notificationService).updateSettings(eq(1L), any());
+        putSettings(body(item("\"favoritePropertyId\":100", "5", "true", "true")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("ACCESS_DENIED"));
+
+        doThrow(new FavoriteNotFoundException()).when(notificationService).updateSettings(eq(1L), any());
+        putSettings(body(item("\"favoritePropertyId\":999", "5", "true", "true")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("FAVORITE_NOT_FOUND"));
+    }
+
+    @Test
+    void 알림설정_수정시_목록이_비었거나_없으면_400을_반환한다() throws Exception {
+        putSettings("{\"settings\":[]}").andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+        putSettings("{}").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+        verify(notificationService, never()).updateSettings(any(), any());
+    }
+
+    @Test
+    void 알림설정_수정시_목록이_200건을_넘으면_400을_반환한다() throws Exception {
+        String[] items = new String[201];
+        for (int i = 0; i < items.length; i++) {
+            items[i] = item("\"favoritePropertyId\":" + (i + 1), "5", "true", "true");
+        }
+        putSettings(body(items)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+        verify(notificationService, never()).updateSettings(any(), any());
+    }
+
+    @Test
+    void 알림설정_수정시_임계치가_0에서_20_사이의_정수가_아니면_400을_반환한다() throws Exception {
+        for (String threshold : new String[] {"-1", "21", "5.5", "0.04", "150"}) {
+            putSettings(body(item("\"favoritePropertyId\":100", threshold, "true", "false")))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+        }
+        verify(notificationService, never()).updateSettings(any(), any());
+    }
+
+    @Test
+    void 알림설정_수정시_세_값_중_하나라도_빠지면_400을_반환한다() throws Exception {
+        putSettings(body(item("\"favoritePropertyId\":100", null, "true", "true"))).andExpect(status().isBadRequest());
+        putSettings(body(item("\"favoritePropertyId\":100", "5", null, "true"))).andExpect(status().isBadRequest());
+        putSettings(body(item("\"favoritePropertyId\":100", "5", "true", null))).andExpect(status().isBadRequest());
+        verify(notificationService, never()).updateSettings(any(), any());
+    }
+
+    @Test
+    void 알림설정_수정시_임계치_경계값_0과_20은_통과한다() throws Exception {
+        putSettings(body(item("\"favoritePropertyId\":100", "0", "true", "true"),
+                        item("\"favoriteRegionId\":200", "20", "true", "true")))
+                .andExpect(status().isOk());
     }
 
     @Test

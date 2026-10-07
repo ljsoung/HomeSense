@@ -1177,6 +1177,8 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 - 4.9절 BAT-NTF-01: 시그니처 `evaluateAfterLoad(NotificationTriggerContext)`, 처리 로직 D2~D7(아래 "BAT-NTF-01 구현 결정 사항")(2026-10-06).
 - 4.10절 BAT-MAIL-01: "발송 큐 전달" → `sent_at IS NULL` DB 대기열 인계, `email_alert_yn` 처리는 미결(2026-10-06).
 - 4.1절 BAT-SCH-01·6.3/6.4절 흐름: 조합 순회(조기 중단 포함) 직후 BAT-NTF-01 직접 호출, 백필 미호출(2026-10-06).
+- 3.8절 SVC-NTF-01 `updateSettings()`: 요청이 대상 목록(`settings`, 1~200건)이고 한 트랜잭션, 임계치 0~20 정수·세 값 필수·같은 대상 중복 400(`DUPLICATE_NOTIFICATION_TARGET`)·남의 대상 403·없는 대상 404(2026-10-07, "MY-03 백엔드 보강" 절).
+- **테이블정의서 3.5절 `price_change_threshold_pct`: 허용 범위 0~20 정수(API 검증, 컬럼은 DECIMAL(4,1) 그대로)(2026-10-07).**
 
 **완결 필요(DTL-01) — 중개사 소재지 `agent_sgg_nm` 미수집(BAT-PRS-01 매핑 확인 필요).** UI정의서 5.3절 거래상세 모달은 "거래유형 + 중개사 소재지(`estateAgentSggNm`, 시군구 단위)"를 요구하지만 `trade`에 대응 컬럼이 없고 파서(`TradeFieldMapper`)도 매핑하지 않는다. 모달에서는 그 행을 숨긴다. 표시하려면 원천 필드명 확인 → 컬럼 추가(DDL 3곳) → 파서 매핑 → `TradeDetailResponse` 순으로 한다.
 
@@ -1197,6 +1199,38 @@ SCR-MY-02(관심 매물·지역 관리) 프론트 착수 전 선행 작업이다
 **프로그램설계서 반영 필요:** 3.7절 SVC-FAV-01 `getFavoriteProperties()`(최근 거래는 매매만, 응답 필드 `registeredAt`·`recentArea`·`recentFloor`), `getFavoriteRegions()`(응답 필드 `registeredAt`·`sidoName`·`sigunguName`·`eupmyeondongName`), `addFavoriteRegion()` 예외표(400 `InvalidFavoriteRegionLevelException`).
 
 검증: `./gradlew test` 646건, `./gradlew integrationTest` 90건(1건은 기존 `RefreshTokenReuseAccessCutoffMariaDbIT`의 같은 초 확인 `assumeTrue` 건너뜀) 전부 통과.
+
+### MY-03 백엔드 보강 — 알림 설정 일괄 저장 (2026-10-07, `feature/backend/notification-settings-support`)
+
+SCR-MY-03(알림 설정) 프론트 착수 전 선행 작업이다. MY-03은 대상을 여러 개 골라 같은 설정을 한 번에 저장하는데(다중 선택 일괄 적용), `PUT /api/notifications/settings`는 대상 하나만 받았다. 확인 문서: `docs/specs/`가 없어 작업 지시에 옮긴 UI정의서 v2.1 5.5절 MY-03, 프로그램설계서 3.8절, 테이블정의서 3.5절 원문.
+
+**Phase 0 확인 결과(2026-10-07 코드 기준):**
+
+| # | 항목 | 결과 |
+| --- | --- | --- |
+| 1 | `GET /settings` 응답 | `notificationSettingId`·`favoritePropertyId`·`favoriteRegionId`·`priceChangeThresholdPct`(BigDecimal)·`newTradeAlertYn`·`emailAlertYn`. 대상이 아닌 쪽 id는 `non_null`로 키가 빠진다 — 변경 없음 |
+| 2 | `PUT /settings` 요청 | 대상 1건만 받았다 → **목록으로 바꿨다**(아래) |
+| 3 | 트랜잭션 | 서비스 클래스 `@Transactional` — 목록 전체가 한 트랜잭션 |
+| 4 | 검증 | 임계치는 0~100·소수 1자리였고, 두 Boolean은 원시 `boolean`이라 키가 빠지면 false로 저장됐다 → 고쳤다 |
+| 5 | 소유권 | 남의 대상 403 `ACCESS_DENIED`, 없는 대상 404 `FAVORITE_NOT_FOUND` — 있었다 |
+| 6 | upsert | 이미 원자적 `INSERT ... ON DUPLICATE KEY UPDATE`(SVC-NTF-01 절) — 변경 없음 |
+| 7 | 배치 임계치 판정 | `PriceChangeCalculator.exceedsThreshold`: 반올림 변동률 ≠ 0.0 그리고 `|변동률| >= threshold` — 명세와 같다 |
+| 8 | NEW_TRADE 대상 | `WatchConditionQuery.findNewTrades`: 매매·전월세 모두, 해제 제외(`cancel_yn = FALSE`) |
+| 9 | 회원 이메일 | `GET /api/users/me`의 `email`(MY-01 `loadProfile` 재사용) |
+| 10 | 대상 표시 | 관심 매물 `favoritePropertyId`·`complexName`, 관심 지역 `favoriteRegionId`·`sigunguName`·`eupmyeondongName`(MY-02 백엔드 보강) |
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| 요청 형태 | `{"settings": [{favoritePropertyId, favoriteRegionId, priceChangeThresholdPct, newTradeAlertYn, emailAlertYn}, ...]}`. 목록 `@NotEmpty @Size(max = 200)`, 항목 `@NotNull @Valid`. 대상 하나짜리 옛 형태는 받지 않는다(호출부가 프론트에 없었다 — 2026-10-07 grep) | 프론트가 대상마다 PUT을 반복하면 중간 실패 시 일부만 저장되고 재시도 범위도 모호해진다 | — |
+| 처리 순서·원자성 | 모든 항목을 먼저 검증한다: 대상 정확히 하나(둘 다 → 400 `INVALID_NOTIFICATION_TARGET`, 없음 → 400 `MISSING_TARGET`), 같은 대상 중복 → 400 `DUPLICATE_NOTIFICATION_TARGET`(신설), 없는 대상 → 404, 남의 대상 → 403. 하나라도 걸리면 아무것도 저장하지 않는다. 검증을 통과하면 항목마다 기존 원자적 upsert. 소유권은 매물·지역 각각 `findAllById` 한 번으로 확인한다(항목 수만큼 조회하지 않음). 매물 id와 지역 id가 같은 숫자여도 서로 다른 대상이다 | 일부만 저장되는 상태를 막는다. 검증 뒤 저장 중 DB 오류가 나도 예외(`RuntimeException`)가 트랜잭션을 롤백한다 | — |
+| 임계치 범위 | `@NotNull @DecimalMin("0") @DecimalMax("20") @Digits(integer = 2, fraction = 0)` — 0 이상 20 이하 정수. 컬럼(DECIMAL(4,1))은 그대로 | MY-03 슬라이더가 0~20, 1단위다(MY-03 D10). 0은 "조금이라도 변동되면 알림"으로 동작하는 정상 값이다(배치가 0.0 변동은 보내지 않음) | 소수 임계치(예: 2.5%)가 필요해지면 `fraction`을 1로 되돌린다 |
+| 두 Boolean | 래퍼 `Boolean` + `@NotNull` | 원시 `boolean`이면 키가 빠진 요청이 조용히 false로 저장됐다("Boolean 필드는 @NotNull" 원칙) | — |
+
+**알려진 한계:** 범위 밖 기존 값(예: 이 변경 전 API로 저장한 30%·2.5%)은 DB에 남아 있을 수 있다 — 로컬 DB는 2026-10-07 기준 `notification_setting`이 0행이라 해당 없음. 화면은 반올림하지 않고 그대로 표시한다(MY-03 D10).
+
+검증: `NotificationControllerTest`(16 — 목록 그대로 전달, 빈 목록·키 없음·201건 400, 임계치 -1·21·5.5·0.04·150 400, 경계 0·20 통과, 세 값 중 하나라도 없으면 400, 대상 둘 다·없음·중복 400, 남의 대상 403·없는 대상 404), `NotificationServiceTest`(15 — 중복, 매물·지역 id가 같은 숫자, 하나라도 남의 것이면 저장 없음, 매물·지역 혼합 upsert), `NotificationServiceMariaDbIT`(5 — 같은 대상 동시 저장 `CyclicBarrier` 2건, 신규·갱신 혼합, 남의 대상이 섞이면 아무것도 저장되지 않음, 관심 매물 삭제 시 설정 CASCADE). `./gradlew test` 679건 통과.
+
+**프로그램설계서·테이블정의서 반영 필요:** 3.8절 `UpdateNotificationSettingsRequest`(목록·한 트랜잭션), 검증 규칙(0~20 정수, 세 값 필수, 목록 1~200, 중복 400), 소유권 예외(403/404), upsert 방식(원자적). 테이블정의서 3.5절 `price_change_threshold_pct` 허용 범위(0~20 정수, API 검증).
 
 ### BAT-NTF-01 관심대상 조건평가·알림 생성 (2026-10-06, `feature/backend/notification-trigger`)
 
