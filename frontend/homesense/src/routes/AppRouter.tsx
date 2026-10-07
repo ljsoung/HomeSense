@@ -9,6 +9,7 @@ import { HomePage } from '../pages/home/HomePage';
 import { PrivacyPolicyPage } from '../pages/legal/PrivacyPolicyPage';
 import { MyPage, MyPageSkeleton } from '../pages/my/MyPage';
 import { MyPreparingPage } from '../pages/my/MyPreparingPage';
+import { NotificationSettingsPage } from '../pages/notificationSettings/NotificationSettingsPage';
 import { SearchResultsPage } from '../pages/search/SearchResultsPage';
 import { MY_ROUTES } from './paths';
 import { RequireAuth } from './RequireAuth';
@@ -43,13 +44,13 @@ export function AppRouter() {
             </RequireAuth>
           }
         />
-        {/* MY-03~05는 아직 준비 중 — MY-01·MY-02 링크가 끊기지 않게 보호 라우트 아래 자리 표시를 둔다. MY-03은
-            MY-02 알림조건 배지가 `?favoritePropertyId={id}`로 들어온다(구현 시 그 대상을 사전 선택해야 한다). */}
+        {/* MY-03 알림 설정 — MY-02 알림조건 배지가 `?favoritePropertyId={id}`로 들어와 그 대상을 미리 선택한다(`?favoriteRegionId=`도
+            받는다). MY-04·05는 아직 준비 중 — MY-01 링크가 끊기지 않게 보호 라우트 아래 자리 표시를 둔다. */}
         <Route
           path={MY_ROUTES.notificationSettings}
           element={
             <RequireAuth>
-              <MyPreparingPage programId="MY-03" title="알림 설정" />
+              <NotificationSettingsPage />
             </RequireAuth>
           }
         />
