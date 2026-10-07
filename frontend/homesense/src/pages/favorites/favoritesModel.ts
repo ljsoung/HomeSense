@@ -65,14 +65,15 @@ function formatThreshold(pct: number): string {
 /**
  * 관심 매물 알림조건 배지 문구(MY-02 결정 D4) — Figma의 더미 문구("지역변동 9%")를 쓰지 않고 실제 설정 값에서 만든다.
  * - 설정 없음 → "알림 설정"(설정 유도)
- * - 이메일 수신 꺼짐 → "알림 꺼짐"(MVP의 알림 수단은 이메일뿐이라 실질적으로 꺼진 상태)
+ * - 이메일 수신 꺼짐 → "이메일 꺼짐" — 2026-10-07 "알림 꺼짐"에서 바꿨다(MY-03 D8). BAT-NTF-01은 email_alert_yn과 무관하게 알림을
+ *   만들어 알림 이력(MY-04)에는 남고 이메일만 가지 않으므로 "알림 꺼짐"은 사실과 달랐다. MY-03 대상 행 보조 텍스트도 이 함수를 쓴다.
  * - 임계치 + 신규거래 → "±{n}% · 신규거래", 임계치만 → "±{n}% 알림"
  * 알림 설정 목록을 아직 받지 못했거나 조회가 실패하면 배지를 그리지 않는다(호출부) — 그때 "알림 설정"을 보이면 설정이
- * 있는 사용자에게 틀린 정보가 되고, 관심 매물 응답의 hasNotificationSetting만으로는 "알림 꺼짐"을 가릴 수 없다.
+ * 있는 사용자에게 틀린 정보가 되고, 관심 매물 응답의 hasNotificationSetting만으로는 "이메일 꺼짐"을 가릴 수 없다.
  */
 export function describeNotificationBadge(setting: NotificationSettingResponse | undefined): NotificationBadge {
   if (!setting) return { label: '알림 설정', tone: 'unset' };
-  if (!setting.emailAlertYn) return { label: '알림 꺼짐', tone: 'off' };
+  if (!setting.emailAlertYn) return { label: '이메일 꺼짐', tone: 'off' };
   const threshold = `±${formatThreshold(setting.priceChangeThresholdPct)}%`;
   return setting.newTradeAlertYn
     ? { label: `${threshold} · 신규거래`, tone: 'on' }

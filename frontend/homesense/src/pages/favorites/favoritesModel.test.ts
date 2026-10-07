@@ -62,9 +62,9 @@ describe('알림조건 배지 문구(D4)', () => {
     expect(describeNotificationBadge(undefined)).toEqual({ label: '알림 설정', tone: 'unset' });
   });
 
-  it('이메일 수신 꺼짐 → "알림 꺼짐"', () => {
+  it('이메일 수신 꺼짐 → "이메일 꺼짐"(알림 이력에는 남는다)', () => {
     expect(describeNotificationBadge(setting({ emailAlertYn: false, newTradeAlertYn: true }))).toEqual({
-      label: '알림 꺼짐',
+      label: '이메일 꺼짐',
       tone: 'off',
     });
   });
