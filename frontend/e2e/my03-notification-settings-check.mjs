@@ -222,6 +222,11 @@ async function scenarioZero(label, viewport) {
   ok(`${label} 3: 0% 요약 문구`, (await page.getByTestId('threshold-summary').innerText()).includes('가격이 조금이라도 오르거나 내리면 알림'));
   ok(`${label} 3: 슬라이더 aria-valuetext 0%`, (await slider(page).getAttribute('aria-valuetext')) === '0%');
   ok(`${label} 3: 0%도 저장 가능`, await saveButton(page).isEnabled());
+  await saveButton(page).click();
+  ok(`${label} 3: 0% 저장 후 행 문구 "모든 변동 · 신규거래"("±0%" 아님)`,
+    await waitFor(async () => (await row(page, 'property:1').innerText()).includes('모든 변동 · 신규거래')),
+    await row(page, 'property:1').innerText());
+  ok(`${label} 3: 0% 저장 후에도 배너 유지(선택 유지·0%)`, await page.getByText('임계치 0% 설정 확인').isVisible());
   await rowBox(page, 'property:1').evaluate((el) => el.click());
   ok(`${label} 3: 선택을 모두 풀면 배너 숨김`, (await page.getByText('임계치 0% 설정 확인').count()) === 0);
   await context.close();

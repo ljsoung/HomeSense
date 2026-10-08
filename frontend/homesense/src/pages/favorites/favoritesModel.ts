@@ -68,13 +68,16 @@ function formatThreshold(pct: number): string {
  * - 이메일 수신 꺼짐 → "이메일 꺼짐" — 2026-10-07 "알림 꺼짐"에서 바꿨다(MY-03 D8). BAT-NTF-01은 email_alert_yn과 무관하게 알림을
  *   만들어 알림 이력(MY-04)에는 남고 이메일만 가지 않으므로 "알림 꺼짐"은 사실과 달랐다. MY-03 대상 행 보조 텍스트도 이 함수를 쓴다.
  * - 임계치 + 신규거래 → "±{n}% · 신규거래", 임계치만 → "±{n}% 알림"
+ * - 임계치 0 → "모든 변동 · 신규거래" / "모든 변동 알림" — 2026-10-08 "±0%"에서 바꿨다. "±0%"는 "변동 없음"·"꺼짐"으로 읽힐 수
+ *   있는데 0은 "조금이라도 오르거나 내리면 알림"이다(MY-03 D7).
  * 알림 설정 목록을 아직 받지 못했거나 조회가 실패하면 배지를 그리지 않는다(호출부) — 그때 "알림 설정"을 보이면 설정이
  * 있는 사용자에게 틀린 정보가 되고, 관심 매물 응답의 hasNotificationSetting만으로는 "이메일 꺼짐"을 가릴 수 없다.
  */
 export function describeNotificationBadge(setting: NotificationSettingResponse | undefined): NotificationBadge {
   if (!setting) return { label: '알림 설정', tone: 'unset' };
   if (!setting.emailAlertYn) return { label: '이메일 꺼짐', tone: 'off' };
-  const threshold = `±${formatThreshold(setting.priceChangeThresholdPct)}%`;
+  const threshold =
+    setting.priceChangeThresholdPct === 0 ? '모든 변동' : `±${formatThreshold(setting.priceChangeThresholdPct)}%`;
   return setting.newTradeAlertYn
     ? { label: `${threshold} · 신규거래`, tone: 'on' }
     : { label: `${threshold} 알림`, tone: 'on' };

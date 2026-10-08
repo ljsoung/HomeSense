@@ -78,6 +78,14 @@ describe('알림조건 배지 문구(D4)', () => {
     expect(describeNotificationBadge(setting({ newTradeAlertYn: true }))).toEqual({ label: '±5% · 신규거래', tone: 'on' });
   });
 
+  it('임계치 0 → "±0%" 대신 "모든 변동"(변동 없음·꺼짐으로 읽히지 않게)', () => {
+    expect(describeNotificationBadge(setting({ priceChangeThresholdPct: 0 }))).toEqual({ label: '모든 변동 알림', tone: 'on' });
+    expect(describeNotificationBadge(setting({ priceChangeThresholdPct: 0, newTradeAlertYn: true }))).toEqual({
+      label: '모든 변동 · 신규거래',
+      tone: 'on',
+    });
+  });
+
   it('알림 설정 목록이 없으면(로딩 중·조회 실패) 배지를 숨긴다 — "알림 설정"으로 보이지 않는다', () => {
     expect(resolveNotificationBadge(null, 10)).toBeNull();
   });

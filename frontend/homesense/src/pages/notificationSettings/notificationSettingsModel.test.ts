@@ -179,6 +179,8 @@ describe('대상 표시·저장 요청·진입 선택', () => {
     expect(describeTargetSetting(undefined)).toBe('미설정');
     expect(describeTargetSetting(setting(1, { favoritePropertyId: 1 }, 5, true, true))).toBe('±5% · 신규거래');
     expect(describeTargetSetting(setting(1, { favoritePropertyId: 1 }, 5, true, false))).toBe('이메일 꺼짐');
+    expect(describeTargetSetting(setting(1, { favoritePropertyId: 1 }, 0, true, true))).toBe('모든 변동 · 신규거래');
+    expect(describeTargetSetting(setting(1, { favoritePropertyId: 1 }, 0, false, true))).toBe('모든 변동 알림');
   });
 
   it('저장 요청은 선택한 대상 전부에 같은 값, 세 값은 항상 명시', () => {
