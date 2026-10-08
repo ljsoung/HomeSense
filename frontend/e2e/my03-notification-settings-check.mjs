@@ -12,6 +12,8 @@
 // 10. 키보드만으로 대상 선택 → 임계치 → 저장(데스크톱)
 // 11. 비로그인 → 로그인 → 쿼리 그대로 복귀
 // 12. 저장 중(PUT 응답 전) 입력 잠금 → 응답 뒤 다시 열림
+// 13. PUT 성공 + 재조회 GET 실패 → 저장한 값 유지, 완료 토스트, 오류 배너 없음
+// 14. 키보드 저장 → 저장 중 aria-disabled·aria-busy(입력 무시), 응답 뒤 포커스 유지
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -57,7 +59,7 @@ const initialSettings = () => [
 
 const browser = await chromium.launch();
 
-/** putMode: 'ok'|'fail'|'failOnce'. settingsMode: 'ok'|'fail'. meMode: 'ok'|'fail'(세션 복원 뒤 화면의 내 정보 조회만 실패). */
+/** putMode: 'ok'|'fail'|'failOnce'|'hold'. settingsMode: 'ok'|'fail'|'refetchFail'(PUT 성공 뒤의 재조회만 500). meMode: 'ok'|'fail'(세션 복원 뒤 화면의 내 정보 조회만 실패). */
 async function open(viewport, { query = '', empty = false, putMode = 'ok', settingsMode = 'ok', meMode = 'ok', loggedIn = true, path = '/notifications/settings' } = {}) {
   const context = await browser.newContext({ viewport });
   if (loggedIn) {
@@ -91,7 +93,9 @@ async function open(viewport, { query = '', empty = false, putMode = 'ok', setti
     if (p === '/api/favorites/properties') return json(200, okBody(empty ? [] : PROPERTIES));
     if (p === '/api/favorites/regions') return json(200, okBody(empty ? [] : REGIONS));
     if (p === '/api/notifications/settings' && method === 'GET') {
-      if (settingsMode === 'fail') return json(500, errBody('INTERNAL_SERVER_ERROR', '알림 설정을 불러오지 못했습니다'));
+      if (settingsMode === 'fail' || (settingsMode === 'refetchFail' && db.putDone)) {
+        return json(500, errBody('INTERNAL_SERVER_ERROR', '알림 설정을 불러오지 못했습니다'));
+      }
       return json(200, okBody(empty ? [] : db.settings));
     }
     if (p === '/api/notifications/settings' && method === 'PUT') {
@@ -100,6 +104,7 @@ async function open(viewport, { query = '', empty = false, putMode = 'ok', setti
         db.putFailures--;
         return json(500, errBody('INTERNAL_SERVER_ERROR', '알림 설정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요'));
       }
+      db.putDone = true;
       const { settings } = JSON.parse(request.postData() ?? '{}');
       for (const item of settings) {
         const existing = db.settings.find((s) =>
@@ -323,6 +328,54 @@ async function scenarioLockedWhileSaving(label, viewport, layout) {
   await context.close();
 }
 
+// PUT은 성공했는데 재조회 GET이 실패해도, 화면은 저장한 값을 보이고 오류 없이 완료로 처리한다.
+async function scenarioRefetchFailure(label, viewport) {
+  const { context, page, calls } = await open(viewport, { query: '?favoritePropertyId=1', settingsMode: 'refetchFail' });
+  await ready(page);
+  await setSlider(page, 7);
+  await page.getByRole('switch', { name: '신규거래 알림 수신' }).click();
+  await saveButton(page).click();
+  ok(`${label} 13: PUT 성공 → 완료 토스트`, await page.getByText('알림 설정을 저장했어요').waitFor({ timeout: 5000 }).then(() => true, () => false));
+  ok(`${label} 13: 재조회 GET이 실제로 실패함`, await waitFor(() => calls.filter((c) => c.method === 'GET' && c.path === '/api/notifications/settings').length >= 2));
+  await page.waitForTimeout(300);
+  ok(`${label} 13: 임계치는 저장한 7%(저장 전 5%로 돌아가지 않음)`, (await slider(page).getAttribute('aria-valuetext')) === '7%');
+  ok(`${label} 13: 신규거래는 저장한 꺼짐`, (await page.getByRole('switch', { name: '신규거래 알림 수신' }).getAttribute('aria-checked')) === 'false');
+  ok(`${label} 13: 행 문구도 저장한 값("±7% 알림")`, (await row(page, 'property:1').innerText()).includes('±7% 알림'), await row(page, 'property:1').innerText());
+  ok(`${label} 13: 변경 없음 상태(저장 비활성)`, (await saveButton(page).getAttribute('aria-disabled')) === 'true' || (await saveButton(page).isDisabled()));
+  ok(`${label} 13: 오류 배너 없음`, (await page.getByRole('alert').count()) === 0);
+  await context.close();
+}
+
+// 키보드로 저장 → 저장 중에는 aria-disabled·aria-busy로 막히고(클릭 무시), 응답 뒤에도 포커스가 저장 버튼에 남는다.
+async function scenarioKeyboardSaveFocus(label, viewport) {
+  const { context, page, calls, releasePut } = await open(viewport, { query: '?favoritePropertyId=1', putMode: 'hold' });
+  await ready(page);
+  await setSlider(page, 9);
+  await saveButton(page).focus();
+  await page.keyboard.press('Enter');
+  ok(`${label} 14: 저장 중 aria-disabled + aria-busy`, await waitFor(async () => (await saveButton(page).getAttribute('aria-disabled')) === 'true'
+    && (await saveButton(page).getAttribute('aria-busy')) === 'true'));
+  ok(`${label} 14: 저장 중 disabled 속성은 없음(포커스 유지)`, (await saveButton(page).getAttribute('disabled')) === null);
+  ok(`${label} 14: 저장 중 포커스는 저장 버튼`, await saveButton(page).evaluate((el) => el === document.activeElement));
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(200);
+  ok(`${label} 14: 저장 중 Enter·Space는 무시(PUT 1회)`, puts(calls).length === 1, String(puts(calls).length));
+  releasePut();
+  ok(`${label} 14: 응답 뒤 토스트`, await page.getByText('알림 설정을 저장했어요').waitFor({ timeout: 5000 }).then(() => true, () => false));
+  await page.waitForTimeout(200);
+  ok(`${label} 14: 응답 뒤에도 포커스는 저장 버튼`, await saveButton(page).evaluate((el) => el === document.activeElement),
+    await page.evaluate(() => document.activeElement?.tagName + ' ' + (document.activeElement?.textContent ?? '')));
+  ok(`${label} 14: 응답 뒤(변경 없음) 버튼은 aria-disabled로 막힘`, (await saveButton(page).getAttribute('aria-disabled')) === 'true');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  ok(`${label} 14: 변경 없음 상태 Enter도 무시`, puts(calls).length === 1);
+  // 포커스가 떠나면 기존 방식(disabled)으로 돌아간다.
+  await slider(page).focus();
+  ok(`${label} 14: 포커스가 떠나면 disabled`, (await saveButton(page).getAttribute('disabled')) !== null);
+  await context.close();
+}
+
 async function scenarioEmpty(label, viewport) {
   const { context, page } = await open(viewport, { empty: true });
   ok(`${label} 6: 빈 상태 제목`, await page.getByText('알림을 받을 관심 매물·지역이 없어요').waitFor({ timeout: 10000 }).then(() => true, () => false));
@@ -442,6 +495,8 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioMixed(label, viewport);
   await scenarioSaveFailure(label, viewport);
   await scenarioLockedWhileSaving(label, viewport, layout);
+  await scenarioRefetchFailure(label, viewport);
+  await scenarioKeyboardSaveFocus(label, viewport);
   await scenarioEmpty(label, viewport);
   if (layout !== 'desktop') await scenarioNumberInput(label, viewport);
   await scenarioPageErrors(label, viewport);

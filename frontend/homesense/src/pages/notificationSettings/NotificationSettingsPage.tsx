@@ -221,6 +221,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
   const [thresholdDraft, setThresholdDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 저장 버튼 포커스 여부 — 포커스가 있는 동안 비활성이 되면(저장 중·저장 직후 변경 없음) disabled 대신 aria-disabled로 막아
+  // 포커스가 body로 빠지지 않게 한다.
+  const [saveFocused, setSaveFocused] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLLabelElement>());
   const ids = {
     hint: useId(),
@@ -241,6 +244,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
   const changed = changedTargets(selectedKeys, settingsByKey, values);
   const draftValid = thresholdDraft === null || parseThresholdDraft(thresholdDraft) !== null;
   const saveEnabled = canSave(selectedKeys.length, changed.length, draftValid, saving);
+  // 저장 버튼 막기: 저장 중이거나 포커스가 있으면 aria-disabled(포커스 유지), 그 밖의 비활성(대상 미선택·변경 없음)은 disabled.
+  const saveBlocked = !saveEnabled;
+  const saveSoftDisabled = saveBlocked && (saving || saveFocused);
   const hint = saveHint(selectedKeys.length, changed.length);
   const noSelection = selectedKeys.length === 0;
   const zero = values.threshold === 0;
@@ -532,11 +538,16 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
           </div>
           <button
             type="button"
-            onClick={() => void save()}
-            disabled={!saveEnabled}
+            onClick={() => {
+              if (!saveBlocked) void save();
+            }}
+            onFocus={() => setSaveFocused(true)}
+            onBlur={() => setSaveFocused(false)}
+            disabled={saveBlocked && !saveSoftDisabled}
+            aria-disabled={saveSoftDisabled || undefined}
             aria-busy={saving || undefined}
             aria-describedby={[ids.hint, hadDifferences && selectedKeys.length > 1 ? ids.applyNote : null].filter(Boolean).join(' ')}
-            className={`rounded-[14px] bg-brand font-bold text-white shadow-[0_4px_14px_rgba(15,92,84,0.3)] transition-colors hover:bg-brand/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:bg-[#e5e7eb] disabled:text-[#9ca3af] disabled:shadow-none ${
+            className={`rounded-[14px] bg-brand font-bold text-white shadow-[0_4px_14px_rgba(15,92,84,0.3)] transition-colors ${saveBlocked ? '' : 'hover:bg-brand/90'} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:bg-[#e5e7eb] disabled:text-[#9ca3af] disabled:shadow-none aria-disabled:cursor-not-allowed aria-disabled:bg-[#e5e7eb] aria-disabled:text-[#9ca3af] aria-disabled:shadow-none ${
               layout === 'desktop' ? 'shrink-0 px-6 py-2.5 text-[14px]' : 'h-[50px] w-full text-[15px]'
             }`}
           >
