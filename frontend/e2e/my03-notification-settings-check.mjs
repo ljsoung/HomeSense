@@ -143,6 +143,9 @@ const noHorizontalScroll = (page) => page.evaluate(() => document.documentElemen
 async function scenarioRender(label, viewport, layout) {
   const { context, page, errors } = await open(viewport);
   ok(`${label} 1: 화면 표시`, await ready(page));
+  for (const text of ['이 비율 이상 변동 시 알림을 발송합니다. 기본값 5%', '대상에 신규 실거래가 확인되면 알림을 발송합니다', '알림을 받을 수단을 선택합니다']) {
+    ok(`${label} 1: 카드 설명 "${text}"`, await page.getByText(text, { exact: true }).isVisible());
+  }
   ok(`${label} 1: 제목 h1 "알림 설정"`, await page.getByRole('heading', { level: 1, name: '알림 설정' }).isVisible());
   const keys = await page.locator('label[data-target-key]').evaluateAll((els) => els.map((e) => e.dataset.targetKey));
   ok(`${label} 1: 대상 순서(매물 등록순 → 지역 등록순)`, JSON.stringify(keys) === JSON.stringify(
@@ -156,6 +159,9 @@ async function scenarioRender(label, viewport, layout) {
   ok(`${label} 1: 미선택 → 임계치 입력 비활성(섹션은 보임)`, (await slider(page).isDisabled()) && (await slider(page).isVisible()));
   ok(`${label} 1: 미선택 → 스위치 비활성`, await page.getByRole('switch', { name: '신규거래 알림 수신' }).isDisabled());
   const numberInput = page.getByRole('textbox', { name: '변동 임계치(%)' });
+  if (layout !== 'desktop') {
+    ok(`${label} 1: 상단 앱 바 높이 52px`, await page.getByRole('heading', { level: 1 }).evaluate((h) => h.parentElement.getBoundingClientRect().height) === 52);
+  }
   if (layout === 'desktop') ok(`${label} 1: 데스크톱은 값 텍스트(숫자 입력 없음)`, (await numberInput.count()) === 0);
   else {
     const box = await numberInput.boundingBox();

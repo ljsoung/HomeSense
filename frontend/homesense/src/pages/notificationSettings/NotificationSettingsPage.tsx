@@ -384,7 +384,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         </fieldset>
       </section>
 
-      <SettingsSection title="가격 변동 임계치" disabled={noSelection}>
+      <SettingsSection title="가격 변동 임계치" description="이 비율 이상 변동 시 알림을 발송합니다. 기본값 5%" disabled={noSelection}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[13px] leading-[19.5px] font-semibold text-[#364153]">
@@ -428,7 +428,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         <ThresholdSummary threshold={values.threshold} warning={zero} />
       </SettingsSection>
 
-      <SettingsSection title="신규거래 알림" disabled={noSelection}>
+      <SettingsSection title="신규거래 알림" description="대상에 신규 실거래가 확인되면 알림을 발송합니다" disabled={noSelection}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[14px] leading-[21px] font-semibold text-[#1e2939]">
@@ -461,7 +461,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         </div>
       </SettingsSection>
 
-      <SettingsSection title="수신 방법" disabled={noSelection}>
+      <SettingsSection title="수신 방법" description="알림을 받을 수단을 선택합니다" disabled={noSelection}>
         <div className="flex flex-col gap-2">
           <label className={`${ROW_BASE_CLASS} cursor-pointer ${values.email ? ROW_SELECTED_CLASS : ROW_UNSELECTED_CLASS}`}>
             <input
@@ -569,11 +569,24 @@ function mergeSaved(
   return next;
 }
 
-function SettingsSection({ title, disabled, children }: { title: string; disabled: boolean; children: ReactNode }) {
+function SettingsSection({
+  title,
+  description,
+  disabled,
+  children,
+}: {
+  title: string;
+  description: string;
+  disabled: boolean;
+  children: ReactNode;
+}) {
   return (
     // 헤더 패딩 20/24/0/24, 본문 20/24/20/24(Figma 1.2)
     <section className={CARD_CLASS}>
-      <h2 className={`px-6 pt-5 ${SECTION_TITLE_CLASS}`}>{title}</h2>
+      <div className="px-6 pt-5">
+        <h2 className={SECTION_TITLE_CLASS}>{title}</h2>
+        <p className={`mt-0.5 ${HELP_TEXT_CLASS} leading-[19.5px]`}>{description}</p>
+      </div>
       {/* 대상을 고르지 않으면 입력을 막는다 — 무엇을 설정하는 화면인지는 보이게 섹션은 그대로 둔다(D5). */}
       <fieldset disabled={disabled} className={`min-w-0 px-6 py-5 ${disabled ? 'opacity-50' : ''}`}>
         {children}
