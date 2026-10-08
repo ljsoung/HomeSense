@@ -11,6 +11,7 @@
 // 9. MY-02 배지 → MY-03 미리 선택, MY-01 메뉴 링크
 // 10. 키보드만으로 대상 선택 → 임계치 → 저장(데스크톱)
 // 11. 비로그인 → 로그인 → 쿼리 그대로 복귀
+// 12. 저장 중(PUT 응답 전) 입력 잠금 → 응답 뒤 다시 열림
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -69,6 +70,9 @@ async function open(viewport, { query = '', empty = false, putMode = 'ok', setti
     });
   }
   const db = { settings: initialSettings(), nextId: 100, putFailures: putMode === 'failOnce' ? 1 : putMode === 'fail' ? Infinity : 0 };
+  // putMode 'hold': PUT 응답을 releasePut()까지 붙잡는다(저장 중 상태를 만든다).
+  let releasePut = () => {};
+  const putHeld = new Promise((resolve) => { releasePut = resolve; });
   const calls = [];
   await context.route('**/api/**', async (route) => {
     const request = route.request();
@@ -91,6 +95,7 @@ async function open(viewport, { query = '', empty = false, putMode = 'ok', setti
       return json(200, okBody(empty ? [] : db.settings));
     }
     if (p === '/api/notifications/settings' && method === 'PUT') {
+      if (putMode === 'hold') await putHeld;
       if (db.putFailures > 0) {
         db.putFailures--;
         return json(500, errBody('INTERNAL_SERVER_ERROR', '알림 설정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요'));
@@ -112,7 +117,7 @@ async function open(viewport, { query = '', empty = false, putMode = 'ok', setti
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${BASE}${path}${query}`);
-  return { context, page, calls, db, errors };
+  return { context, page, calls, db, errors, releasePut };
 }
 
 const ready = (page) => page.getByRole('heading', { level: 2, name: '대상 선택' }).waitFor({ timeout: 10000 }).then(() => true, () => false);
@@ -294,6 +299,30 @@ async function scenarioSaveFailure(label, viewport) {
   await context.close();
 }
 
+// 저장 중(PUT 응답 전)에는 입력이 잠겨 그사이 바꾼 값이 응답 시점에 조용히 사라지지 않는다(코드리뷰 P2).
+async function scenarioLockedWhileSaving(label, viewport, layout) {
+  const { context, page, calls, releasePut } = await open(viewport, { query: '?favoritePropertyId=1', putMode: 'hold' });
+  await ready(page);
+  await setSlider(page, 7);
+  await saveButton(page).click();
+  ok(`${label} 12: 저장 중 PUT 1회 나감`, await waitFor(() => puts(calls).length === 1));
+  ok(`${label} 12: 저장 중 대상 체크박스 잠김`, await rowBox(page, 'property:2').isDisabled());
+  ok(`${label} 12: 저장 중 슬라이더 잠김`, await slider(page).isDisabled());
+  ok(`${label} 12: 저장 중 스위치 잠김`, await page.getByRole('switch', { name: '신규거래 알림 수신' }).isDisabled());
+  ok(`${label} 12: 저장 중 이메일 체크박스 잠김`, await page.getByRole('checkbox', { name: /이메일 수신/ }).isDisabled());
+  if (layout !== 'desktop') ok(`${label} 12: 저장 중 숫자 입력 잠김`, await page.getByRole('textbox', { name: '변동 임계치(%)' }).isDisabled());
+  ok(`${label} 12: 저장 중 폼 aria-busy`, (await page.locator('[aria-busy="true"]').count()) > 0);
+  // 잠긴 행을 눌러도 선택이 바뀌지 않는다.
+  await row(page, 'property:2').click({ force: true });
+  ok(`${label} 12: 저장 중 행 클릭은 선택을 바꾸지 않음`, !(await rowBox(page, 'property:2').isChecked()));
+  releasePut();
+  ok(`${label} 12: 응답 뒤 토스트`, await page.getByText('알림 설정을 저장했어요').waitFor({ timeout: 5000 }).then(() => true, () => false));
+  ok(`${label} 12: 응답 뒤 입력 다시 열림`, await waitFor(async () => (await rowBox(page, 'property:2').isEnabled()) && (await slider(page).isEnabled())));
+  ok(`${label} 12: 저장한 값(7%) 유지`, (await slider(page).getAttribute('aria-valuetext')) === '7%');
+  ok(`${label} 12: PUT 본문은 저장 버튼을 누른 순간의 값`, JSON.parse(puts(calls)[0].body).settings[0].priceChangeThresholdPct === 7);
+  await context.close();
+}
+
 async function scenarioEmpty(label, viewport) {
   const { context, page } = await open(viewport, { empty: true });
   ok(`${label} 6: 빈 상태 제목`, await page.getByText('알림을 받을 관심 매물·지역이 없어요').waitFor({ timeout: 10000 }).then(() => true, () => false));
@@ -412,6 +441,7 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioZero(label, viewport);
   await scenarioMixed(label, viewport);
   await scenarioSaveFailure(label, viewport);
+  await scenarioLockedWhileSaving(label, viewport, layout);
   await scenarioEmpty(label, viewport);
   if (layout !== 'desktop') await scenarioNumberInput(label, viewport);
   await scenarioPageErrors(label, viewport);

@@ -54,7 +54,7 @@ const SECTION_TITLE_CLASS = 'text-[15px] leading-[22.5px] font-bold text-[#10182
 /** 카드 설명·대상 행 보조 텍스트·대상마다 다름·이메일 끔 안내·적용 안내(Figma 1.2·1.8) */
 const HELP_TEXT_CLASS = 'text-[12px] leading-[18px] text-[#99a1af]';
 /** 체크박스 행(대상 선택·수신 방법) — 선택 여부로 배경·테두리만 바뀐다. 선택 안 됨도 투명 테두리를 둬 높이가 흔들리지 않게 한다. */
-const ROW_BASE_CLASS = 'flex items-center gap-3 rounded-[14px] border px-4 py-3 transition-colors';
+const ROW_BASE_CLASS = 'flex items-center gap-3 rounded-[14px] border px-4 py-3 transition-colors has-[input:disabled]:cursor-not-allowed';
 const ROW_SELECTED_CLASS = 'border-[rgba(15,92,84,0.2)] bg-[#e8f2f0]';
 const ROW_UNSELECTED_CLASS = 'border-transparent bg-[#f9fafb]';
 const ROW_LABEL_CLASS = 'text-[14px] leading-[21px] font-semibold';
@@ -341,7 +341,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
     );
 
   return (
-    <div className="flex flex-col gap-4">
+    // 저장 중(PUT·재조회)에는 대상·값 입력을 모두 잠근다 — 저장 완료 시 입력 상태를 초기화하므로, 그사이 바꾼 값이 조용히
+    // 사라지지 않게 한다(2026-10-08 코드리뷰 P2).
+    <div className="flex flex-col gap-4" aria-busy={saving || undefined}>
       {zero && !noSelection && (
         <div role="status" className="flex gap-3 rounded-[14px] border border-[#fee685] bg-[#fffbeb] px-4 py-3.5">
           {/* 18×20 영역, 위 여백 2. 16px 아이콘(선 1.333)을 18px로 키우면 선이 Figma의 1.5가 된다. */}
@@ -358,7 +360,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
       )}
 
       <section className={CARD_CLASS}>
-        <fieldset className="min-w-0">
+        <fieldset className="min-w-0" disabled={saving}>
           {/* 헤더 패딩 20/24/0/24, 본문 20/24/20/24(Figma 1.2) */}
           <legend className="w-full px-6 pt-5">
             <h2 className={SECTION_TITLE_CLASS}>대상 선택</h2>
@@ -384,7 +386,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         </fieldset>
       </section>
 
-      <SettingsSection title="가격 변동 임계치" description="이 비율 이상 변동 시 알림을 발송합니다. 기본값 5%" disabled={noSelection}>
+      <SettingsSection title="가격 변동 임계치" description="이 비율 이상 변동 시 알림을 발송합니다. 기본값 5%" disabled={noSelection} locked={saving}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[13px] leading-[19.5px] font-semibold text-[#364153]">
@@ -428,7 +430,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         <ThresholdSummary threshold={values.threshold} warning={zero} />
       </SettingsSection>
 
-      <SettingsSection title="신규거래 알림" description="대상에 신규 실거래가 확인되면 알림을 발송합니다" disabled={noSelection}>
+      <SettingsSection title="신규거래 알림" description="대상에 신규 실거래가 확인되면 알림을 발송합니다" disabled={noSelection} locked={saving}>
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-[14px] leading-[21px] font-semibold text-[#1e2939]">
@@ -461,7 +463,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         </div>
       </SettingsSection>
 
-      <SettingsSection title="수신 방법" description="알림을 받을 수단을 선택합니다" disabled={noSelection}>
+      <SettingsSection title="수신 방법" description="알림을 받을 수단을 선택합니다" disabled={noSelection} locked={saving}>
         <div className="flex flex-col gap-2">
           <label className={`${ROW_BASE_CLASS} cursor-pointer ${values.email ? ROW_SELECTED_CLASS : ROW_UNSELECTED_CLASS}`}>
             <input
@@ -569,15 +571,18 @@ function mergeSaved(
   return next;
 }
 
+/** disabled: 대상 미선택이라 흐리게 막는다(D5). locked: 저장 중이라 모양은 그대로 두고 입력만 막는다. */
 function SettingsSection({
   title,
   description,
   disabled,
+  locked,
   children,
 }: {
   title: string;
   description: string;
   disabled: boolean;
+  locked: boolean;
   children: ReactNode;
 }) {
   return (
@@ -588,7 +593,7 @@ function SettingsSection({
         <p className={`mt-0.5 ${HELP_TEXT_CLASS} leading-[19.5px]`}>{description}</p>
       </div>
       {/* 대상을 고르지 않으면 입력을 막는다 — 무엇을 설정하는 화면인지는 보이게 섹션은 그대로 둔다(D5). */}
-      <fieldset disabled={disabled} className={`min-w-0 px-6 py-5 ${disabled ? 'opacity-50' : ''}`}>
+      <fieldset disabled={disabled || locked} className={`min-w-0 px-6 py-5 ${disabled ? 'opacity-50' : ''}`}>
         {children}
       </fieldset>
     </section>
