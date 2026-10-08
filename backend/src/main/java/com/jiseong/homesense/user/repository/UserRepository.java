@@ -93,4 +93,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
               AND u.withdrawnAt IS NULL
             """)
     long countWithdrawnWithoutTimestamp();
+
+    /**
+     * 회원 행에 배타 잠금을 걸고 트랜잭션이 끝날 때까지 쥔다 — 같은 회원의 쓰기를 직렬화하는 용도(SVC-NTF-01.updateSettings()).
+     * 반드시 트랜잭션 안에서 부른다. 엔티티를 영속성 컨텍스트에 올리지 않으려고 네이티브 COUNT로 잠그기만 한다.
+     */
+    @Query(value = "SELECT COUNT(*) FROM user WHERE user_id = :userId FOR UPDATE", nativeQuery = true)
+    long lockForUpdate(@Param("userId") Long userId);
 }

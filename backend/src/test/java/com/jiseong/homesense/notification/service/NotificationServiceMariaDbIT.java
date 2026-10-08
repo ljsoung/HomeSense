@@ -1,11 +1,13 @@
 package com.jiseong.homesense.notification.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -29,6 +31,7 @@ import com.jiseong.homesense.favorite.repository.FavoritePropertyRepository;
 import com.jiseong.homesense.favorite.repository.FavoriteRegionRepository;
 import com.jiseong.homesense.notification.dto.UpdateNotificationSettingsCommand;
 import com.jiseong.homesense.notification.entity.NotificationSetting;
+import com.jiseong.homesense.notification.exception.AccessDeniedException;
 import com.jiseong.homesense.notification.repository.NotificationSettingRepository;
 import com.jiseong.homesense.region.entity.LegalDistrictCode;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
@@ -53,9 +56,10 @@ import com.jiseong.homesense.user.repository.UserRepository;
  * 수동으로 붙잡아 순서를 강제하지 않고, 두 스레드가 동시에 실제 프로덕션 경로(updateSettings())를
  * 호출하게 한 뒤 (1) 둘 다 예외 없이 반환되는지, (2) 최종적으로 정확히 한 행만 남는지만 검증한다.
  *
+ * <p>2026-10-07 MY-03 다중 선택 일괄 저장으로 요청이 대상 목록이 되면서 일괄 저장(신규·갱신 혼합), 남의 대상이 섞이면
+ * 아무것도 저장되지 않음, 관심 매물 삭제 시 CASCADE를 함께 검증한다.
+ *
  * <p>Docker가 필요해 기본 `./gradlew test`에서는 제외되고 `./gradlew integrationTest`로만 실행된다.
- * 이 리포지토리 환경에서 Docker 데몬을 쓸 수 없어 작성 시점에 실제 실행까지는 확인하지 못했다 —
- * `./gradlew integrationTest`로 반드시 재확인하라.
  */
 @SpringBootTest
 @Testcontainers
@@ -129,22 +133,23 @@ class NotificationServiceMariaDbIT {
         Long favoritePropertyId = favorite.getFavoritePropertyId();
 
         UpdateNotificationSettingsCommand cmdA =
-                new UpdateNotificationSettingsCommand(favoritePropertyId, null, new BigDecimal("3.0"), false, false);
+                one(favoritePropertyId, null, "3", false, false);
         UpdateNotificationSettingsCommand cmdB =
-                new UpdateNotificationSettingsCommand(favoritePropertyId, null, new BigDecimal("7.5"), true, true);
+                one(favoritePropertyId, null, "7", true, true);
 
-        CountDownLatch startLatch = new CountDownLatch(1);
+        CyclicBarrier startBarrier = new CyclicBarrier(2);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<?> futureA = executor.submit(() -> {
-                awaitUninterruptibly(startLatch);
+                startBarrier.await(10, TimeUnit.SECONDS); // 두 스레드가 장벽에서 만난 뒤 동시에 출발한다
                 notificationService.updateSettings(userId, cmdA);
+                return null;
             });
             Future<?> futureB = executor.submit(() -> {
-                awaitUninterruptibly(startLatch);
+                startBarrier.await(10, TimeUnit.SECONDS); // 두 스레드가 장벽에서 만난 뒤 동시에 출발한다
                 notificationService.updateSettings(userId, cmdB);
+                return null;
             });
-            startLatch.countDown();
 
             // 둘 다 예외 없이 반환돼야 한다 — get()이 ExecutionException을 던지면 그 자체가 실패다.
             futureA.get(10, TimeUnit.SECONDS);
@@ -167,22 +172,23 @@ class NotificationServiceMariaDbIT {
         Long favoriteRegionId = favorite.getFavoriteRegionId();
 
         UpdateNotificationSettingsCommand cmdA =
-                new UpdateNotificationSettingsCommand(null, favoriteRegionId, new BigDecimal("3.0"), false, false);
+                one(null, favoriteRegionId, "3", false, false);
         UpdateNotificationSettingsCommand cmdB =
-                new UpdateNotificationSettingsCommand(null, favoriteRegionId, new BigDecimal("7.5"), true, true);
+                one(null, favoriteRegionId, "7", true, true);
 
-        CountDownLatch startLatch = new CountDownLatch(1);
+        CyclicBarrier startBarrier = new CyclicBarrier(2);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<?> futureA = executor.submit(() -> {
-                awaitUninterruptibly(startLatch);
+                startBarrier.await(10, TimeUnit.SECONDS); // 두 스레드가 장벽에서 만난 뒤 동시에 출발한다
                 notificationService.updateSettings(userId, cmdA);
+                return null;
             });
             Future<?> futureB = executor.submit(() -> {
-                awaitUninterruptibly(startLatch);
+                startBarrier.await(10, TimeUnit.SECONDS); // 두 스레드가 장벽에서 만난 뒤 동시에 출발한다
                 notificationService.updateSettings(userId, cmdB);
+                return null;
             });
-            startLatch.countDown();
 
             futureA.get(10, TimeUnit.SECONDS);
             futureB.get(10, TimeUnit.SECONDS);
@@ -194,21 +200,128 @@ class NotificationServiceMariaDbIT {
         }
     }
 
-    private void awaitUninterruptibly(CountDownLatch latch) {
-        boolean interrupted = false;
+    private static UpdateNotificationSettingsCommand one(Long favoritePropertyId, Long favoriteRegionId, String threshold,
+            boolean newTrade, boolean email) {
+        return new UpdateNotificationSettingsCommand(List.of(item(favoritePropertyId, favoriteRegionId, threshold, newTrade, email)));
+    }
+
+    private static UpdateNotificationSettingsCommand.Item item(Long favoritePropertyId, Long favoriteRegionId, String threshold,
+            boolean newTrade, boolean email) {
+        return new UpdateNotificationSettingsCommand.Item(favoritePropertyId, favoriteRegionId, new BigDecimal(threshold),
+                newTrade, email);
+    }
+
+    /** MY-03 다중 선택 일괄 저장 — 신규 생성(관심 지역)과 기존 갱신(관심 매물)이 한 요청에 섞여 있어도 둘 다 반영된다. */
+    @Test
+    void 여러_대상을_한_번에_저장하면_기존_설정은_갱신되고_없던_설정은_생성된다() {
+        User user = userRepository.saveAndFlush(User.createUser("ntf-batch-mixed@test.com", "encoded", "일괄회원"));
+        Complex complex = complexRepository.saveAndFlush(complex("SRC-NTF-BATCH-1"));
+        FavoriteProperty property = favoritePropertyRepository.saveAndFlush(
+                FavoriteProperty.register(user, complex, HousingType.APT));
+        LegalDistrictCode legal = legalDistrictCodeRepository.saveAndFlush(region("1168099997"));
+        FavoriteRegion favoriteRegion = favoriteRegionRepository.saveAndFlush(FavoriteRegion.register(user, legal));
+        Long userId = user.getUserId();
+        notificationService.updateSettings(userId, one(property.getFavoritePropertyId(), null, "5", true, true));
+
+        notificationService.updateSettings(userId, new UpdateNotificationSettingsCommand(List.of(
+                item(property.getFavoritePropertyId(), null, "12", false, false),
+                item(null, favoriteRegion.getFavoriteRegionId(), "0", true, false))));
+
+        List<NotificationSetting> rows = notificationSettingRepository.findByUser_UserId(userId);
+        assertThat(rows).hasSize(2);
+        NotificationSetting propertyRow = rows.stream().filter(r -> r.getFavoriteProperty() != null).findFirst().orElseThrow();
+        NotificationSetting regionRow = rows.stream().filter(r -> r.getFavoriteRegion() != null).findFirst().orElseThrow();
+        assertThat(propertyRow.getPriceChangeThresholdPct()).isEqualByComparingTo("12");
+        assertThat(propertyRow.isNewTradeAlertYn()).isFalse();
+        assertThat(propertyRow.isEmailAlertYn()).isFalse();
+        assertThat(regionRow.getPriceChangeThresholdPct()).isEqualByComparingTo("0");
+        assertThat(regionRow.isNewTradeAlertYn()).isTrue();
+        assertThat(regionRow.isEmailAlertYn()).isFalse();
+    }
+
+    /**
+     * 겹치는 대상을 서로 반대 순서로 담은 두 요청(두 탭)이 동시에 와도 교착으로 한쪽이 롤백되지 않는다 — 서비스가 요청 순서와
+     * 무관하게 정해진 순서로 upsert하기 때문이다(Codex 코드리뷰 P2). 요청 순서대로 보내면 각자 첫 행을 잠근 채 상대 행을
+     * 기다려 MariaDB가 한쪽을 deadlock으로 롤백시킨다. 타이밍에 따라 재현 여부가 갈리므로 여러 번 반복하고, 설정이 이미 있는
+     * 경우(갱신)와 없는 경우(신규) 모두 본다.
+     */
+    @Test
+    void 겹치는_대상을_반대_순서로_담은_두_요청이_동시에_와도_둘_다_성공한다() throws Exception {
+        User user = userRepository.saveAndFlush(User.createUser("ntf-lock-order@test.com", "encoded", "순서회원"));
+        Long userId = user.getUserId();
+        Long p1 = favoritePropertyRepository.saveAndFlush(FavoriteProperty.register(
+                user, complexRepository.saveAndFlush(complex("SRC-NTF-ORDER-1")), HousingType.APT)).getFavoritePropertyId();
+        Long p2 = favoritePropertyRepository.saveAndFlush(FavoriteProperty.register(
+                user, complexRepository.saveAndFlush(complex("SRC-NTF-ORDER-2")), HousingType.APT)).getFavoritePropertyId();
+        Long r1 = favoriteRegionRepository.saveAndFlush(FavoriteRegion.register(
+                user, legalDistrictCodeRepository.saveAndFlush(region("1168099996")))).getFavoriteRegionId();
+
+        UpdateNotificationSettingsCommand forward = new UpdateNotificationSettingsCommand(List.of(
+                item(p1, null, "3", true, true), item(p2, null, "3", true, true), item(null, r1, "3", true, true)));
+        UpdateNotificationSettingsCommand reversed = new UpdateNotificationSettingsCommand(List.of(
+                item(null, r1, "7", false, false), item(p2, null, "7", false, false), item(p1, null, "7", false, false)));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            while (true) {
-                try {
-                    latch.await();
-                    return;
-                } catch (InterruptedException e) {
-                    interrupted = true;
+            for (int round = 0; round < 20; round++) {
+                if (round % 2 == 0) { // 짝수 회차는 설정을 비워 신규 삽입끼리, 홀수 회차는 기존 행 갱신끼리 경쟁한다
+                    notificationSettingRepository.deleteAll(notificationSettingRepository.findByUser_UserId(userId));
                 }
+                CyclicBarrier startBarrier = new CyclicBarrier(2);
+                Future<?> a = executor.submit(() -> {
+                    startBarrier.await(10, TimeUnit.SECONDS);
+                    notificationService.updateSettings(userId, forward);
+                    return null;
+                });
+                Future<?> b = executor.submit(() -> {
+                    startBarrier.await(10, TimeUnit.SECONDS);
+                    notificationService.updateSettings(userId, reversed);
+                    return null;
+                });
+                // deadlock으로 롤백되면 get()이 ExecutionException을 던져 그 자체로 실패한다(몇 회차인지 메시지에 남긴다).
+                try {
+                    a.get(30, TimeUnit.SECONDS);
+                    b.get(30, TimeUnit.SECONDS);
+                } catch (ExecutionException e) {
+                    throw new AssertionError("round " + round + "(" + (round % 2 == 0 ? "신규" : "갱신") + ")에서 실패", e);
+                }
+                assertThat(notificationSettingRepository.findByUser_UserId(userId)).hasSize(3);
             }
         } finally {
-            if (interrupted) {
-                Thread.currentThread().interrupt();
-            }
+            executor.shutdownNow();
         }
+    }
+
+    /** 목록 중 하나라도 남의 관심 매물이면 403이고, 내 대상까지 포함해 아무것도 저장되지 않는다. */
+    @Test
+    void 여러_대상_중_하나가_남의_관심매물이면_아무것도_저장되지_않는다() {
+        User me = userRepository.saveAndFlush(User.createUser("ntf-batch-me@test.com", "encoded", "나회원"));
+        User other = userRepository.saveAndFlush(User.createUser("ntf-batch-other@test.com", "encoded", "남회원"));
+        FavoriteProperty mine = favoritePropertyRepository.saveAndFlush(
+                FavoriteProperty.register(me, complexRepository.saveAndFlush(complex("SRC-NTF-BATCH-2")), HousingType.APT));
+        FavoriteProperty others = favoritePropertyRepository.saveAndFlush(
+                FavoriteProperty.register(other, complexRepository.saveAndFlush(complex("SRC-NTF-BATCH-3")), HousingType.APT));
+
+        assertThatThrownBy(() -> notificationService.updateSettings(me.getUserId(), new UpdateNotificationSettingsCommand(List.of(
+                item(mine.getFavoritePropertyId(), null, "5", true, true),
+                item(others.getFavoritePropertyId(), null, "5", true, true)))))
+                .isInstanceOf(AccessDeniedException.class);
+
+        assertThat(notificationSettingRepository.findByUser_UserId(me.getUserId())).isEmpty();
+        assertThat(notificationSettingRepository.findByUser_UserId(other.getUserId())).isEmpty();
+    }
+
+    /** 관심 매물을 지우면 그 알림 설정도 DB FK(ON DELETE CASCADE)로 함께 지워진다(MY-02 삭제 다이얼로그 안내의 근거). */
+    @Test
+    void 관심매물을_삭제하면_알림설정도_함께_삭제된다() {
+        User user = userRepository.saveAndFlush(User.createUser("ntf-cascade@test.com", "encoded", "삭제회원"));
+        FavoriteProperty property = favoritePropertyRepository.saveAndFlush(
+                FavoriteProperty.register(user, complexRepository.saveAndFlush(complex("SRC-NTF-CASCADE-1")), HousingType.APT));
+        notificationService.updateSettings(user.getUserId(), one(property.getFavoritePropertyId(), null, "5", true, true));
+        assertThat(notificationSettingRepository.findByUser_UserId(user.getUserId())).hasSize(1);
+
+        favoritePropertyRepository.deleteById(property.getFavoritePropertyId());
+
+        assertThat(notificationSettingRepository.findByUser_UserId(user.getUserId())).isEmpty();
     }
 }

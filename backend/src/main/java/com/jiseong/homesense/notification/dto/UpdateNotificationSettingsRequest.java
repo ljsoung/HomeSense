@@ -1,38 +1,49 @@
 package com.jiseong.homesense.notification.dto;
 
 import java.math.BigDecimal;
+import java.util.List;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 /**
- * MY-03 알림 조건 설정(대상당 1건 upsert) 요청. favoritePropertyId/favoriteRegionId에는
- * {@code @NotNull}을 걸지 않는다 — "정확히 하나만"/"둘 다 없음"을 Service가 각각
- * {@code InvalidNotificationTargetException}/{@code MissingTargetException}으로 구분해 던지도록
- * 설계서가 지정하고 있어, Bean Validation으로 옮기면 COM-VAL-01의 범용 VALIDATION_FAILED 응답으로
- * 뭉뚱그려져 그 지정을 어기게 된다(AddFavoritePropertyRequest.complexId와 같은 이유).
+ * MY-03 알림 조건 설정 요청 — 선택한 대상 여러 곳을 한 번에 저장한다(2026-10-07, MY-03 다중 선택 일괄 저장).
+ * 대상 하나만 받던 형태에서 바꿨다: 프론트가 대상마다 PUT을 반복하면 중간 실패 시 일부만 저장되고 재시도 범위도 모호해진다.
+ * 목록 전체를 한 트랜잭션으로 처리한다(SVC-NTF-01.updateSettings).
  *
- * <p>priceChangeThresholdPct의 0~100 범위 검증은 Service 처리 로직이 지정한 대상이 아니라
- * 설계서 예외표에도 전용 예외가 없어 COM-VAL-01 표준 경로(Bean Validation)를 그대로 쓴다 — 0%는
- * 하한 그대로 허용되는 값이라(MY-03 예외 처리표) {@code @DecimalMin}의 기본 inclusive=true가
- * 정확히 이 요구와 일치한다. {@code @Digits(integer = 3, fraction = 1)}는 range 검증과 별개로
- * {@code NotificationSetting.priceChangeThresholdPct}(DECIMAL(4,1)) 컬럼의 소수 자릿수(scale=1)를
- * 그대로 강제한다 — 이게 없으면 0.04나 99.99처럼 소수 둘째 자리를 가진 값도 range만 통과해 API는
- * 200을 반환하지만, MariaDB가 컬럼 scale에 맞춰 그 값을 0.0/100.0으로 반올림해 저장하는 값이
- * 사용자가 요청한 것과 달라지는 조용한 정밀도 손실이 생긴다(Codex 코드리뷰 P2 지적).
+ * <p>목록은 비면 안 되고 200건까지다 — 관심 매물·지역 수에 상한은 없지만 한 화면에서 고르는 대상이라 그 이상은 비정상 요청으로 본다.
  */
 public record UpdateNotificationSettingsRequest(
-        Long favoritePropertyId,
-        Long favoriteRegionId,
-        @NotNull @DecimalMin("0.0") @DecimalMax("100.0") @Digits(integer = 3, fraction = 1)
-        BigDecimal priceChangeThresholdPct,
-        boolean newTradeAlertYn,
-        boolean emailAlertYn) {
+        @NotEmpty @Size(max = 200) List<@NotNull @Valid Item> settings) {
+
+    /**
+     * 대상 하나의 설정. favoritePropertyId/favoriteRegionId에는 {@code @NotNull}을 걸지 않는다 — "정확히 하나만"/"둘 다
+     * 없음"을 Service가 각각 {@code InvalidNotificationTargetException}/{@code MissingTargetException}으로 구분해 던지도록
+     * 설계서가 지정하고 있어서다(AddFavoritePropertyRequest.complexId와 같은 이유).
+     *
+     * <p>priceChangeThresholdPct는 0 이상 20 이하의 정수다(MY-03 슬라이더 0~20, 1단위). 0%는 "조금이라도 변동되면 알림"으로
+     * 동작하는 정상 값이다(BAT-NTF-01은 반올림 변동률이 0.0이면 보내지 않는다). {@code @Digits(fraction = 0)}이 소수를 막는다 —
+     * 컬럼은 DECIMAL(4,1)이지만 이 화면의 계약은 정수다(CLAUDE.md "DECIMAL 컬럼 @Digits" 원칙).
+     * 두 Boolean은 래퍼 + {@code @NotNull}이다 — 원시 boolean이면 키가 빠진 요청이 조용히 false로 저장된다.
+     */
+    public record Item(
+            Long favoritePropertyId,
+            Long favoriteRegionId,
+            @NotNull @DecimalMin("0") @DecimalMax("20") @Digits(integer = 2, fraction = 0)
+            BigDecimal priceChangeThresholdPct,
+            @NotNull Boolean newTradeAlertYn,
+            @NotNull Boolean emailAlertYn) {
+    }
 
     public UpdateNotificationSettingsCommand toCommand() {
-        return new UpdateNotificationSettingsCommand(
-                favoritePropertyId, favoriteRegionId, priceChangeThresholdPct, newTradeAlertYn, emailAlertYn);
+        return new UpdateNotificationSettingsCommand(settings.stream()
+                .map(item -> new UpdateNotificationSettingsCommand.Item(item.favoritePropertyId(), item.favoriteRegionId(),
+                        item.priceChangeThresholdPct(), item.newTradeAlertYn(), item.emailAlertYn()))
+                .toList());
     }
 }
