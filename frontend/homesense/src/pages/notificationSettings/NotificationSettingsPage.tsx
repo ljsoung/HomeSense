@@ -1,5 +1,6 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { AlertCircleIcon } from '../../components/icons/AlertCircleIcon';
 import { AlertTriangleIcon } from '../../components/icons/AlertTriangleIcon';
 import { BellIcon } from '../../components/icons/BellIcon';
 import { CheckIcon } from '../../components/icons/CheckIcon';
@@ -47,8 +48,42 @@ const TITLE = '알림 설정';
 const SUBTITLE = '관심 매물·지역 단위로 가격 변동 임계치와 신규 거래 알림 여부를 설정합니다.';
 /** BAT-NTF-01 NEW_TRADE는 매매·전월세 모두, 해제 거래 제외(WatchConditionQuery.findNewTrades) — D2. */
 const NEW_TRADE_HINT = '매매·전세·월세 거래가 새로 등록되면 알림';
-const CARD_CLASS = 'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05)]';
+// Figma(데스크톱 35-2·태블릿 36-1017·모바일 36-508) 값. brand 외의 색은 공용 토큰이 없어 이 화면에서만 쓴다.
+const CARD_CLASS = 'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.06)]';
 const SECTION_TITLE_CLASS = 'text-[15px] leading-[22.5px] font-bold text-[#101828]';
+/** 카드 설명·대상 행 보조 텍스트·대상마다 다름·이메일 끔 안내·적용 안내(Figma 1.2·1.8) */
+const HELP_TEXT_CLASS = 'text-[12px] leading-[18px] text-[#99a1af]';
+/** 체크박스 행(대상 선택·수신 방법) — 선택 여부로 배경·테두리만 바뀐다. 선택 안 됨도 투명 테두리를 둬 높이가 흔들리지 않게 한다. */
+const ROW_BASE_CLASS = 'flex items-center gap-3 rounded-[14px] border px-4 py-3 transition-colors';
+const ROW_SELECTED_CLASS = 'border-[rgba(15,92,84,0.2)] bg-[#e8f2f0]';
+const ROW_UNSELECTED_CLASS = 'border-transparent bg-[#f9fafb]';
+const ROW_LABEL_CLASS = 'text-[14px] leading-[21px] font-semibold';
+
+/**
+ * 임계치 슬라이더(Figma 1.4) — 네이티브 range를 그대로 써 키보드·스크린리더 동작을 유지하고 모양만 바꾼다.
+ * 트랙 6px #e5e7eb, 채움·손잡이 테두리는 --ntf-accent(평소 brand, 0%면 #ef4444), 손잡이 22px 흰 원.
+ * SRCH-01 RangeSlider와 같은 방식(컴포넌트 안 style 블록)이다.
+ */
+const THRESHOLD_RANGE_CSS = `
+.ntf-threshold-range { appearance: none; height: 22px; background: transparent; cursor: pointer; }
+.ntf-threshold-range:disabled { cursor: not-allowed; }
+.ntf-threshold-range:focus { outline: none; }
+.ntf-threshold-range:focus-visible { outline: 2px solid #0f5c54; outline-offset: 4px; border-radius: 9999px; }
+.ntf-threshold-range::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 9999px;
+  background: linear-gradient(to right, var(--ntf-accent) 0 var(--ntf-fill), #e5e7eb var(--ntf-fill) 100%);
+}
+.ntf-threshold-range::-moz-range-track { height: 6px; border-radius: 9999px; background: #e5e7eb; }
+.ntf-threshold-range::-moz-range-progress { height: 6px; border-radius: 9999px; background: var(--ntf-accent); }
+.ntf-threshold-range::-webkit-slider-thumb {
+  appearance: none; margin-top: -8px; width: 22px; height: 22px; border-radius: 9999px;
+  background: #ffffff; border: 2px solid var(--ntf-accent); box-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
+}
+.ntf-threshold-range::-moz-range-thumb {
+  box-sizing: border-box; width: 22px; height: 22px; border-radius: 9999px;
+  background: #ffffff; border: 2px solid var(--ntf-accent); box-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
+}
+`;
 const MIXED_TEXT = '대상마다 다름';
 
 type Layout = 'mobile' | 'tablet' | 'desktop';
@@ -130,32 +165,34 @@ export function NotificationSettingsPage() {
   return (
     <MainLayout>
       {layout === 'desktop' ? (
-        <div className="mx-auto flex max-w-[1000px] flex-col px-8 py-12">
-          <nav aria-label="위치 경로" className="mb-3 text-[12.5px] leading-[19px] text-[#99a1af]">
+        // 콘텐츠 폭 712px(좌우 32px 패딩 포함 776px) 가운데 정렬.
+        <div className="mx-auto flex w-full max-w-[776px] flex-col px-8 py-12">
+          <nav aria-label="위치 경로" className="mb-5 text-[13px] leading-[19.5px]">
             <ol className="flex items-center gap-1.5">
               <li>
-                <Link to={MY_ROUTES.home} className="hover:text-[#4a5565] hover:underline">
+                <Link to={MY_ROUTES.home} className="font-semibold text-[#6a7282] hover:underline">
                   마이페이지
                 </Link>
               </li>
-              <li aria-hidden="true" className="text-[#d1d5dc]">
+              <li aria-hidden="true" className="text-[16px] leading-none text-[#d1d5dc]">
                 /
               </li>
-              <li aria-current="page" className="font-semibold text-[#4a5565]">
+              <li aria-current="page" className="font-semibold text-[#101828]">
                 {TITLE}
               </li>
             </ol>
           </nav>
-          <h1 className="text-[24px] leading-[36px] font-extrabold text-[#101828]">{TITLE}</h1>
-          <p className="mt-1 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
-          <div className="mt-7">{body}</div>
+          <h1 className="text-[22px] leading-[33px] font-extrabold text-[#101828]">{TITLE}</h1>
+          <p className="mt-0.5 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+          <div className="mt-6">{body}</div>
         </div>
       ) : (
         <div className="flex flex-col">
           <MobileAppBar title={TITLE} />
-          <div className={`mx-auto flex w-full max-w-[1000px] flex-col ${layout === 'tablet' ? 'px-6 py-6' : 'px-4 py-5'}`}>
+          {/* 태블릿·모바일 모두 좌우 16px(태블릿 768에서 736px, 모바일 393에서 361px). */}
+          <div className="flex w-full flex-col px-4 pt-5">
             <p className="text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
-            <div className="mt-5">{body}</div>
+            <div className="mt-6">{body}</div>
           </div>
         </div>
       )}
@@ -264,7 +301,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
 
   const thresholdInput =
     layout === 'desktop' ? (
-      <span className={`text-[20px] leading-[30px] font-extrabold ${zero ? 'text-[#bb4d00]' : 'text-brand'}`}>
+      <span className={`text-[17px] leading-[25.5px] font-extrabold ${zero ? 'text-[#ef4444]' : 'text-brand'}`}>
         {formatThreshold(values.threshold)}%
       </span>
     ) : (
@@ -289,11 +326,15 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
               commitDraft();
             }
           }}
-          className={`h-[35px] w-[52px] rounded-[10px] border bg-white text-center text-[15px] font-bold outline-none focus:border-brand ${
-            !draftValid ? 'border-[#fb2c36]' : zero ? 'border-[#fee685] text-[#bb4d00]' : 'border-[#e5e7eb] text-[#101828]'
+          className={`h-[35px] w-[52px] rounded-[14px] border text-center text-[14px] font-extrabold outline-none focus:border-brand ${
+            !draftValid
+              ? 'border-[#fb2c36] bg-[#fff5f5] text-[#ef4444]'
+              : zero
+                ? 'border-[#fecaca] bg-[#fff5f5] text-[#ef4444]'
+                : 'border-[#e5e7eb] bg-[#f9fafb] text-brand'
           }`}
         />
-        <span aria-hidden="true" className="text-[14px] font-semibold text-[#4a5565]">
+        <span aria-hidden="true" className="text-[13px] font-semibold text-[#364153]">
           %
         </span>
       </span>
@@ -303,25 +344,29 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
     <div className="flex flex-col gap-4">
       {zero && !noSelection && (
         <div role="status" className="flex gap-3 rounded-[14px] border border-[#fee685] bg-[#fffbeb] px-4 py-3.5">
-          <AlertTriangleIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[#e17100]" />
+          {/* 18×20 영역, 위 여백 2. 16px 아이콘(선 1.333)을 18px로 키우면 선이 Figma의 1.5가 된다. */}
+          <span aria-hidden="true" className="mt-0.5 flex h-5 w-[18px] shrink-0 items-center text-[#e17100]">
+            <AlertTriangleIcon className="size-[18px]" />
+          </span>
           <div>
-            <p className="text-[13px] leading-5 font-bold text-[#973c00]">임계치 0% 설정 확인</p>
-            <p className="mt-0.5 text-[12.5px] leading-[19px] text-[#973c00]">
+            <p className="text-[13.5px] leading-5 font-bold text-[#973c00]">임계치 0% 설정 확인</p>
+            <p className="mt-0.5 text-[12.5px] leading-[19px] text-[#bb4d00]">
               변동이 있을 때마다 알림이 발송될 수 있습니다. 알림 빈도가 매우 높아질 수 있으니 확인 후 저장해주세요.
             </p>
           </div>
         </div>
       )}
 
-      <section className={`${CARD_CLASS} p-5 md:p-6`}>
-        <fieldset>
-          <legend className="mb-1">
+      <section className={CARD_CLASS}>
+        <fieldset className="min-w-0">
+          {/* 헤더 패딩 20/24/0/24, 본문 20/24/20/24(Figma 1.2) */}
+          <legend className="w-full px-6 pt-5">
             <h2 className={SECTION_TITLE_CLASS}>대상 선택</h2>
           </legend>
-          <p className="text-[12.5px] leading-[19px] text-[#99a1af]">
+          <p className={`mt-0.5 px-6 ${HELP_TEXT_CLASS} leading-[19.5px]`}>
             알림을 설정할 관심 매물·지역을 고르세요. 여러 곳을 고르면 같은 설정이 함께 저장됩니다.
           </p>
-          <div className="mt-4 flex flex-col gap-2">
+          <div className="flex flex-col gap-2 px-6 py-5">
             {targets.map((target) => (
               <TargetRow
                 key={target.key}
@@ -342,17 +387,24 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
       <SettingsSection title="가격 변동 임계치" disabled={noSelection}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[14px] leading-[21px] font-semibold text-[#101828]">
+            <p className="text-[13px] leading-[19.5px] font-semibold text-[#364153]">
               변동 임계치
               {mixed.threshold && <MixedTag id={ids.thresholdMixed} />}
             </p>
-            <p id={ids.thresholdHelp} className="mt-0.5 text-[12px] leading-[18px] text-[#99a1af]">
+            <p id={ids.thresholdHelp} className={`mt-0.5 ${HELP_TEXT_CLASS}`}>
               상승·하락에 같은 기준이 적용됩니다
             </p>
           </div>
           {thresholdInput}
         </div>
         <input
+          // 트랙 6px·채움·손잡이 22px는 아래 THRESHOLD_RANGE_CSS. 채움 끝은 손잡이 중심(양 끝 11px 안쪽)에 맞춘다.
+          style={
+            {
+              '--ntf-accent': zero ? '#ef4444' : '#0f5c54',
+              '--ntf-fill': `calc(11px + (100% - 22px) * ${(values.threshold - THRESHOLD_MIN) / (THRESHOLD_MAX - THRESHOLD_MIN)})`,
+            } as CSSProperties
+          }
           type="range"
           min={THRESHOLD_MIN}
           max={THRESHOLD_MAX}
@@ -365,9 +417,11 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
           aria-label="변동 임계치"
           aria-valuetext={`${formatThreshold(values.threshold)}%`}
           aria-describedby={[ids.thresholdHelp, mixed.threshold ? ids.thresholdMixed : null].filter(Boolean).join(' ')}
-          className={`mt-4 h-2 w-full cursor-pointer disabled:cursor-not-allowed ${zero ? 'accent-[#e17100]' : 'accent-brand'}`}
+          className="ntf-threshold-range mt-1 w-full"
         />
-        <div aria-hidden="true" className="mt-1 flex justify-between text-[11px] leading-4 text-[#99a1af]">
+        <style>{THRESHOLD_RANGE_CSS}</style>
+        {/* 트랙(입력 높이 22 중 가운데 6)과 라벨 사이 6px */}
+        <div aria-hidden="true" className="-mt-0.5 flex justify-between text-[11px] leading-[16.5px] text-[#99a1af]">
           <span>{THRESHOLD_MIN}%</span>
           <span>{THRESHOLD_MAX}%</span>
         </div>
@@ -377,11 +431,11 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
       <SettingsSection title="신규거래 알림" disabled={noSelection}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[14px] leading-[21px] font-semibold text-[#101828]">
+            <p className="text-[14px] leading-[21px] font-semibold text-[#1e2939]">
               신규거래 알림 수신
               {mixed.newTrade && <MixedTag id={ids.newTradeMixed} />}
             </p>
-            <p id={ids.newTradeHelp} className="mt-0.5 text-[12px] leading-[18px] text-[#99a1af]">
+            <p id={ids.newTradeHelp} className={`mt-0.5 ${HELP_TEXT_CLASS}`}>
               {NEW_TRADE_HINT}
             </p>
           </div>
@@ -398,8 +452,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
           >
             <span
               aria-hidden="true"
-              className={`absolute top-[3px] size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.2)] transition-[left] ${
-                values.newTrade ? 'left-[25px]' : 'left-[3px]'
+              // 손잡이 18px(Figma 1.6). 끔 색 #d1d5dc는 Figma에 없고 공용 토글도 없어 정했다.
+              className={`absolute top-1 size-[18px] rounded-full bg-white shadow-[0_1px_2px_-1px_rgba(0,0,0,0.1),0_1px_3px_rgba(0,0,0,0.1)] transition-[left] ${
+                values.newTrade ? 'left-[26px]' : 'left-1'
               }`}
             />
           </button>
@@ -408,7 +463,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
 
       <SettingsSection title="수신 방법" disabled={noSelection}>
         <div className="flex flex-col gap-2">
-          <label className="flex cursor-pointer items-center gap-3 rounded-[12px] border border-[#f3f4f6] px-4 py-3">
+          <label className={`${ROW_BASE_CLASS} cursor-pointer ${values.email ? ROW_SELECTED_CLASS : ROW_UNSELECTED_CLASS}`}>
             <input
               type="checkbox"
               checked={values.email}
@@ -418,24 +473,24 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
             />
             <CheckVisual checked={values.email} />
             <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
-              <span className="text-[14px] leading-[21px] font-semibold text-[#101828]">
+              <span className={`${ROW_LABEL_CLASS} ${values.email ? 'text-[#101828]' : 'text-[#364153]'}`}>
                 이메일 수신
                 {mixed.email && <MixedTag id={ids.emailMixed} />}
               </span>
-              {email && <span className="truncate text-[12.5px] leading-[19px] text-[#99a1af]">{email}</span>}
+              {email && <span className="truncate text-[11px] leading-[16.5px] font-medium text-[#99a1af]">{email}</span>}
             </span>
           </label>
           {!values.email && (
-            <p id={ids.emailHelp} className="px-1 text-[12px] leading-[18px] text-[#4a5565]">
+            <p id={ids.emailHelp} className={`px-1 ${HELP_TEXT_CLASS}`}>
               이메일은 보내지 않고 알림 이력에만 기록해요
             </p>
           )}
-          <label className="flex cursor-not-allowed items-center gap-3 rounded-[12px] border border-[#f3f4f6] bg-[#f9fafb] px-4 py-3">
+          <label className={`${ROW_BASE_CLASS} ${ROW_UNSELECTED_CLASS} cursor-not-allowed opacity-[0.45]`}>
             <input type="checkbox" checked={false} disabled aria-describedby={ids.pushBadge} className="peer sr-only" readOnly />
-            <CheckVisual checked={false} disabled />
+            <CheckVisual checked={false} />
             <span className="flex flex-1 items-center justify-between gap-3">
-              <span className="text-[14px] leading-[21px] font-semibold text-[#99a1af]">웹 푸시</span>
-              <span id={ids.pushBadge} className="rounded-full bg-[#f3f4f6] px-2 py-0.5 text-[11px] leading-4 font-semibold text-[#6a7282]">
+              <span className={`${ROW_LABEL_CLASS} text-[#364153]`}>웹 푸시</span>
+              <span id={ids.pushBadge} className="rounded-full bg-[#fef3c6] px-2 py-0.5 text-[10px] leading-[15px] font-bold text-[#bb4d00]">
                 2차 확장 예정
               </span>
             </span>
@@ -443,27 +498,32 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         </div>
       </SettingsSection>
 
-      <div className="flex flex-col gap-3 pt-1">
+      {/* 마지막 카드와 사이 24(gap 16 + 8). 데스크톱 좌우 4, 태블릿·모바일 아래 16(좌우는 페이지 패딩이 이미 16). */}
+      <div className={`flex flex-col gap-3 pt-2 ${layout === 'desktop' ? 'px-1' : 'pb-4'}`}>
         {saveError && (
-          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[#ffc9c9] bg-[#fef2f2] px-4 py-3">
-            <p className="text-[13px] leading-5 text-[#9f0712]">{saveError}</p>
+          // 프로젝트 기존 오류 배너(MY-01 ProfileErrorBanner)와 같은 모양
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-[#fee2e2] bg-[#fef2f2] px-4 py-3">
+            <p className="flex items-center gap-2 text-[13px] text-[#7f1d1d]">
+              <AlertCircleIcon aria-hidden="true" className="size-4 shrink-0 text-[#e7000b]" />
+              <span>{saveError}</span>
+            </p>
             <button
               type="button"
               onClick={() => void save()}
               disabled={saving}
-              className="rounded-[10px] border border-[#ffc9c9] bg-white px-3.5 py-1.5 text-[13px] font-semibold text-[#9f0712] hover:bg-[#fff5f5] disabled:opacity-60"
+              className="rounded-[10px] bg-white px-3.5 py-1.5 text-[13px] font-semibold text-[#e7000b] shadow-[0_1px_2px_rgba(0,0,0,0.1)] disabled:opacity-60"
             >
               다시 시도
             </button>
           </div>
         )}
-        <div className={`flex gap-3 ${layout === 'mobile' ? 'flex-col' : 'items-center justify-between'}`}>
+        <div className={`flex gap-3 ${layout === 'desktop' ? 'items-center justify-between' : 'flex-col'}`}>
           <div className="flex flex-col gap-0.5">
-            <p id={ids.hint} className="text-[12.5px] leading-[19px] text-[#99a1af]">
+            <p id={ids.hint} className="text-[12.5px] leading-[18.75px] text-[#99a1af]">
               {SAVE_HINT_TEXT[hint]}
             </p>
             {hadDifferences && selectedKeys.length > 1 && (
-              <p id={ids.applyNote} className="text-[12.5px] leading-[19px] font-semibold text-[#4a5565]">
+              <p id={ids.applyNote} className={HELP_TEXT_CLASS}>
                 선택한 대상 {selectedKeys.length}곳에 같은 설정이 적용됩니다
               </p>
             )}
@@ -474,8 +534,8 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
             disabled={!saveEnabled}
             aria-busy={saving || undefined}
             aria-describedby={[ids.hint, hadDifferences && selectedKeys.length > 1 ? ids.applyNote : null].filter(Boolean).join(' ')}
-            className={`h-12 rounded-[14px] bg-brand px-8 text-[15px] font-bold text-white transition-colors hover:bg-brand/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:bg-[#d1d5dc] ${
-              layout === 'mobile' ? 'w-full' : 'shrink-0'
+            className={`rounded-[14px] bg-brand font-bold text-white shadow-[0_4px_14px_rgba(15,92,84,0.3)] transition-colors hover:bg-brand/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:bg-[#e5e7eb] disabled:text-[#9ca3af] disabled:shadow-none ${
+              layout === 'desktop' ? 'shrink-0 px-6 py-2.5 text-[14px]' : 'h-[50px] w-full text-[15px]'
             }`}
           >
             {saving ? '저장 중…' : '저장'}
@@ -511,30 +571,33 @@ function mergeSaved(
 
 function SettingsSection({ title, disabled, children }: { title: string; disabled: boolean; children: ReactNode }) {
   return (
-    <section className={`${CARD_CLASS} p-5 md:p-6`}>
-      <h2 className={SECTION_TITLE_CLASS}>{title}</h2>
+    // 헤더 패딩 20/24/0/24, 본문 20/24/20/24(Figma 1.2)
+    <section className={CARD_CLASS}>
+      <h2 className={`px-6 pt-5 ${SECTION_TITLE_CLASS}`}>{title}</h2>
       {/* 대상을 고르지 않으면 입력을 막는다 — 무엇을 설정하는 화면인지는 보이게 섹션은 그대로 둔다(D5). */}
-      <fieldset disabled={disabled} className={`mt-3 min-w-0 ${disabled ? 'opacity-50' : ''}`}>
+      <fieldset disabled={disabled} className={`min-w-0 px-6 py-5 ${disabled ? 'opacity-50' : ''}`}>
         {children}
       </fieldset>
     </section>
   );
 }
 
+/** "대상마다 다름"(D3) — Figma에 없는 요소라 카드 설명과 같은 보조 텍스트 모양(Figma 1.8). */
 function MixedTag({ id }: { id: string }) {
   return (
-    <span id={id} className="ml-2 rounded-full bg-[#f3f4f6] px-2 py-0.5 align-middle text-[11px] leading-4 font-semibold text-[#4a5565]">
+    <span id={id} className={`ml-2 align-middle font-normal ${HELP_TEXT_CLASS}`}>
       {MIXED_TEXT}
     </span>
   );
 }
 
-function CheckVisual({ checked, disabled = false }: { checked: boolean; disabled?: boolean }) {
+/** 체크박스 20×20, radius 8, 선 2px(Figma 1.3). */
+function CheckVisual({ checked }: { checked: boolean }) {
   return (
     <span
       aria-hidden="true"
-      className={`flex size-5 shrink-0 items-center justify-center rounded-[6px] border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-brand peer-focus-visible:ring-offset-2 ${
-        disabled ? 'border-[#e5e7eb] bg-[#f3f4f6]' : checked ? 'border-brand bg-brand' : 'border-[#d1d5db] bg-white'
+      className={`flex size-5 shrink-0 items-center justify-center rounded-[8px] border-2 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-brand peer-focus-visible:ring-offset-2 ${
+        checked ? 'border-brand bg-brand' : 'border-[#d1d5dc] bg-white'
       }`}
     >
       {checked && <CheckIcon strokeWidth={1.5} className="size-3 text-white" />}
@@ -543,8 +606,8 @@ function CheckVisual({ checked, disabled = false }: { checked: boolean; disabled
 }
 
 const KIND_BADGE: Record<SettingTarget['kind'], { label: string; className: string }> = {
-  property: { label: '관심 매물', className: 'bg-[#e8f2f0] text-brand' },
-  region: { label: '관심 지역', className: 'bg-[#fef3c6] text-[#973c00]' },
+  property: { label: '관심 매물', className: 'bg-[#d1eae6] text-[#0b4a43]' },
+  region: { label: '관심 지역', className: 'bg-[#dbeafe] text-[#1447e6]' },
 };
 
 /** 대상 행 — 행 전체가 체크박스의 라벨이다. 유형 배지와 현재 설정 요약(D6)은 체크박스 설명으로 잇는다. */
@@ -568,9 +631,7 @@ function TargetRow({
     <label
       ref={rowRef}
       data-target-key={target.key}
-      className={`flex cursor-pointer items-center gap-3 rounded-[12px] border px-4 py-3 transition-colors ${
-        checked ? 'border-brand bg-[#f0f9f7]' : 'border-[#f3f4f6] bg-white hover:bg-[#f7f8fa]'
-      }`}
+      className={`${ROW_BASE_CLASS} cursor-pointer ${checked ? ROW_SELECTED_CLASS : ROW_UNSELECTED_CLASS}`}
     >
       <input
         type="checkbox"
@@ -581,12 +642,12 @@ function TargetRow({
       />
       <CheckVisual checked={checked} />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[14px] leading-[21px] font-semibold text-[#101828]">{target.name}</span>
-        <span id={summaryId} className="text-[12px] leading-[18px] text-[#99a1af]">
+        <span className={`truncate ${ROW_LABEL_CLASS} ${checked ? 'text-[#101828]' : 'text-[#364153]'}`}>{target.name}</span>
+        <span id={summaryId} className={HELP_TEXT_CLASS}>
           {summary}
         </span>
       </span>
-      <span id={badgeId} className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] leading-4 font-semibold ${badge.className}`}>
+      <span id={badgeId} className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] leading-[15px] font-bold ${badge.className}`}>
         {badge.label}
       </span>
     </label>
@@ -595,7 +656,7 @@ function TargetRow({
 
 /**
  * 요약 박스(D7). 보이는 문구는 즉시 바뀌고, 스크린리더용 알림은 값이 300ms 멈춘 뒤에만 갱신한다 — 슬라이더를 끄는 동안 매 단계
- * 읽히지 않게. 배너가 화면 밖에 있을 수 있어 0%일 때 이 박스도 경고 문구를 담는다.
+ * 읽히지 않게. 배너가 화면 밖에 있을 수 있어 0%일 때 스크린리더 알림에 경고 문구를 덧붙인다(보이는 경고는 빨간 박스 색).
  */
 function ThresholdSummary({ threshold, warning }: { threshold: number; warning: boolean }) {
   const text = thresholdSummary(threshold);
@@ -607,18 +668,13 @@ function ThresholdSummary({ threshold, warning }: { threshold: number; warning: 
   return (
     <div
       data-testid="threshold-summary"
-      className={`mt-4 rounded-[12px] border px-4 py-3 text-[13px] leading-5 ${
-        warning ? 'border-[#fee685] bg-[#fffbeb] text-[#973c00]' : 'border-[#d1eae6] bg-[#f0f9f7] text-brand'
+      // Figma 1.4 — 점 6px + 문구 하나. 0%면 빨강(글자 #c10007은 4.5:1 충족).
+      className={`mt-5 flex items-center gap-2 rounded-[14px] border px-3.5 py-2.5 text-[13px] leading-[19.5px] font-semibold ${
+        warning ? 'border-[#ffc9c9] bg-[#fef2f2] text-[#c10007]' : 'border-[#c5e0db] bg-[#f0f9f7] text-brand'
       }`}
     >
-      <p aria-hidden="true" className="font-semibold">
-        {text}
-      </p>
-      {warning && (
-        <p aria-hidden="true" className="mt-0.5 text-[12px] leading-[18px]">
-          변동이 있을 때마다 알림이 발송될 수 있습니다
-        </p>
-      )}
+      <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${warning ? 'bg-[#ef4444]' : 'bg-brand'}`} />
+      <p aria-hidden="true">{text}</p>
       <p aria-live="polite" className="sr-only">
         {announced}
         {warning && announced === text ? '. 변동이 있을 때마다 알림이 발송될 수 있습니다' : ''}
