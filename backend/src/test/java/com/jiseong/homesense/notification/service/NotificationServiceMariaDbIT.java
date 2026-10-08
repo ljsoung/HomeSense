@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -236,6 +237,59 @@ class NotificationServiceMariaDbIT {
         assertThat(regionRow.getPriceChangeThresholdPct()).isEqualByComparingTo("0");
         assertThat(regionRow.isNewTradeAlertYn()).isTrue();
         assertThat(regionRow.isEmailAlertYn()).isFalse();
+    }
+
+    /**
+     * 겹치는 대상을 서로 반대 순서로 담은 두 요청(두 탭)이 동시에 와도 교착으로 한쪽이 롤백되지 않는다 — 서비스가 요청 순서와
+     * 무관하게 정해진 순서로 upsert하기 때문이다(Codex 코드리뷰 P2). 요청 순서대로 보내면 각자 첫 행을 잠근 채 상대 행을
+     * 기다려 MariaDB가 한쪽을 deadlock으로 롤백시킨다. 타이밍에 따라 재현 여부가 갈리므로 여러 번 반복하고, 설정이 이미 있는
+     * 경우(갱신)와 없는 경우(신규) 모두 본다.
+     */
+    @Test
+    void 겹치는_대상을_반대_순서로_담은_두_요청이_동시에_와도_둘_다_성공한다() throws Exception {
+        User user = userRepository.saveAndFlush(User.createUser("ntf-lock-order@test.com", "encoded", "순서회원"));
+        Long userId = user.getUserId();
+        Long p1 = favoritePropertyRepository.saveAndFlush(FavoriteProperty.register(
+                user, complexRepository.saveAndFlush(complex("SRC-NTF-ORDER-1")), HousingType.APT)).getFavoritePropertyId();
+        Long p2 = favoritePropertyRepository.saveAndFlush(FavoriteProperty.register(
+                user, complexRepository.saveAndFlush(complex("SRC-NTF-ORDER-2")), HousingType.APT)).getFavoritePropertyId();
+        Long r1 = favoriteRegionRepository.saveAndFlush(FavoriteRegion.register(
+                user, legalDistrictCodeRepository.saveAndFlush(region("1168099996")))).getFavoriteRegionId();
+
+        UpdateNotificationSettingsCommand forward = new UpdateNotificationSettingsCommand(List.of(
+                item(p1, null, "3", true, true), item(p2, null, "3", true, true), item(null, r1, "3", true, true)));
+        UpdateNotificationSettingsCommand reversed = new UpdateNotificationSettingsCommand(List.of(
+                item(null, r1, "7", false, false), item(p2, null, "7", false, false), item(p1, null, "7", false, false)));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 20; round++) {
+                if (round % 2 == 0) { // 짝수 회차는 설정을 비워 신규 삽입끼리, 홀수 회차는 기존 행 갱신끼리 경쟁한다
+                    notificationSettingRepository.deleteAll(notificationSettingRepository.findByUser_UserId(userId));
+                }
+                CyclicBarrier startBarrier = new CyclicBarrier(2);
+                Future<?> a = executor.submit(() -> {
+                    startBarrier.await(10, TimeUnit.SECONDS);
+                    notificationService.updateSettings(userId, forward);
+                    return null;
+                });
+                Future<?> b = executor.submit(() -> {
+                    startBarrier.await(10, TimeUnit.SECONDS);
+                    notificationService.updateSettings(userId, reversed);
+                    return null;
+                });
+                // deadlock으로 롤백되면 get()이 ExecutionException을 던져 그 자체로 실패한다(몇 회차인지 메시지에 남긴다).
+                try {
+                    a.get(30, TimeUnit.SECONDS);
+                    b.get(30, TimeUnit.SECONDS);
+                } catch (ExecutionException e) {
+                    throw new AssertionError("round " + round + "(" + (round % 2 == 0 ? "신규" : "갱신") + ")에서 실패", e);
+                }
+                assertThat(notificationSettingRepository.findByUser_UserId(userId)).hasSize(3);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     /** 목록 중 하나라도 남의 관심 매물이면 403이고, 내 대상까지 포함해 아무것도 저장되지 않는다. */

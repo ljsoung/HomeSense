@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -21,6 +22,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -47,6 +49,7 @@ import com.jiseong.homesense.notification.exception.NotificationNotFoundExceptio
 import com.jiseong.homesense.notification.repository.NotificationRepository;
 import com.jiseong.homesense.notification.repository.NotificationSettingRepository;
 import com.jiseong.homesense.user.entity.User;
+import com.jiseong.homesense.user.repository.UserRepository;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
@@ -59,13 +62,15 @@ class NotificationServiceTest {
     private FavoritePropertyRepository favoritePropertyRepository;
     @Mock
     private FavoriteRegionRepository favoriteRegionRepository;
+    @Mock
+    private UserRepository userRepository;
 
     private NotificationService notificationService;
 
     @BeforeEach
     void setUp() {
         notificationService = new NotificationService(notificationSettingRepository, notificationRepository,
-                favoritePropertyRepository, favoriteRegionRepository);
+                favoritePropertyRepository, favoriteRegionRepository, userRepository);
     }
 
     // ---- updateSettings: 대상 검증 ----
@@ -207,6 +212,27 @@ class NotificationServiceTest {
                 eq(false), any(LocalDateTime.class));
         verify(notificationSettingRepository).upsert(eq(1L), isNull(), eq(200L), eq(new BigDecimal("10")), eq(false),
                 eq(true), any(LocalDateTime.class));
+    }
+
+    /**
+     * 요청 순서와 무관하게 관심 매물(id 오름차순) → 관심 지역(id 오름차순) 순서로 upsert한다 — 겹치는 대상을 다른 순서로 담은
+     * 두 요청이 서로의 행 잠금을 기다려 교착하지 않게 한다(실제 교착 여부는 `NotificationServiceMariaDbIT`).
+     */
+    @Test
+    void updateSettings_회원_행을_먼저_잠그고_요청_순서와_무관하게_매물_지역_순서로_id_오름차순_upsert한다() {
+        List<FavoriteProperty> properties = List.of(ownedProperty(300L, 1L), ownedProperty(100L, 1L));
+        List<FavoriteRegion> regions = List.of(ownedRegion(200L, 1L), ownedRegion(50L, 1L));
+        when(favoritePropertyRepository.findAllById(Set.of(300L, 100L))).thenReturn(properties);
+        when(favoriteRegionRepository.findAllById(Set.of(200L, 50L))).thenReturn(regions);
+
+        notificationService.updateSettings(1L, command(region(200L), property(300L), region(50L), property(100L)));
+
+        InOrder inOrder = inOrder(userRepository, notificationSettingRepository);
+        inOrder.verify(userRepository).lockForUpdate(1L);
+        inOrder.verify(notificationSettingRepository).upsert(eq(1L), eq(100L), isNull(), any(), anyBoolean(), anyBoolean(), any());
+        inOrder.verify(notificationSettingRepository).upsert(eq(1L), eq(300L), isNull(), any(), anyBoolean(), anyBoolean(), any());
+        inOrder.verify(notificationSettingRepository).upsert(eq(1L), isNull(), eq(50L), any(), anyBoolean(), anyBoolean(), any());
+        inOrder.verify(notificationSettingRepository).upsert(eq(1L), isNull(), eq(200L), any(), anyBoolean(), anyBoolean(), any());
     }
 
     // ---- getSettings ----
