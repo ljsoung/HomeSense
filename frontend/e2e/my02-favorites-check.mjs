@@ -156,7 +156,8 @@ async function scenarioRender(label, viewport, isDesktop) {
   await page.getByText('래미안 원베일리').waitFor({ timeout: 5000 });
   // 배지는 알림 설정 목록을 받은 뒤에 나타난다.
   await page.getByRole('link', { name: /알림 조건/ }).first().waitFor({ timeout: 5000 });
-  if (!isDesktop) {
+  // MY-02는 모바일에서만 공용 앱 바를 쓴다(태블릿은 페이지 제목).
+  if (label === '모바일') {
     ok(`${label} 1: 상단 앱 바 높이 52px`, await page.getByRole('heading', { level: 1 }).evaluate((h) => h.parentElement.getBoundingClientRect().height) === 52);
   }
   if (isDesktop) {
