@@ -24,11 +24,14 @@ export function BottomTabNav() {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-[#e5e7eb] bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
       {TABS.map(({ to, label, Icon }) => {
-        // 단지 상세(`/complexes/*`, DTL-01)는 검색에서 이어지는 화면이라 "검색" 탭을 활성으로 둔다.
+        // 단지 상세(`/complexes/*`, DTL-01)는 검색에서 이어지는 화면이라 "검색" 탭을 활성으로 둔다. 알림 설정·이력(MY-03·04,
+        // `/notifications/*`)은 마이페이지 하위 화면이라 "마이" 탭을 활성으로 둔다.
         const active =
           to === '/'
             ? location.pathname === '/'
-            : location.pathname.startsWith(to) || (to === '/search' && location.pathname.startsWith('/complexes/'));
+            : location.pathname.startsWith(to) ||
+              (to === '/search' && location.pathname.startsWith('/complexes/')) ||
+              (to === '/my' && location.pathname.startsWith('/notifications'));
         return (
           <Link
             key={to}

@@ -24,13 +24,25 @@ export interface NotificationResponse {
 /**
  * GET /api/notifications/settings 항목 — NotificationSettingResponse.java 실제 필드 그대로. favoritePropertyId와
  * favoriteRegionId 중 정확히 하나만 채워진다. 대상 이름은 없어 관심 매물·지역 목록과 ID로 조인한다(SVC-NTF-01 설계).
- * priceChangeThresholdPct는 0.0~100.0(%)이다.
+ * priceChangeThresholdPct는 0~20 정수(%)다(2026-10-07 이전 API로 저장한 범위 밖 값은 그대로 온다).
  */
 export interface NotificationSettingResponse {
   notificationSettingId: number;
   /** 대상이 아닌 쪽은 서버가 키를 빼서(non_null) undefined로 온다. */
   favoritePropertyId?: number | null;
   favoriteRegionId?: number | null;
+  priceChangeThresholdPct: number;
+  newTradeAlertYn: boolean;
+  emailAlertYn: boolean;
+}
+
+/**
+ * PUT /api/notifications/settings 요청 항목 — UpdateNotificationSettingsRequest.Item. 대상은 정확히 하나만 채운다(다른 쪽은 null).
+ * 임계치는 0~20 정수, 세 값은 모두 필수다. 요청 본문은 `{ settings: [...] }`(1~200건)이고 서버가 한 트랜잭션으로 저장한다.
+ */
+export interface NotificationSettingItem {
+  favoritePropertyId: number | null;
+  favoriteRegionId: number | null;
   priceChangeThresholdPct: number;
   newTradeAlertYn: boolean;
   emailAlertYn: boolean;
