@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -590,6 +591,43 @@ class ComplexGeocodingServiceTest {
         verify(redisState).markNotFound(1L, "RECHECK/KEYWORD_NAME_MISMATCH");
         verify(detailCache).evictIfPresent(1L);
         assertThat(result.dropped()).isEqualTo(1);
+    }
+
+    @Test
+    void 재판정도_일시_실패가_연달아_나오면_멈추고_좌표를_건드리지_않는다() {
+        for (long id = 1; id <= 5; id++) {
+            approximate(id, "강남구", "대치동", "단지" + id, "37.5", "127.0");
+        }
+        when(complexRepository.findApproximateTargets()).thenReturn(approximate);
+        when(client.searchKeyword(anyString(), anyInt())).thenThrow(new GeocodingTransientException("HTTP_502"));
+
+        ComplexGeocodingService.RecheckResult result = service(10_000, 0, 3, 100).recheckApproximate(Integer.MAX_VALUE);
+
+        verify(client, times(3)).searchKeyword(anyString(), anyInt()); // 4·5번째 단지는 보내지 않는다
+        verify(complexRepository, never()).clearApproximateCoordinates(anyLong(), any());
+        verify(complexRepository, never()).updateApproximateCoordinates(anyLong(), any(), any(), any());
+        assertThat(result.transientFailed()).isEqualTo(3);
+        assertThat(result.calls()).isEqualTo(3);
+        assertThat(result.stopReason()).isEqualTo(StopReason.CONSECUTIVE_TRANSIENT_FAILURES);
+    }
+
+    @Test
+    void 재판정의_연속_일시_실패는_판정에_성공한_단지에서_다시_센다() {
+        approximate(1L, "강남구", "대치동", "단지1", "37.5", "127.0");
+        approximate(2L, "강남구", "대치동", "단지2", "37.5", "127.0");
+        approximate(3L, "강남구", "대치동", "대치푸르지오써밋", "37.5014784", "127.0617312");
+        approximate(4L, "강남구", "대치동", "단지4", "37.5", "127.0");
+        approximate(5L, "강남구", "대치동", "단지5", "37.5", "127.0");
+        when(complexRepository.findApproximateTargets()).thenReturn(approximate);
+        when(client.searchKeyword(anyString(), anyInt())).thenThrow(new GeocodingTransientException("HTTP_502"));
+        doReturn(lastPage(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")))
+                .when(client).searchKeyword("강남구 대치푸르지오써밋", 1);
+
+        ComplexGeocodingService.RecheckResult result = service(10_000, 0, 3, 100).recheckApproximate(Integer.MAX_VALUE);
+
+        assertThat(result.kept()).isEqualTo(1);
+        assertThat(result.transientFailed()).isEqualTo(4);
+        assertThat(result.stopReason()).isEqualTo(StopReason.COMPLETED);
     }
 
     @Test

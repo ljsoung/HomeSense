@@ -364,7 +364,8 @@ public class ComplexGeocodingService {
      *   <li>다시 채택되면 좌표가 같으면 그대로 두고, 다른 장소가 골라졌으면 그 좌표로 바꾼다(APPROXIMATE 유지).</li>
      *   <li>탈락하면 좌표를 NULL로 되돌리고 "못 찾음" 표시를 남긴다 — 이후 {@code --retry-failed}로 다시 돌릴 수 있다.</li>
      * </ul>
-     * 호출 규칙(일일 카운터·429·401·403 중단·5xx 재시도)은 {@link #run}과 같다. 단지마다 바로 커밋한다(건수가 적다).
+     * 호출 규칙(일일 카운터·429·401·403 중단·5xx 재시도·연속 일시 실패 시 중단)은 {@link #run}과 같다. 단지마다 바로 커밋한다
+     * (건수가 적다).
      */
     public RecheckResult recheckApproximate(int maxComplexes) {
         List<ApproximateTarget> targets = complexRepository.findApproximateTargets().stream()
@@ -376,6 +377,7 @@ public class ComplexGeocodingService {
         int moved = 0;
         int dropped = 0;
         int checked = 0;
+        int consecutiveTransient = 0;
         StopReason stopReason = StopReason.COMPLETED;
         try {
             for (ApproximateTarget a : targets) {
@@ -390,12 +392,18 @@ public class ComplexGeocodingService {
                     stopReason = StopReason.DAILY_LIMIT;
                     break;
                 } catch (GeocodingTransientException e) {
-                    // 판정하지 못한 단지는 그대로 둔다(좌표 유지). 다음 recheck 실행이 다시 본다.
+                    // 판정하지 못한 단지는 그대로 둔다(좌표 유지). 다음 recheck 실행이 다시 본다. 연달아 나오면 run()과 같은
+                    // 기준으로 멈춘다 — 카카오 장애 중에 남은 단지를 모두 재시도하며 쿼터를 쓰지 않게 한다.
                     counter.transientFailed++;
                     auditLogger.logGeocodingFailure(a.target().complexId(), a.target().address(), e.getMessage(), true);
                     checked++;
+                    if (++consecutiveTransient >= properties.maxConsecutiveTransientFailures()) {
+                        stopReason = StopReason.CONSECUTIVE_TRANSIENT_FAILURES;
+                        break;
+                    }
                     continue;
                 }
+                consecutiveTransient = 0;
                 checked++;
                 Long complexId = a.target().complexId();
                 LocalDateTime now = LocalDateTime.now(clock);
