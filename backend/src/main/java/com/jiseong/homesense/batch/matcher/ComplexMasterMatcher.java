@@ -5,8 +5,6 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
@@ -26,16 +24,10 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ComplexMasterMatcher {
 
-    /**
-     * legal_dong_address는 실제로는 "시도 시군구 동리 지번 단지명" 형태다 — 지번 뒤에 단지명이 그대로
-     * 이어 붙는다(실 DB 데이터로 확인, 예: "서울특별시 종로구 숭인동 766 종로청계힐스테이트"). 예전에는
-     * 이 컬럼이 지번으로 끝난다고 가정해 문자열 끝($)에 anchor한 정규식을 썼는데, 그 가정이 틀려
-     * match_method=EXACT가 전국 0건이 되는 원인이었다(dongRi 뒤에서 지번을 추출하는
-     * {@link #extractJibunFromAddress(Complex)}로 대체). draft.jibun()은 단일 토큰이라
-     * {@link #normalizeStandaloneJibun(String)}으로 전체 일치를 그대로 검사한다.
+    /*
+     * 지번 추출(JibunExtractor)은 legal_dong_address가 "시도 시군구 동리 지번 단지명" 형태라 dongRi 바로 뒤에서 시작
+     * 앵커로 읽는다. 예전에는 문자열 끝($)에 anchor해 match_method=EXACT가 전국 0건이었다(CLAUDE.md BAT-MAT-02 버그 B).
      */
-    private static final Pattern JIBUN_LEADING_PATTERN = Pattern.compile("^(산)?\\s*([0-9]+(-[0-9]+)?)");
-    private static final Pattern JIBUN_STANDALONE_PATTERN = Pattern.compile("^(산)?\\s*([0-9]+(-[0-9]+)?)$");
     private static final int NGRAM_SIZE = 3;
 
     private static final BigDecimal EXACT_CONFIDENCE = new BigDecimal("1.000");
@@ -117,44 +109,13 @@ public class ComplexMasterMatcher {
      * "산" 접두 여부까지 일치해야 같은 지번으로 본다 — 산번지와 일반 지번은 다른 필지다.
      */
     private Optional<String> normalizeStandaloneJibun(String raw) {
-        if (raw == null) {
-            return Optional.empty();
-        }
-        Matcher matcher = JIBUN_STANDALONE_PATTERN.matcher(raw.trim());
-        if (!matcher.matches()) {
-            return Optional.empty();
-        }
-        return Optional.of(jibunKey(matcher));
+        return JibunExtractor.parseStandalone(raw).map(JibunExtractor.Jibun::key);
     }
 
-    /**
-     * legal_dong_address는 "...동리 지번 단지명" 형태로 지번 뒤에 단지명이 그대로 이어 붙는다 —
-     * candidate.dongRi로 동리 텍스트가 끝나는 위치를 먼저 찾고, 그 바로 뒤에서 지번 토큰만 시작
-     * 앵커(lookingAt)로 추출한다. 단지명이 숫자로 시작하든 아니든 뒤에 남는 텍스트는 매치 대상이
-     * 아니므로 영향받지 않는다.
-     */
+    /** candidate.dongRi 바로 뒤의 지번(JibunExtractor.afterDongRi). 뒤에 붙은 단지명은 영향을 주지 않는다. */
     private Optional<String> extractJibunFromAddress(Complex candidate) {
-        String address = candidate.getLegalDongAddress();
-        String dongRi = candidate.getDongRi();
-        if (address == null || dongRi == null) {
-            return Optional.empty();
-        }
-        int idx = address.indexOf(dongRi);
-        if (idx < 0) {
-            return Optional.empty();
-        }
-        String remainder = address.substring(idx + dongRi.length()).trim();
-        Matcher matcher = JIBUN_LEADING_PATTERN.matcher(remainder);
-        if (!matcher.lookingAt()) {
-            return Optional.empty();
-        }
-        return Optional.of(jibunKey(matcher));
-    }
-
-    private String jibunKey(Matcher matcher) {
-        boolean isMountainLot = matcher.group(1) != null;
-        String number = matcher.group(2).replaceAll("\\s+", "");
-        return (isMountainLot ? "산" : "") + number;
+        return JibunExtractor.afterDongRi(candidate.getLegalDongAddress(), candidate.getDongRi())
+                .map(JibunExtractor.Jibun::key);
     }
 
     private boolean isNameExactMatch(String draftName, String complexName) {
