@@ -377,8 +377,8 @@ async function scenarioKeyboard(label, viewport) {
 
 async function scenarioPlaceholders(label, viewport) {
   const { context, page } = await open(viewport);
-  // MY-02(/favorites)는 2026-10-02 구현됐다 — my02-favorites-check가 검증한다.
-  for (const [to, id] of [['/notifications/settings', 'MY-03'], ['/notifications', 'MY-04'], ['/my/profile', 'MY-05']]) {
+  // MY-02(/favorites)는 2026-10-02, MY-03(/notifications/settings)은 2026-10-07 구현됐다 — my02·my03 e2e가 검증한다.
+  for (const [to, id] of [['/notifications', 'MY-04'], ['/my/profile', 'MY-05']]) {
     await page.goto(`${BASE}${to}`);
     ok(`${label} 5절: ${to} 준비 중(${id})`, await page.getByText(id, { exact: true }).waitFor({ timeout: 5000 }).then(() => true, () => false)
       && (await page.getByText('준비 중인 화면입니다.').isVisible()));

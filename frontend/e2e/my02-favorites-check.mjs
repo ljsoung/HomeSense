@@ -156,6 +156,10 @@ async function scenarioRender(label, viewport, isDesktop) {
   await page.getByText('래미안 원베일리').waitFor({ timeout: 5000 });
   // 배지는 알림 설정 목록을 받은 뒤에 나타난다.
   await page.getByRole('link', { name: /알림 조건/ }).first().waitFor({ timeout: 5000 });
+  // MY-02는 모바일에서만 공용 앱 바를 쓴다(태블릿은 페이지 제목).
+  if (label === '모바일') {
+    ok(`${label} 1: 상단 앱 바 높이 52px`, await page.getByRole('heading', { level: 1 }).evaluate((h) => h.parentElement.getBoundingClientRect().height) === 52);
+  }
   if (isDesktop) {
     ok(`${label} 1: 세로 섹션(관심 매물·관심 지역·추가)`, (await page.getByRole('heading', { level: 2, name: /관심 매물/ }).isVisible())
       && (await page.getByRole('heading', { level: 2, name: /관심 지역$|관심 지역\s*\d/ }).first().isVisible())
@@ -175,7 +179,7 @@ async function scenarioRender(label, viewport, isDesktop) {
   const t2 = await page.locator('li[data-favorite-key="property:2"]').innerText();
   const t3 = await page.locator('li[data-favorite-key="property:3"]').innerText();
   const t4 = await page.locator('li[data-favorite-key="property:4"]').innerText();
-  ok(`${label} 1: 배지 문구(임계치만·설정 없음·꺼짐)`, t2.includes('±2.5% 알림') && t3.includes('알림 설정') && t4.includes('알림 꺼짐'));
+  ok(`${label} 1: 배지 문구(임계치만·설정 없음·꺼짐)`, t2.includes('±2.5% 알림') && t3.includes('알림 설정') && t4.includes('이메일 꺼짐'));
   const bodyText = await page.locator('body').innerText();
   ok(`${label} 1: 빠진 필드(null 생략)가 NaN·undefined로 보이지 않음`, !/NaN|undefined/.test(bodyText), bodyText.match(/.{0,20}(NaN|undefined).{0,20}/)?.[0]);
   ok(`${label} 1: 하락·변동없음·거래 없음`, t2.includes('▼ 1.1%') && t4.includes('변동없음') && t3.includes('거래 없음') && t3.includes('—'));
@@ -249,7 +253,7 @@ async function scenarioSettingsFail(label, viewport) {
   const badges = await page.getByRole('link', { name: /알림 조건/ }).count();
   const listText = await page.locator('li[data-favorite-key^="property:"]').allInnerTexts();
   ok(`${label} 8: 알림 설정 조회 실패 → 목록 4건 표시, 배지 없음, "알림 설정" 문구 없음`, items === 4 && badges === 0
-    && !listText.some((t) => t.includes('알림 설정') || t.includes('알림 꺼짐')), `items=${items} badges=${badges}`);
+    && !listText.some((t) => t.includes('알림 설정') || t.includes('이메일 꺼짐') || t.includes('알림 꺼짐')), `items=${items} badges=${badges}`);
   ok(`${label} 8: 매물 정보는 그대로(가격·변동률)`, listText.join(' ').includes('42억 5,000만원') && listText.join(' ').includes('3.2%'));
   await context.close();
 }
