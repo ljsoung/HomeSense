@@ -3,6 +3,7 @@ import type { NotificationSettingResponse } from '../../features/notification/ty
 import {
   DEFAULT_VALUES,
   buildSaveItems,
+  MAX_TARGETS_PER_SAVE,
   canSave,
   changedTargets,
   deriveForm,
@@ -123,6 +124,12 @@ describe('changedTargets·canSave·saveHint(D5)', () => {
     expect(canSave(1, 1, false, false)).toBe(false);
     expect(canSave(1, 1, true, true)).toBe(false);
     expect(canSave(1, 1, true, false)).toBe(true);
+  });
+
+  it('대상은 한 번에 200개까지 — 백엔드 요청 상한(@Size(max = 200))과 같다(D12)', () => {
+    expect(MAX_TARGETS_PER_SAVE).toBe(200);
+    expect(canSave(200, 200, true, false)).toBe(true);
+    expect(canSave(201, 201, true, false)).toBe(false);
   });
 });
 

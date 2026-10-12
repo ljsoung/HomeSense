@@ -14,6 +14,7 @@
 // 12. 저장 중(PUT 응답 전) 입력 잠금 → 응답 뒤 다시 열림
 // 13. PUT 성공 + 재조회 GET 실패 → 저장한 값 유지, 완료 토스트, 오류 배너 없음
 // 14. 키보드 저장 → 저장 중 aria-disabled·aria-busy(입력 무시), 응답 뒤 포커스 유지. 키보드 "다시 시도" 성공 뒤 포커스가 저장 버튼
+// 15. 관심 매물 205개: 선택 200개에서 막힘(나머지 행 비활성·안내), 저장 본문 200개, 하나 풀면 다시 고를 수 있음
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -60,7 +61,7 @@ const initialSettings = () => [
 const browser = await chromium.launch();
 
 /** putMode: 'ok'|'fail'|'failOnce'|'hold'. settingsMode: 'ok'|'fail'|'refetchFail'(PUT 성공 뒤의 재조회만 500). meMode: 'ok'|'fail'(세션 복원 뒤 화면의 내 정보 조회만 실패). */
-async function open(viewport, { query = '', empty = false, putMode = 'ok', settingsMode = 'ok', meMode = 'ok', loggedIn = true, path = '/notifications/settings' } = {}) {
+async function open(viewport, { query = '', empty = false, extraProperties = 0, putMode = 'ok', settingsMode = 'ok', meMode = 'ok', loggedIn = true, path = '/notifications/settings' } = {}) {
   const context = await browser.newContext({ viewport });
   if (loggedIn) {
     await context.addInitScript(() => {
@@ -90,7 +91,10 @@ async function open(viewport, { query = '', empty = false, putMode = 'ok', setti
       if (meMode === 'fail' && db.meCalls > 1) return json(500, errBody('INTERNAL_SERVER_ERROR', '프로필 서버 오류입니다'));
       return json(200, okBody(USER));
     }
-    if (p === '/api/favorites/properties') return json(200, okBody(empty ? [] : PROPERTIES));
+    if (p === '/api/favorites/properties') {
+      const extra = Array.from({ length: extraProperties }, (_, i) => property(1000 + i, `추가 단지 ${i + 1}`, '2026-08-01T10:00:00'));
+      return json(200, okBody(empty ? [] : [...PROPERTIES, ...extra]));
+    }
     if (p === '/api/favorites/regions') return json(200, okBody(empty ? [] : REGIONS));
     if (p === '/api/notifications/settings' && method === 'GET') {
       if (settingsMode === 'fail' || (settingsMode === 'refetchFail' && db.putDone)) {
@@ -419,6 +423,32 @@ async function scenarioKeyboardSaveFocus(label, viewport) {
   await retryRun.context.close();
 }
 
+// 관심 대상이 200개를 넘어도 한 번에 200개까지만 고를 수 있다(백엔드 @Size(max = 200), D12).
+async function scenarioSelectionCap(label, viewport) {
+  const { context, page, calls } = await open(viewport, { extraProperties: 199 }); // 매물 4 + 199 + 지역 2 = 205
+  await ready(page);
+  const boxes = page.locator('label[data-target-key] input[type="checkbox"]');
+  ok(`${label} 15: 대상 205행`, (await boxes.count()) === 205);
+  await boxes.evaluateAll((els) => els.slice(0, 201).forEach((el) => el.click()));
+  const checked = await boxes.evaluateAll((els) => els.filter((el) => el.checked).length);
+  ok(`${label} 15: 201개를 눌러도 200개만 선택`, checked === 200, String(checked));
+  const disabledCount = await boxes.evaluateAll((els) => els.filter((el) => el.disabled).length);
+  ok(`${label} 15: 고르지 않은 5행 비활성`, disabledCount === 5, String(disabledCount));
+  const note = page.getByRole('status').filter({ hasText: '한 번에 최대 200곳까지' });
+  ok(`${label} 15: 상한 안내 표시`, await note.isVisible());
+  const lastDescribed = await boxes.last().getAttribute('aria-describedby');
+  ok(`${label} 15: 막힌 행 설명에 안내 연결`, (lastDescribed ?? '').split(' ').includes(await note.getAttribute('id')));
+  ok(`${label} 15: 200개면 저장 가능`, await saveButton(page).isEnabled());
+  await saveButton(page).click();
+  ok(`${label} 15: 저장 토스트`, await page.getByText('알림 설정을 저장했어요').waitFor({ timeout: 5000 }).then(() => true, () => false));
+  const body = JSON.parse(puts(calls)[0]?.body ?? '{"settings":[]}');
+  ok(`${label} 15: 저장 본문 200개`, body.settings.length === 200, String(body.settings.length));
+  await boxes.first().evaluate((el) => el.click());
+  ok(`${label} 15: 하나 풀면 안내 사라짐·막힌 행 없음`,
+    (await note.count()) === 0 && (await boxes.evaluateAll((els) => els.filter((el) => el.disabled).length)) === 0);
+  await context.close();
+}
+
 async function scenarioEmpty(label, viewport) {
   const { context, page } = await open(viewport, { empty: true });
   ok(`${label} 6: 빈 상태 제목`, await page.getByText('알림을 받을 관심 매물·지역이 없어요').waitFor({ timeout: 10000 }).then(() => true, () => false));
@@ -540,6 +570,7 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioLockedWhileSaving(label, viewport, layout);
   await scenarioRefetchFailure(label, viewport);
   await scenarioKeyboardSaveFocus(label, viewport);
+  await scenarioSelectionCap(label, viewport);
   await scenarioEmpty(label, viewport);
   if (layout !== 'desktop') await scenarioNumberInput(label, viewport);
   await scenarioPageErrors(label, viewport);

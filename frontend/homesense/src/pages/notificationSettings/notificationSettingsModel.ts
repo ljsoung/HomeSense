@@ -154,9 +154,16 @@ export function saveHint(selectedCount: number, changedCount: number): SaveHint 
   return changedCount === 0 ? 'noChange' : 'changed';
 }
 
-/** 저장 버튼 활성 조건(D5) — 대상 1개 이상, 바뀌는 대상 1개 이상, 숫자 입력 유효, 저장 중 아님. */
+/**
+ * 한 번에 저장할 수 있는 대상 수 — 백엔드 `UpdateNotificationSettingsRequest.settings`의 `@Size(max = 200)`과 같아야 한다.
+ * 관심 매물·지역에는 개수 상한이 없어 화면이 선택을 이 수로 막는다(D12). 여러 요청으로 나누지 않는 이유: 한 번의 저장이
+ * 한 트랜잭션이라 일부만 저장되는 상태가 없다는 전제를 지킨다.
+ */
+export const MAX_TARGETS_PER_SAVE = 200;
+
+/** 저장 버튼 활성 조건(D5) — 대상 1개 이상 200개 이하, 바뀌는 대상 1개 이상, 숫자 입력 유효, 저장 중 아님. */
 export function canSave(selectedCount: number, changedCount: number, inputValid: boolean, saving: boolean): boolean {
-  return selectedCount > 0 && changedCount > 0 && inputValid && !saving;
+  return selectedCount > 0 && selectedCount <= MAX_TARGETS_PER_SAVE && changedCount > 0 && inputValid && !saving;
 }
 
 /** 표시용 임계치 — 저장된 값이 정수가 아니면(직접 API 호출로만 가능) 반올림하지 않고 그대로 보인다(D10). */

@@ -19,6 +19,7 @@ import { loadProfile } from '../my/myPageData';
 import { RowSkeleton } from '../my/SectionCard';
 import { useLoadable } from '../my/useLoadable';
 import {
+  MAX_TARGETS_PER_SAVE,
   SAVE_HINT_TEXT,
   THRESHOLD_MAX,
   THRESHOLD_MIN,
@@ -236,6 +237,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
     emailHelp: useId(),
     emailMixed: useId(),
     pushBadge: useId(),
+    capNote: useId(),
   };
 
   const settingsByKey = useMemo(() => indexSettings(settings), [settings]);
@@ -250,6 +252,8 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
   const saveSoftDisabled = !saveEnabled && (saving || saveFocused);
   const hint = saveHint(selectedKeys.length, changed.length);
   const noSelection = selectedKeys.length === 0;
+  // 선택이 요청 상한(200)에 닿으면 고르지 않은 행을 막는다(D12).
+  const atCap = selectedKeys.length >= MAX_TARGETS_PER_SAVE;
   const zero = values.threshold === 0;
 
   // 진입 쿼리로 고른 대상이 보이도록 한 번 스크롤한다(D9).
@@ -263,6 +267,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
   const toggleTarget = (key: string, checked: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
+      if (checked && prev.size >= MAX_TARGETS_PER_SAVE) return prev;
       if (checked) next.add(key);
       else next.delete(key);
       return next;
@@ -376,6 +381,14 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
           <p className={`mt-0.5 px-6 ${HELP_TEXT_CLASS} leading-[19.5px]`}>
             알림을 설정할 관심 매물·지역을 고르세요. 여러 곳을 고르면 같은 설정이 함께 저장됩니다.
           </p>
+          {/* 상한 안내 — 라이브 영역이라 늘 렌더하고 내용만 바꾼다. 막힌 행의 설명으로도 잇는다. */}
+          <p
+            id={ids.capNote}
+            role="status"
+            className={atCap ? 'mx-6 mt-3 rounded-[12px] border border-[#fee685] bg-[#fffbeb] px-3.5 py-2.5 text-[12.5px] leading-[19px] text-[#973c00]' : 'sr-only'}
+          >
+            {atCap ? `한 번에 최대 ${MAX_TARGETS_PER_SAVE}곳까지 선택할 수 있어요. 다른 대상을 고르려면 선택을 하나 풀어 주세요.` : ''}
+          </p>
           <div className="flex flex-col gap-2 px-6 py-5">
             {targets.map((target) => (
               <TargetRow
@@ -383,6 +396,8 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
                 target={target}
                 summary={describeTargetSetting(settingsByKey.get(target.key))}
                 checked={selected.has(target.key)}
+                capped={atCap && !selected.has(target.key)}
+                capNoteId={ids.capNote}
                 onChange={(checked) => toggleTarget(target.key, checked)}
                 rowRef={(element) => {
                   if (element) rowRefs.current.set(target.key, element);
@@ -651,12 +666,17 @@ function TargetRow({
   target,
   summary,
   checked,
+  capped,
+  capNoteId,
   onChange,
   rowRef,
 }: {
   target: SettingTarget;
   summary: string;
   checked: boolean;
+  /** 선택 상한(200)에 닿아 이 행은 고를 수 없다(D12). */
+  capped: boolean;
+  capNoteId: string;
   onChange: (checked: boolean) => void;
   rowRef: (element: HTMLLabelElement | null) => void;
 }) {
@@ -667,13 +687,14 @@ function TargetRow({
     <label
       ref={rowRef}
       data-target-key={target.key}
-      className={`${ROW_BASE_CLASS} cursor-pointer ${checked ? ROW_SELECTED_CLASS : ROW_UNSELECTED_CLASS}`}
+      className={`${ROW_BASE_CLASS} cursor-pointer ${checked ? ROW_SELECTED_CLASS : ROW_UNSELECTED_CLASS} ${capped ? 'opacity-50' : ''}`}
     >
       <input
         type="checkbox"
         checked={checked}
+        disabled={capped || undefined}
         onChange={(event) => onChange(event.target.checked)}
-        aria-describedby={`${badgeId} ${summaryId}`}
+        aria-describedby={`${badgeId} ${summaryId}${capped ? ` ${capNoteId}` : ''}`}
         className="peer sr-only"
       />
       <CheckVisual checked={checked} />
