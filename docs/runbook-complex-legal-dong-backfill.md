@@ -204,6 +204,10 @@ apply가 자동으로 하므로 6단계는 WARN이 있을 때만 한다.
 재적재로 기존 단지의 **주소가 바뀐** 경우는 러너가 다시 계산하지 않는다(값이 이미 있음). 그 행의
 `legal_dong_cd`를 NULL로 되돌린 뒤 러너를 실행한다.
 
+legal_dong_cd 백필이 끝나면 **이어서 10단계(좌표 지오코딩)를 실행**한다. 순서: 단지 마스터 재적재 → legal_dong_cd
+백필 → 지오코딩 백필. 주소가 바뀐 단지는 좌표도 다시 계산하지 않으므로 `latitude`/`longitude`/`location_precision`도
+NULL로 되돌린 뒤 실행한다.
+
 ## 9. 법정동코드 재적재 (행정구역 개편 등, 비정기)
 
 재적재는 서비스 중인 앱이 아니라 **별도 프로세스**(`reload-legal-district` 프로필)에서 돈다. 서비스 중인 앱의
@@ -235,3 +239,30 @@ apply가 자동으로 하므로 6단계는 WARN이 있을 때만 한다.
 5. **버전 발행에 실패했으면 서비스 중인 앱을 모두 재시작한다.** 재시작하면 prefix 맵을 DB에서 새로 만든다.
    재적재 자체는 이미 커밋됐으므로 다시 돌릴 필요가 없다.
 6. `RegionCoverageChecker` 로그에서 커버리지 공백이 0건인지 확인한다(CLAUDE.md "법정동코드 참조자료 재적재" 절).
+
+## 10. 단지 좌표 지오코딩 (BAT-GEO-01)
+
+`complex.latitude IS NULL`인 단지만 카카오 주소 검색(REST API 키, `KAKAO_API_KEY`)으로 좌표를 채운다. 운영 DB는
+**백엔드 첫 배포 때** 이 단계로 채운다. 단지당 호출 1회라 전체 백필은 약 2.1만 회다.
+
+1. 카카오 개발자 콘솔 [통계] > [쿼터]에서 일일 한도와 오늘 사용량을 확인하고, 그보다 낮게 `GEOCODING_DAILY_LIMIT`을
+   정한다(기본 10000). 이 상한은 러너와 03:00 정기 런이 Redis 카운터 `geo:calls:{yyyyMMdd}` 하나로 같이 센다.
+2. dry-run(카카오 호출 없음) — 정제 가능 건수와 지번 없는 단지 표본을 확인한다.
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding
+   ```
+3. apply — 처음에는 `--limit=20`으로 표본을 확인하고(좌표를 카카오맵 링크로 눈으로 확인), 이상이 없으면 제한 없이 실행한다.
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --limit=20
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply
+   ```
+   일일 상한에 닿으면 종료 사유 `DAILY_LIMIT`, 종료 코드 0으로 끝난다. 다음 날 같은 명령을 다시 실행하거나 03:00 정기 런이
+   이어서 처리한다(좌표 NULL인 단지만 고르므로 자연히 이어진다). 종료 코드 1이면 `CONFIGURATION_ERROR`(401·403 —
+   REST API 키와 콘솔의 카카오맵 활성화 확인) 또는 예외다.
+4. 검증
+   ```sql
+   SELECT COUNT(*), COUNT(latitude), SUM(location_precision = 'PRECISE') FROM complex;
+   ```
+   좌표가 끝내 NULL로 남는 단지는 지번이 없는 단지(약 1.0%)와 카카오가 주소를 못 찾은 단지다. 못 찾은 단지는 Redis
+   `geo:fail:{complexId}`가 남아 있는 동안(기본 30일) 다시 호출하지 않는다 — 즉시 다시 시도하려면 그 키를 지운다.
+5. 캐시 — 러너가 좌표를 쓴 단지의 `complexDetailV3` 항목을 청크마다 지운다(evictIfPresent). 별도 작업은 없다.

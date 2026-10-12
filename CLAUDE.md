@@ -1171,6 +1171,7 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 - 3.3절 SVC-CPX-01 `getDetail()` 응답: `matchMethod`(대표 거래 기준) 추가, 캐시 이름 `complexDetailV3`(2026-09-30).
 - 3.4절 SVC-TRD-01 `getHistory()` 응답 `TradeResponse`: `cancelDate`, `dealingType`(`AGENT`/`DIRECT`) 추가(2026-09-30).
 - 3.3절 SVC-CPX-01 `getDetail()` 응답: `legalDongCd` 추가(2026-09-30).
+- 4.8절 BAT-GEO-01: 도로명 우선 → **지번 단일 경로**(road_address 제거), 주소 정제 규칙, 일일 호출 상한·"못 찾음" 건너뛰기, 실행 위치(BAT-SCH-01 적재 뒤·BAT-NTF-01 앞)와 일회성 백필 러너(2026-10-12, "BAT-GEO-01 지오코딩" 절).
 - **테이블정의서 3.5절·8장 `notification.sent_at`: NOT NULL → NULL 허용, 설명 "발송 완료 시각, NULL=발송 대기"(2026-10-06, BAT-NTF-01 D1).**
 - 3.8절 SVC-NTF-01 `getNotifications()`: 정렬 `created_at DESC, notification_id DESC`(sent_at 아님), 응답에 `createdAt` 추가, `sentAt`은 미발송 시 null이라 JSON 키가 빠진다(2026-10-06).
 - **UI정의서 5.5절 MY-04(알림 이력) 응답·"발생 일시": `createdAt` 기준, 미발송 알림도 표시, `sentAt`은 생략될 수 있음(2026-10-06).**
@@ -1274,9 +1275,9 @@ BAT-SCH-01 조합 순회가 끝나면 `WatchConditionEvaluator.evaluateAfterLoad
 | --- | --- | --- | --- | --- |
 | 국토부 serviceKey | `DataGoKrProperties` | `homesense.external.data-go-kr` | BAT-CLC-01, `OpenApiRestClientConfig`가 `@EnableConfigurationProperties` | `@NotBlank` |
 | JWT 서명 키 | `JwtProperties` | `homesense.security.jwt` | COM-SEC-01/02, `SecurityConfig`가 `@EnableConfigurationProperties` | `@NotBlank`(길이 검증은 `JwtTokenProvider` 생성자의 `Keys.hmacShaKeyFor()`가 `WeakKeyException`으로 담당) |
-| 카카오 API 키 | `KakaoProperties` | `homesense.external.kakao` | 아직 없음(`ExternalApiConfig`가 임시로 `@EnableConfigurationProperties`만) | 없음(의도적) |
+| 카카오 REST API 키 | `KakaoProperties` | `homesense.external.kakao` | BAT-GEO-01, `GeocodingConfig`가 `@EnableConfigurationProperties` | `@NotBlank`(2026-10-12) |
 
-카카오 키만 `@NotBlank`를 걸지 않았습니다 — BAT-GEO-01(지오코딩)이 아직 3단계 범위라 구현되지 않아 이 값을 소비하는 코드가 없고, 걸어 버리면 BAT-GEO-01 없이 배포하는 1~2단계에서도 `KAKAO_API_KEY`가 없다는 이유로 기동이 막힙니다. BAT-GEO-01을 구현하는 시점에 `DataGoKrProperties`와 같은 패턴(`@Validated` + `@NotBlank`)을 추가하고, `KakaoProperties` 등록을 `ExternalApiConfig`에서 그 소비자의 설정 클래스로 옮기세요.
+**[처리완료 2026-10-12, `feature/backend/geocoding`]** 카카오 키는 BAT-GEO-01이 소비자가 되면서 다른 두 시크릿과 같이 `@Validated` + `@NotBlank`로 바꿨고, 임시 등록처였던 `ExternalApiConfig`는 지우고 `GeocodingConfig`로 옮겼다. 이 키는 **REST API 키**다(프론트 지도 SDK의 JavaScript 키와 다르다). 이제 `KAKAO_API_KEY`가 비어 있으면 기동이 막힌다 — 테스트 컨텍스트는 `src/test/resources/application.properties`의 테스트용 값을 쓴다.
 
 `@Validated`/`@NotBlank`는 Spring이 `@ConfigurationProperties`를 바인딩하는 시점에만 동작합니다 — `new JwtProperties("", ...)`처럼 레코드를 직접 생성하는 단위 테스트에서는 트리거되지 않으므로(검증하려면 `ApplicationContextRunner`로 실제 컨텍스트를 띄워야 함, `ExternalApiPropertiesTest` 참고), `JwtTokenProviderTest`가 만료 토큰을 만들려고 `accessTokenValidity`에 음수를 직접 넣는 것과 충돌하지 않습니다.
 
@@ -1292,7 +1293,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 
 캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다. **캐시 이름은 반드시 `CacheNames` 상수로 쓰고, 새 캐시는 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다(`CacheConfigTest`·`CacheNameRegistrationTest`가 강제)** — 미등록 캐시는 자동 생성되지 않는다(2026-09-27 리스트 캐시 500 hotfix, "단지 검색 지역코드·키워드·거래유형" 절 참고). 캐시 조회·저장 실패는 `CacheErrorHandler`가 로그만 남기고 미스로 처리한다.
 
-**`ComplexDetailResponse`·인기 단지 응답에 들어가는 값(complex 컬럼, 대표 거래의 complex_id/match_method)을 바꾸는 모든 경로는 커밋 후 해당 캐시를 evict한다(단건은 이벤트, 일괄은 전체 clear).** 단건 경로: `TradeDataLoader`(적재), `TradeRematchRunner`(재매칭) → `TradeCacheEvictionEvent`. 일괄 경로: `ComplexLegalDongBackfillService`(complex.legal_dong_cd 백필) → 전체 비움. 단지 마스터 적재기가 저장소에 들어오면 그것도 이 규칙을 따른다.
+**`ComplexDetailResponse`·인기 단지 응답에 들어가는 값(complex 컬럼, 대표 거래의 complex_id/match_method)을 바꾸는 모든 경로는 커밋 후 해당 캐시를 evict한다(단건은 이벤트, 일괄은 전체 clear).** 단건 경로: `TradeDataLoader`(적재), `TradeRematchRunner`(재매칭) → `TradeCacheEvictionEvent`. 일괄 경로: `ComplexLegalDongBackfillService`(complex.legal_dong_cd 백필) → 전체 비움. 좌표: `ComplexGeocodingService`(BAT-GEO-01)가 청크 커밋 뒤 좌표를 쓴 단지의 `complexDetailV3` 항목만 `evictIfPresent`로 지운다(인기 단지 응답에는 좌표가 없다). 단지 마스터 적재기가 저장소에 들어오면 그것도 이 규칙을 따른다.
 
 **코드에서 캐시를 지울 때는 `Cache.evict()`/`clear()`가 아니라 `evictIfPresent()`/`invalidate()`를 쓴다(2026-09-30).** Spring Data Redis 4.1.1은 Lettuce 연결에서 `evict()`/`clear()`를 비동기로 보내고 결과를 기다리지 않는다(`DefaultRedisCacheWriter.writeAsynchronously()`). 그래서 `System.exit`로 끝나는 1회성 러너에서는 삭제가 Redis에 닿기 전에 사라질 수 있고(백필 러너로 재현: `clear()` 뒤 `popularComplexesV3::8`이 남았다), Redis 오류도 호출부의 try-catch에 잡히지 않는다. `evictIfPresent()`/`invalidate()`는 Spring `Cache` 계약상 즉시 실행이다. `@CacheEvict` 애노테이션은 이 경로를 쓰지 않는다 — 쓰게 되면 `beforeInvocation`이나 즉시 실행 여부를 따로 확인한다.
 
@@ -2029,6 +2030,50 @@ complex WHERE dong_ri='주봉리'` 등 3개 표본), **정규화 로직 오류�
 완료. 재매칭 후 매칭률이 프로젝트 실측 기준선(90.4%) 근처(92.1%)로 나옴 — 완료. 미매칭 원인이 기존
 카테고리와 같은 성격임을 실제 조회로 확인(추정 아님) — 완료. 위 "lawd_cd 커버리지 공백" 절의 우선순위
 높음 태그는 이 절의 완료로 해제한다. **남은 절차 없음** — 이 이슈는 완전히 닫혔다.
+
+### BAT-GEO-01 지오코딩 (2026-10-12, `feature/backend/geocoding`)
+
+`complex.latitude`/`longitude`/`location_precision`을 채운다. 기존 단지 21,680건은 일회성 러너(`backfill-geocoding` 프로필)로 채운다. 그 뒤로 좌표 없는 단지는 BAT-SCH-01 03:00 런 끝에서 처리한다(적재 뒤, BAT-NTF-01 앞 — 설계서 6.3절 순서). 코드: `batch/geocoding/`(`ComplexGeocodingService`, `KakaoGeocodingClient`, `GeocodingAddressRefiner`, `GeocodingRedisState`, `ComplexGeocodingCommandLineRunner`), `common/config/GeocodingConfig`·`GeocodingProperties`. 운영 절차: `docs/runbook-complex-legal-dong-backfill.md` 10절. 확인에 쓴 문서: 프로그램설계서 v2.1.1 4.8절(Downloads 사본, `docs/specs/` 없음).
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| **지번 단일 경로(설계서 이탈)** | 설계서 4.8절의 "도로명 우선, 실패 시 지번" 대신 지번만 쓴다. 지번을 못 뽑는 단지는 호출하지 않고 좌표 NULL로 둔다. 이런 단지는 지도에 나오지 않는다 | complex에서 road_address 컬럼을 이미 제거했다(미사용 컬럼 제거 원칙). 로컬 실측(2026-10-12)에서 지번 없는 단지는 227건(1.05%)이다. UI정의서 7.3절 "매칭 대기(약 1.1%)"와 같은 범주로 본다 | 지번 없는 단지를 지도에 꼭 띄워야 하면 road_address 재도입(단지 마스터 재적재 포함)을 검토한다 |
+| **주소 정제** | `GeocodingAddressRefiner`가 정제한다. 쉼표로 나눈 조각 중 지번이 있는 첫 조각을 고르고, 동리 **토큰** 바로 뒤의 "(산)본번(-부번)"까지만 남긴다. 끝의 하이픈("73-")과 단지명은 버리고 연속 공백은 하나로 줄인다. 본번 0은 지번으로 보지 않는다. 지번 추출은 BAT-MAT-02의 정규식을 `batch.matcher.JibunExtractor`로 꺼내 두 곳이 같이 쓴다(ComplexMasterMatcher 동작은 그대로이고 기존 테스트도 통과한다) | 로컬 실측: 원본 "법정동주소"는 전부 뒤에 단지명이 붙어 있다. 부번 없이 하이픈만 남은 경우가 1,014건, 쉼표로 이어진 다중 주소가 1,374건이다. 동리를 `indexOf`가 아니라 토큰 일치로 찾는 이유는 단지명 안의 같은 글자("신월동아파트")를 잡지 않기 위해서다. `dong_ri`가 NULL인 9건은 동리 위치를 특정할 수 없어 정제하지 않는다. 그중 3건은 읍·면 단위 지번이 있지만 버린다 | K-apt 원본의 주소 표기 규칙이 바뀌면 재검증한다 |
+| **시군구 표기는 원본 그대로** | "화성만세구", "창원의창구" 같은 K-apt 표기를 고치지 않고 보낸다 | 2026-10-12에 10건을 실제로 호출해 확인했다. 카카오 주소 검색은 K-apt 표기, 2026년 신설 행정구역("전남광주통합특별시", "제물포구"), 끝의 하이픈을 모두 정확히 찾았다. 참고: Git Bash의 curl `--data-urlencode`는 한글 쿼리를 잘못 인코딩해 전부 0건이 나온다. 수동 확인은 node `fetch`로 한다 | 카카오가 옛 표기를 지원하지 않게 되면 `legal_district_code.legal_dong_name`(공식 표기) + 지번으로 바꾼다 |
+| **결과 분류** | 성공하면 `location_precision='PRECISE'`로 고정한다(MVP, 설계서 4.8절). documents가 빈 배열이거나 다시 보내도 같을 4xx면 "못 찾음"으로 보고 재시도하지 않는다. 429·5xx·네트워크 오류는 재시도한다(기본 2회, 배수 백오프). 끝내 실패하면 표시 없이 다음 실행으로 넘긴다. 401·403이면 그 실행 전체를 멈추고(`CONFIGURATION_ERROR`) `logBatchFailure`를 남긴다. 재시도까지 실패한 단지가 연달아 5건 나와도 멈춘다. 실패 로그는 `AuditLogger.logGeocodingFailure(complexId, address, reason, retryable)`로 남긴다 | 401·403은 키·앱 설정 문제라 단지마다 반복해도 결과가 같다. 연속 실패에서 멈추는 이유는 카카오 장애 중에 쿼터만 소진하지 않기 위해서다 | — |
+| **"못 찾음" 건너뛰기는 Redis 키(신규 판단)** | 키는 `geo:fail:{complexId}`이고 값은 사유, TTL은 기본 30일이다(`homesense.geocoding.not-found-retry-days`). 키가 남아 있는 동안 정기 실행과 러너가 그 단지를 호출하지 않는다. complex에는 컬럼을 추가하지 않았다 | 미사용 컬럼 추가 금지 원칙 — 이 값은 재시도 억제에만 쓰인다. Redis가 비어도(재시작·flush) 한 번 더 호출할 뿐이라 정확성 문제는 없다 | 실패 사유를 화면이나 관리자 기능에서 보여야 하면 DB로 옮긴다 |
+| **일일 호출 상한은 Redis 카운터(신규 판단)** | 카운터 키는 `geo:calls:{yyyyMMdd}`(KST, TTL 2일)다. 호출 직전 INCR로 한 건을 예약한다. 상한을 넘으면 DECR로 되돌리고 멈춘다(`DAILY_LIMIT`, 러너 종료 코드 0). 상한은 `homesense.geocoding.daily-limit`(환경변수 `GEOCODING_DAILY_LIMIT`, 기본 10000)이고, 재시도도 한 번으로 센다. Redis를 읽거나 쓰지 못하면 예외로 그 실행을 멈춘다 — 호출 수를 셀 수 없는 상태로 쿼터를 쓰지 않는다 | 무료 쿼터는 앱 단위로 집계되므로(NFR-11) 러너와 정기 실행이 같은 카운터를 봐야 한다. INCR로 예약하므로 둘이 동시에 돌아도 상한을 넘지 않는다. 기본값 10000은 카카오 한도를 확인하기 전의 보수적인 값이다 | 카카오 콘솔에서 실제 일일 한도를 확인하면, 그보다 낮은 값을 환경변수로 정한다 |
+| 초당 호출 제한 | 호출 사이 최소 간격은 `homesense.geocoding.request-interval-millis`(기본 100ms = 초당 10건)다 | 로컬 표본: 20건 처리에 기동 포함 11초 | — |
+| 커밋·재개 | 좌표는 청크(기본 100건)마다 `TransactionTemplate`으로 커밋한다. 서비스 자체에는 트랜잭션을 걸지 않는다. 상한·중단·예외 등 어떤 경로로 끝나든 이미 받은 좌표는 `finally`에서 쓴다. 쓰기는 `latitude IS NULL` 조건부 UPDATE라 좌표가 있는 행은 덮지 않는다. 대상을 `latitude IS NULL`로 고르므로 다시 실행하면 남은 단지부터 이어진다 | 카카오를 수만 번 호출하는 동안 트랜잭션을 붙잡지 않기 위해서다. TradeRematchRunner의 "전체를 한 트랜잭션으로 묶은" 실수와 같은 이유다 | — |
+| 정기 실행 위치 | `BatchExecutionOrchestrator.orchestrate()`의 `finally`에서 `evaluateWatchConditions` 앞에 부른다. 예외는 흡수한다(수집·알림 평가를 막지 않음). 인터럽트로 끝난 런이거나 `homesense.geocoding.scheduled-enabled=false`면 건너뛴다. 백필(`orchestrateBackfill`)에서는 부르지 않는다 | 설계서 6.3절의 순서다. 단지 마스터는 저장소 밖에서 재적재될 때만 늘어나므로 평소엔 대상이 0건이다. 러너가 일일 상한에서 멈췄으면 정기 실행이 이어서 처리한다 | 단지 마스터 적재기가 저장소에 들어오면, 적재 직후에 바로 부르는 방식도 검토한다 |
+| 캐시 | 좌표를 쓴 청크의 단지마다 `complexDetailV3` 항목을 `evictIfPresent`로 지운다. 종료형 러너라 비동기 `evict()`는 쓰지 않는다(캐싱 절). 삭제 실패는 WARN을 남기고 흡수한다 | `ComplexDetailResponse`가 latitude/longitude/locationPrecision을 담는다. 인기 단지·검색 응답에는 좌표가 없다 | 좌표를 담는 다른 캐시가 생기면 함께 지운다 |
+| RestClient를 빈으로 노출하지 않음 | `GeocodingConfig`는 `KakaoGeocodingClient`를 빈으로 등록하고, RestClient는 그 안에만 둔다 | RestClient 빈이 둘이 되면 타입으로 주입받는 `RealEstateApiCollector`의 주입이 모호해진다 | — |
+
+**운영 순서(runbook 8·10절):**
+1. 단지 마스터 재적재
+2. legal_dong_cd 백필
+3. 지오코딩 백필
+
+운영 DB는 백엔드 첫 배포 때 적용한다. 실행 전 카카오 콘솔 [통계] > [쿼터]에서 일일 한도와 사용량을 확인하고 `GEOCODING_DAILY_LIMIT`을 정한다.
+
+**로컬 실행 결과(2026-10-12):**
+- dry-run: 대상 21,680, 정제 가능 21,453, 지번 없음 227.
+- 표본 apply(`--limit=20`): 20건 모두 좌표를 받았고, 못 찾음·오류는 0건, 호출은 20회다.
+- **전체 백필은 아직 돌리지 않았다**(약 2.1만 회의 쿼터가 든다 — 콘솔 한도를 확인한 뒤 실행). 로컬 DB에서 좌표가 있는 단지는 이 표본 20건뿐이다.
+
+검증:
+- 단위 테스트:
+  - `GeocodingAddressRefinerTest` — 실측 사례 4종, 산 지번, 본번 0, 토큰 경계, 연속 공백.
+  - `JibunExtractorTest`.
+  - `KakaoGeocodingClientTest`(MockRestServiceServer) — 성공, 빈 결과, 400, 429, 502, 네트워크 오류, 401.
+  - `ComplexGeocodingServiceTest` — 일일 상한, 못 찾음 건너뛰기, 재시도, 연속 실패 중단, 인증 실패, 단지 수 상한, 청크 커밋, 캐시 실패 흡수, dry-run.
+  - `GeocodingRedisStateTest` — KST 날짜 키, 첫 호출에만 만료 설정.
+  - `ComplexGeocodingCommandLineRunnerTest`.
+  - `BatchExecutionOrchestratorTest` — 지오코딩이 알림 평가보다 먼저 실행, 실패 흡수, 꺼짐·인터럽트·백필에서는 호출하지 않음.
+  - `ExternalApiPropertiesTest` — 카카오 키가 비면 기동 실패.
+- **`ComplexGeocodingMariaDbIT`** — 좌표 쓰기, 이미 있는 좌표 보존, 중단 후 재개. 카카오 클라이언트와 Redis 상태는 목으로 둬 개발 Redis의 호출 카운터를 건드리지 않는다.
+- 변형 검증: 조건부 UPDATE에서 `latitude IS NULL`을 빼면 IT 1건이 실패한다.
+- 전체: `./gradlew test` 726건, `./gradlew integrationTest` 106건(20개 클래스) 통과.
 
 ## 개발 단계 (MVP 로드맵)
 
@@ -3015,6 +3060,11 @@ mysql -u root homesense < backend/src/main/resources/schema/notification_sent_at
 # 웹 서버·스케줄러 없이 돌고 종료 코드를 반환한다. 운영 절차: docs/runbook-complex-legal-dong-backfill.md
 ./gradlew bootRun --args='--spring.profiles.active=local,backfill-complex-legal-dong'          # dry-run
 ./gradlew bootRun --args='--spring.profiles.active=local,backfill-complex-legal-dong --apply'  # 적용
+
+# 단지 좌표 지오코딩 백필(BAT-GEO-01) — legal_dong_cd 백필 뒤에 실행. 기본 dry-run(카카오 호출 없음).
+# --apply가 카카오 쿼터를 쓴다(단지당 1회). --limit=N으로 표본만. 운영 절차: runbook 10절
+./gradlew bootRun --args='--spring.profiles.active=local,backfill-geocoding'                      # dry-run
+./gradlew bootRun --args='--spring.profiles.active=local,backfill-geocoding --apply --limit=20'   # 표본
 ```
 
 ## UNIQUE 제약 동시성 회귀 테스트 원칙
