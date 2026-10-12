@@ -194,7 +194,7 @@ public class ComplexGeocodingService {
         Counter counter = new Counter();
         List<Coordinate> pending = new ArrayList<>();
         StopReason stopReason = StopReason.COMPLETED;
-        int consecutiveTransient = 0;
+        TransientFailureStreak transientStreak = new TransientFailureStreak(properties.maxConsecutiveTransientFailures());
         int attempted = 0;
         try {
             for (Target t : targets) {
@@ -240,13 +240,13 @@ public class ComplexGeocodingService {
                 } catch (GeocodingTransientException e) {
                     counter.transientFailed++;
                     auditLogger.logGeocodingFailure(t.complexId(), refined.get().query(), e.getMessage(), true);
-                    if (++consecutiveTransient >= properties.maxConsecutiveTransientFailures()) {
+                    if (transientStreak.failed()) {
                         stopReason = StopReason.CONSECUTIVE_TRANSIENT_FAILURES;
                         break;
                     }
                     continue;
                 }
-                consecutiveTransient = 0;
+                transientStreak.responded();
 
                 if (coordinate != null) {
                     counter.found++;
@@ -377,7 +377,7 @@ public class ComplexGeocodingService {
         int moved = 0;
         int dropped = 0;
         int checked = 0;
-        int consecutiveTransient = 0;
+        TransientFailureStreak transientStreak = new TransientFailureStreak(properties.maxConsecutiveTransientFailures());
         StopReason stopReason = StopReason.COMPLETED;
         try {
             for (ApproximateTarget a : targets) {
@@ -397,13 +397,13 @@ public class ComplexGeocodingService {
                     counter.transientFailed++;
                     auditLogger.logGeocodingFailure(a.target().complexId(), a.target().address(), e.getMessage(), true);
                     checked++;
-                    if (++consecutiveTransient >= properties.maxConsecutiveTransientFailures()) {
+                    if (transientStreak.failed()) {
                         stopReason = StopReason.CONSECUTIVE_TRANSIENT_FAILURES;
                         break;
                     }
                     continue;
                 }
-                consecutiveTransient = 0;
+                transientStreak.responded();
                 checked++;
                 Long complexId = a.target().complexId();
                 LocalDateTime now = LocalDateTime.now(clock);
@@ -564,6 +564,34 @@ public class ComplexGeocodingService {
         int notFound;
         int transientFailed;
         int calls;
+    }
+
+    /**
+     * 재시도까지 실패한 단지가 연달아 나오는지 센다(카카오 장애 의심). {@link #run}(정기 런·러너 기본·{@code --retry-failed})과
+     * {@link #recheckApproximate}가 같이 쓴다.
+     * <ul>
+     *   <li>{@link #failed()} — 한 단지의 처리가 {@link GeocodingTransientException}(5xx·네트워크 오류를 재시도까지 실패)으로
+     *       끝났을 때 한 번 부른다. 단지 단위라 주소 검색이든 키워드 검색의 몇 번째 페이지든 그 단지는 1회로 센다.</li>
+     *   <li>{@link #responded()} — 카카오가 정상 응답해 그 단지를 판정했을 때 부른다(좌표 채택·못 찾음·이름 불일치·후보 여럿·
+     *       결과 미완 모두). 429·401·403과 일일 상한은 실행 자체를 멈추므로 여기서 세지 않는다.</li>
+     * </ul>
+     */
+    private static final class TransientFailureStreak {
+        private final int limit;
+        private int count;
+
+        TransientFailureStreak(int limit) {
+            this.limit = limit;
+        }
+
+        /** @return 연속 실패가 상한에 닿아 실행을 멈춰야 하면 true */
+        boolean failed() {
+            return ++count >= limit;
+        }
+
+        void responded() {
+            count = 0;
+        }
     }
 
     private static final class DailyLimitReachedException extends RuntimeException {

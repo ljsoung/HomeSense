@@ -186,6 +186,73 @@ class ComplexGeocodingServiceTest {
     }
 
     @Test
+    void retry_failed도_일시_실패가_연달아_나오면_멈추고_못_찾음_표시를_건드리지_않는다() {
+        for (long id = 1; id <= 5; id++) {
+            target(id, "서울특별시 종로구 내수동 " + id + " 단지", "내수동");
+        }
+        when(redisState.isMarkedNotFound(anyLong())).thenReturn(true);
+        when(client.geocode(anyString(), anyBoolean())).thenThrow(new GeocodingTransientException("HTTP_502"));
+
+        ComplexGeocodingService.RunResult result = service(10_000, 0, 3, 100).run(Integer.MAX_VALUE, true);
+
+        verify(client, times(3)).geocode(anyString(), anyBoolean());
+        verify(redisState, never()).markNotFound(anyLong(), anyString());
+        verify(redisState, never()).clearNotFound(anyLong());
+        assertThat(result.transientFailed()).isEqualTo(3);
+        assertThat(result.stopReason()).isEqualTo(StopReason.CONSECUTIVE_TRANSIENT_FAILURES);
+    }
+
+    @Test
+    void 연속_일시_실패는_카카오가_정상_응답한_단지마다_다시_센다() {
+        // 기준 3. 정상 응답 6종(PRECISE, 키워드 채택, 후보 없음, 이름 불일치, 후보 여럿, 결과 미완) 사이에 실패를 2번씩 끼운다.
+        // 정상 응답이 하나라도 카운터를 초기화하지 않으면 그 뒤에서 3번째 실패가 되어 멈춘다.
+        for (long id = 1; id <= 20; id++) {
+            target(id, "서울특별시 종로구 내수동 " + id + " 단지" + id, "내수동");
+        }
+        when(client.geocode(anyString(), anyBoolean())).thenThrow(new GeocodingTransientException("HTTP_502"));
+        doReturn(SEOUL).when(client).geocode("서울특별시 종로구 내수동 3", false);
+        KakaoGeocodingClient.NotFound noResult = new KakaoGeocodingClient.NotFound("NO_RESULT");
+        for (long id : new long[] {6, 9, 12, 15, 18}) {
+            doReturn(noResult).when(client).geocode("서울특별시 종로구 내수동 " + id, false);
+        }
+        // 6: 후보 없음(기본 빈 페이지)
+        when(client.searchKeyword("종로구 단지9", 1)).thenReturn(lastPage(apartment("다른아파트", "서울 종로구 내수동 75")));
+        when(client.searchKeyword("종로구 단지12", 1)).thenReturn(lastPage(
+                apartment("단지12A아파트", "서울 종로구 내수동 75"), apartment("단지12B아파트", "서울 종로구 내수동 76")));
+        when(client.searchKeyword(eq("종로구 단지15"), anyInt())).thenReturn(page(apartment("다른아파트", "서울 종로구 내수동 75")));
+        when(client.searchKeyword("종로구 단지18", 1)).thenReturn(lastPage(apartment("단지18아파트", "서울 종로구 내수동 75")));
+
+        ComplexGeocodingService.RunResult result = service(10_000, 0, 3, 100).run(Integer.MAX_VALUE);
+
+        assertThat(result.stopReason()).isEqualTo(StopReason.COMPLETED);
+        assertThat(result.transientFailed()).isEqualTo(14);
+        assertThat(result.found()).isEqualTo(2); // PRECISE 1 + 키워드 1
+        verify(redisState).markNotFound(6L, "NO_RESULT/KEYWORD_NO_CANDIDATE");
+        verify(redisState).markNotFound(9L, "NO_RESULT/KEYWORD_NAME_MISMATCH");
+        verify(redisState).markNotFound(12L, "NO_RESULT/KEYWORD_AMBIGUOUS");
+        verify(redisState).markNotFound(15L, "NO_RESULT/KEYWORD_INCOMPLETE");
+    }
+
+    @Test
+    void 키워드_검색의_한_페이지가_재시도_끝에_실패해도_그_단지는_일시_실패_1회로_센다() {
+        // 기준 2, 재시도 1회. 단지1은 1쪽은 정상이고 2쪽이 두 번 모두 5xx다 — 호출 단위로 세면 2를 넘어 멈춘다.
+        target(1L, "서울특별시 종로구 내수동 1 단지1", "내수동");
+        target(2L, "서울특별시 종로구 내수동 2 단지2", "내수동");
+        when(client.geocode("서울특별시 종로구 내수동 1", false)).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
+        when(client.searchKeyword("종로구 단지1", 1)).thenReturn(page());
+        when(client.searchKeyword("종로구 단지1", 2)).thenThrow(new GeocodingTransientException("HTTP_503"));
+        when(client.geocode("서울특별시 종로구 내수동 2", false)).thenReturn(SEOUL);
+
+        ComplexGeocodingService.RunResult result = service(10_000, 1, 2, 100).run(Integer.MAX_VALUE);
+
+        verify(client, times(2)).searchKeyword("종로구 단지1", 2); // 재시도까지 실패
+        verify(redisState, never()).markNotFound(anyLong(), anyString()); // 판정하지 못한 단지는 표시하지 않는다
+        assertThat(result.transientFailed()).isEqualTo(1);
+        assertThat(result.found()).isEqualTo(1);
+        assertThat(result.stopReason()).isEqualTo(StopReason.COMPLETED);
+    }
+
+    @Test
     void 일일_상한에_닿으면_보내지_않고_멈추며_받은_좌표는_쓴다() {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
         target(2L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
@@ -618,15 +685,20 @@ class ComplexGeocodingServiceTest {
         approximate(3L, "강남구", "대치동", "대치푸르지오써밋", "37.5014784", "127.0617312");
         approximate(4L, "강남구", "대치동", "단지4", "37.5", "127.0");
         approximate(5L, "강남구", "대치동", "단지5", "37.5", "127.0");
+        approximate(6L, "강남구", "대치동", "단지6", "37.5", "127.0");
+        approximate(7L, "강남구", "대치동", "단지7", "37.5", "127.0");
+        approximate(8L, "강남구", "대치동", "단지8", "37.5", "127.0");
         when(complexRepository.findApproximateTargets()).thenReturn(approximate);
         when(client.searchKeyword(anyString(), anyInt())).thenThrow(new GeocodingTransientException("HTTP_502"));
         doReturn(lastPage(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")))
                 .when(client).searchKeyword("강남구 대치푸르지오써밋", 1);
+        doReturn(lastPage(apartment("다른아파트", "서울 강남구 대치동 1"))).when(client).searchKeyword("강남구 단지6", 1);
 
         ComplexGeocodingService.RecheckResult result = service(10_000, 0, 3, 100).recheckApproximate(Integer.MAX_VALUE);
 
-        assertThat(result.kept()).isEqualTo(1);
-        assertThat(result.transientFailed()).isEqualTo(4);
+        assertThat(result.kept()).isEqualTo(1); // 3번: 다시 채택
+        assertThat(result.dropped()).isEqualTo(1); // 6번: 이름 불일치로 탈락해도 카카오는 정상 응답했다
+        assertThat(result.transientFailed()).isEqualTo(6);
         assertThat(result.stopReason()).isEqualTo(StopReason.COMPLETED);
     }
 
