@@ -2,6 +2,7 @@ package com.jiseong.homesense.batch.geocoding;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -75,6 +76,11 @@ class ComplexGeocodingMariaDbIT {
     @MockitoBean
     private GeocodingRedisState redisState;
 
+    /** 키워드 검색 마지막 페이지(is_end=true) 하나. */
+    private static KakaoGeocodingClient.KeywordPage lastPage(KakaoGeocodingClient.KeywordPlace... places) {
+        return new KakaoGeocodingClient.KeywordPage(List.of(places), true);
+    }
+
     private Complex complex(String sourceCd, String address, String dongRi, BigDecimal latitude, BigDecimal longitude) {
         return complexRepository.saveAndFlush(Complex.builder()
                 .sourceComplexCd(sourceCd).complexName(sourceCd).complexType("아파트")
@@ -147,7 +153,7 @@ class ComplexGeocodingMariaDbIT {
         // location_precision을 VARCHAR(12)로 넓힌 스키마에서 11자 값이 실제로 들어가는지 본다(VARCHAR(10)이면 Data too long)
         Complex target = complex("GEO-K", "서울특별시 종로구 내수동 963 재건축단지", "내수동", null, null);
         when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
-        when(client.searchKeyword("종로구 GEO-K")).thenReturn(List.of(new KakaoGeocodingClient.KeywordPlace(
+        when(client.searchKeyword("종로구 GEO-K", 1)).thenReturn(lastPage(new KakaoGeocodingClient.KeywordPlace(
                 "GEO-K아파트", "부동산 > 주거시설 > 아파트", "서울 종로구 내수동 1032", JONGNO.latitude(), JONGNO.longitude())));
         when(redisState.recordCall()).thenReturn(1L);
 
@@ -169,7 +175,8 @@ class ComplexGeocodingMariaDbIT {
                 .dataUpdatedAt(LocalDate.of(2026, 1, 1)).build());
         Complex precise = complex("GEO-P", "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동",
                 new BigDecimal("37.0000000"), new BigDecimal("127.0000000"));
-        when(client.searchKeyword(anyString())).thenReturn(List.of(new KakaoGeocodingClient.KeywordPlace("동탄역자이아파트",
+        when(client.searchKeyword(anyString(), anyInt())).thenReturn(lastPage(
+                new KakaoGeocodingClient.KeywordPlace("동탄역자이아파트",
                 "부동산 > 주거시설 > 아파트", "서울 종로구 내수동 892", JONGNO.latitude(), JONGNO.longitude())));
         when(redisState.recordCall()).thenReturn(1L);
 

@@ -1,0 +1,174 @@
+{
+  "documents": [
+    {
+      "id": "624558790",
+      "place_name": "현대한신부동산공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 동대문구 답십리동 542-1",
+      "road_address_name": "서울 동대문구 황물로 42",
+      "x": "127.046205010572",
+      "y": "37.5733276834159",
+      "place_url": "http://place.map.kakao.com/624558790"
+    },
+    {
+      "id": "1229162137",
+      "place_name": "좋은집단지내부동산공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 동대문구 전농동 690",
+      "road_address_name": "서울 동대문구 사가정로 65",
+      "x": "127.05047140501674",
+      "y": "37.57481437973995",
+      "place_url": "http://place.map.kakao.com/1229162137"
+    },
+    {
+      "id": "1124816213",
+      "place_name": "아틀리에 플로티브",
+      "category_name": "가정,생활 > 꽃집,꽃배달",
+      "category_group_code": "",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.048732493163",
+      "y": "37.5711570711851",
+      "place_url": "http://place.map.kakao.com/1124816213"
+    },
+    {
+      "id": "899333363",
+      "place_name": "OK부동산",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.04874270321315",
+      "y": "37.57119130477979",
+      "place_url": "http://place.map.kakao.com/899333363"
+    },
+    {
+      "id": "298169611",
+      "place_name": "청아어린이집",
+      "category_name": "교육,학문 > 유아교육 > 어린이집",
+      "category_group_code": "PS3",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.04711385598371",
+      "y": "37.571286570557625",
+      "place_url": "http://place.map.kakao.com/298169611"
+    },
+    {
+      "id": "1574547261",
+      "place_name": "정민정공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.04874043574779",
+      "y": "37.57118589975113",
+      "place_url": "http://place.map.kakao.com/1574547261"
+    },
+    {
+      "id": "789638909",
+      "place_name": "스위트네일",
+      "category_name": "가정,생활 > 미용 > 네일샵",
+      "category_group_code": "",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.048573873883",
+      "y": "37.5709363927376",
+      "place_url": "http://place.map.kakao.com/789638909"
+    },
+    {
+      "id": "541975585",
+      "place_name": "에이치짐 신설동역점",
+      "category_name": "스포츠,레저 > 스포츠시설 > 헬스클럽",
+      "category_group_code": "",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.02147475741744",
+      "y": "37.575554823319926",
+      "place_url": "http://place.map.kakao.com/541975585"
+    },
+    {
+      "id": "13565110",
+      "place_name": "열린온누리약국",
+      "category_name": "의료,건강 > 약국",
+      "category_group_code": "PM9",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.02145210451484",
+      "y": "37.57551248070047",
+      "place_url": "http://place.map.kakao.com/13565110"
+    },
+    {
+      "id": "27272627",
+      "place_name": "돈벼락",
+      "category_name": "음식점 > 한식 > 육류,고기",
+      "category_group_code": "FD6",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.02166170545996",
+      "y": "37.576113405759855",
+      "place_url": "http://place.map.kakao.com/27272627"
+    },
+    {
+      "id": "1042564781",
+      "place_name": "로잉",
+      "category_name": "가정,생활 > 패션 > 의류판매 > 여성의류",
+      "category_group_code": "",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.02145551019083",
+      "y": "37.57554581688014",
+      "place_url": "http://place.map.kakao.com/1042564781"
+    },
+    {
+      "id": "1505473671",
+      "place_name": "소주물 신당중앙시장점",
+      "category_name": "음식점 > 한식",
+      "category_group_code": "FD6",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.020537810556",
+      "y": "37.568695714509",
+      "place_url": "http://place.map.kakao.com/1505473671"
+    },
+    {
+      "id": "7984559",
+      "place_name": "신화공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.02148834575405",
+      "y": "37.57556833577157",
+      "place_url": "http://place.map.kakao.com/7984559"
+    },
+    {
+      "id": "1191436908",
+      "place_name": "김은의한의원",
+      "category_name": "의료,건강 > 병원 > 한의원",
+      "category_group_code": "",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.02146343703998",
+      "y": "37.57555482537868",
+      "place_url": "http://place.map.kakao.com/1191436908"
+    },
+    {
+      "id": "1936232435",
+      "place_name": "내가편한심리상담센터",
+      "category_name": "의료,건강 > 상담 > 심리상담소",
+      "category_group_code": "",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.020537810556",
+      "y": "37.568695714509",
+      "place_url": "http://place.map.kakao.com/1936232435"
+    }
+  ],
+  "meta": {
+    "total_count": 56,
+    "pageable_count": 31,
+    "is_end": false
+  }
+}

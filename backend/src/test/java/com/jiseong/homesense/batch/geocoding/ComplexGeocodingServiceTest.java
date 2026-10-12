@@ -3,6 +3,7 @@ package com.jiseong.homesense.batch.geocoding;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -71,6 +72,7 @@ class ComplexGeocodingServiceTest {
         lenient().when(cacheManager.getCache(CacheNames.COMPLEX_DETAIL)).thenReturn(detailCache);
         lenient().when(complexRepository.fillCoordinatesIfNull(anyLong(), any(), any(), anyString(), any()))
                 .thenReturn(1);
+        lenient().when(client.searchKeyword(anyString(), anyInt())).thenReturn(lastPage());
     }
 
     private ComplexGeocodingService service(int dailyLimit, int maxRetries, int maxConsecutive, int chunkSize) {
@@ -91,6 +93,11 @@ class ComplexGeocodingServiceTest {
 
     private void target(long complexId, String address, String dongRi, String sigungu, String complexName) {
         targets.add(new Object[] {complexId, address, dongRi, "서울특별시", sigungu, complexName});
+    }
+
+    /** 키워드 검색 마지막 페이지(is_end=true) 하나. */
+    private static KakaoGeocodingClient.KeywordPage lastPage(KakaoGeocodingClient.KeywordPlace... places) {
+        return new KakaoGeocodingClient.KeywordPage(List.of(places), true);
     }
 
     private static KakaoGeocodingClient.KeywordPlace apartment(String name, String address) {
@@ -134,7 +141,7 @@ class ComplexGeocodingServiceTest {
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
         verify(client, times(1)).geocode(anyString(), anyBoolean());
-        verify(client, times(1)).searchKeyword("종로구 단지1");
+        verify(client, times(1)).searchKeyword("종로구 단지1", 1);
         verify(redisState).markNotFound(1L, "NO_RESULT/KEYWORD_NO_CANDIDATE");
         verify(auditLogger).logGeocodingFailure(1L, "서울특별시 종로구 내수동 72", "NO_RESULT/KEYWORD_NO_CANDIDATE", false);
         assertThat(result.calls()).isEqualTo(2);
@@ -313,7 +320,7 @@ class ComplexGeocodingServiceTest {
         target(1L, "서울특별시 강남구 대치동 963 대치푸르지오써밋", "대치동", "강남구", "대치푸르지오써밋");
         when(client.geocode("서울특별시 강남구 대치동 963", false)).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
         KakaoGeocodingClient.KeywordPlace place = apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032");
-        when(client.searchKeyword("강남구 대치푸르지오써밋")).thenReturn(List.of(place));
+        when(client.searchKeyword("강남구 대치푸르지오써밋", 1)).thenReturn(lastPage(place));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
@@ -330,9 +337,9 @@ class ComplexGeocodingServiceTest {
     void 키워드_후보가_없으면_단지명_끝의_아파트를_떼고_한_번_더_찾는다() {
         target(1L, "서울특별시 종로구 내수동 72 경희궁아파트", "내수동", "종로구", "경희궁아파트");
         when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
-        when(client.searchKeyword("종로구 경희궁아파트")).thenReturn(List.of());
-        when(client.searchKeyword("종로구 경희궁"))
-                .thenReturn(List.of(apartment("경희궁아파트", "서울 종로구 내수동 75")));
+        when(client.searchKeyword("종로구 경희궁아파트", 1)).thenReturn(lastPage());
+        when(client.searchKeyword("종로구 경희궁", 1))
+                .thenReturn(lastPage(apartment("경희궁아파트", "서울 종로구 내수동 75")));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
@@ -344,12 +351,12 @@ class ComplexGeocodingServiceTest {
     void 이름을_포함하는_키워드_후보가_여럿이면_다시_찾지_않고_못_찾음으로_남긴다() {
         target(1L, "서울특별시 종로구 내수동 72 경희궁아파트", "내수동", "종로구", "경희궁아파트");
         when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
-        when(client.searchKeyword("종로구 경희궁아파트")).thenReturn(List.of(
+        when(client.searchKeyword("종로구 경희궁아파트", 1)).thenReturn(lastPage(
                 apartment("경희궁1단지", "서울 종로구 내수동 75"), apartment("경희궁2단지", "서울 종로구 내수동 76")));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client, never()).searchKeyword("종로구 경희궁");
+        verify(client, never()).searchKeyword("종로구 경희궁", 1);
         verify(redisState).markNotFound(1L, "NO_RESULT/KEYWORD_AMBIGUOUS");
         assertThat(result.notFound()).isEqualTo(1);
     }
@@ -359,11 +366,11 @@ class ComplexGeocodingServiceTest {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
         target(2L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
         when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
-        when(client.searchKeyword(anyString())).thenThrow(new GeocodingRateLimitedException("429"));
+        when(client.searchKeyword(anyString(), anyInt())).thenThrow(new GeocodingRateLimitedException("429"));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client, times(1)).searchKeyword(anyString()); // 재시도 없음
+        verify(client, times(1)).searchKeyword(anyString(), anyInt()); // 재시도 없음
         verify(client, times(1)).geocode(anyString(), anyBoolean()); // 다음 단지로 가지 않음
         verify(redisState, never()).markNotFound(anyLong(), anyString());
         assertThat(result.stopReason()).isEqualTo(StopReason.RATE_LIMITED);
@@ -373,13 +380,13 @@ class ComplexGeocodingServiceTest {
     void 키워드_검색의_5xx도_백오프_후_재시도하고_카운터를_센다() {
         target(1L, "서울특별시 강남구 대치동 963 대치푸르지오써밋", "대치동", "강남구", "대치푸르지오써밋");
         when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
-        when(client.searchKeyword("강남구 대치푸르지오써밋"))
+        when(client.searchKeyword("강남구 대치푸르지오써밋", 1))
                 .thenThrow(new GeocodingTransientException("HTTP_503"))
-                .thenReturn(List.of(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")));
+                .thenReturn(lastPage(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client, times(2)).searchKeyword("강남구 대치푸르지오써밋");
+        verify(client, times(2)).searchKeyword("강남구 대치푸르지오써밋", 1);
         verify(redisState, times(3)).recordCall();
         assertThat(result.foundByKeyword()).isEqualTo(1);
     }
@@ -392,7 +399,7 @@ class ComplexGeocodingServiceTest {
 
         ComplexGeocodingService.RunResult result = service(10, 2, 5, 100).run(Integer.MAX_VALUE);
 
-        verify(client, never()).searchKeyword(anyString());
+        verify(client, never()).searchKeyword(anyString(), anyInt());
         verify(redisState, never()).markNotFound(anyLong(), anyString());
         assertThat(result.stopReason()).isEqualTo(StopReason.DAILY_LIMIT);
     }
@@ -404,8 +411,8 @@ class ComplexGeocodingServiceTest {
         target(3L, "서울특별시 중랑구 망우동  신내역 힐데스하임아파트", "망우동");
         when(redisState.isMarkedNotFound(anyLong())).thenAnswer(invocation -> invocation.getArgument(0).equals(1L));
         when(client.geocode("서울특별시 강남구 대치동 963", false)).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
-        when(client.searchKeyword("강남구 대치푸르지오써밋"))
-                .thenReturn(List.of(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")));
+        when(client.searchKeyword("강남구 대치푸르지오써밋", 1))
+                .thenReturn(lastPage(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE, true);
 
@@ -433,16 +440,101 @@ class ComplexGeocodingServiceTest {
         targets.add(new Object[] {1L, "경기도 화성동탄구 영천동 651-1372 동탄파크자이아파트", "영천동", "경기도", "화성동탄구",
                 "동탄파크자이아파트"});
         when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
-        when(client.searchKeyword(anyString())).thenReturn(List.of(
+        when(client.searchKeyword(anyString(), anyInt())).thenReturn(lastPage(
                 new KakaoGeocodingClient.KeywordPlace("동탄역자이아파트", "부동산 > 주거시설 > 아파트",
                         "경기 화성시 동탄구 영천동 892", new BigDecimal("37.2"), new BigDecimal("127.1"))));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client).searchKeyword("화성동탄구 동탄파크자이아파트");
-        verify(client).searchKeyword("화성동탄구 동탄파크자이");
+        verify(client).searchKeyword("화성동탄구 동탄파크자이아파트", 1);
+        verify(client).searchKeyword("화성동탄구 동탄파크자이", 1);
         verify(redisState).markNotFound(1L, "NO_RESULT/KEYWORD_NAME_MISMATCH");
         assertThat(result.foundByKeyword()).isZero();
+    }
+
+    // 키워드 검색 페이지
+
+    private static KakaoGeocodingClient.KeywordPage page(KakaoGeocodingClient.KeywordPlace... places) {
+        return new KakaoGeocodingClient.KeywordPage(List.of(places), false);
+    }
+
+    private void keywordTarget() {
+        target(1L, "서울특별시 종로구 내수동 72 경희궁아파트", "내수동", "종로구", "경희궁아파트");
+        when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
+    }
+
+    @Test
+    void 첫_페이지에_없는_단지도_마지막_페이지까지_받아_찾는다() {
+        keywordTarget();
+        KakaoGeocodingClient.KeywordPlace place = apartment("경희궁아파트", "서울 종로구 내수동 75");
+        when(client.searchKeyword("종로구 경희궁아파트", 1)).thenReturn(page());
+        when(client.searchKeyword("종로구 경희궁아파트", 2)).thenReturn(lastPage(place));
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        verify(complexRepository).fillCoordinatesIfNull(1L, place.latitude(), place.longitude(), "APPROXIMATE",
+                LocalDateTime.now(CLOCK));
+        verify(client, never()).searchKeyword(eq("종로구 경희궁"), anyInt()); // 첫 검색어에서 찾았다
+        verify(redisState, times(3)).recordCall(); // 주소 1 + 키워드 2쪽
+        assertThat(result.calls()).isEqualTo(3);
+        assertThat(result.foundByKeyword()).isEqualTo(1);
+    }
+
+    @Test
+    void 뒤_페이지에_이름을_포함하는_후보가_또_있으면_첫_페이지_후보를_채택하지_않는다() {
+        keywordTarget();
+        when(client.searchKeyword("종로구 경희궁아파트", 1)).thenReturn(page(apartment("경희궁1단지", "서울 종로구 내수동 75")));
+        when(client.searchKeyword("종로구 경희궁아파트", 2)).thenReturn(lastPage(apartment("경희궁2단지", "서울 종로구 내수동 76")));
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        verify(complexRepository, never()).fillCoordinatesIfNull(anyLong(), any(), any(), anyString(), any());
+        verify(redisState).markNotFound(1L, "NO_RESULT/KEYWORD_AMBIGUOUS");
+        assertThat(result.notFound()).isEqualTo(1);
+    }
+
+    @Test
+    void 상한_페이지까지_받아도_끝나지_않으면_일부_결과로_채택하지_않고_멈춘다() {
+        keywordTarget();
+        when(client.searchKeyword(eq("종로구 경희궁아파트"), anyInt()))
+                .thenReturn(page(apartment("경희궁아파트", "서울 종로구 내수동 75")));
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        verify(client, times(KakaoGeocodingClient.KEYWORD_MAX_PAGES)).searchKeyword(eq("종로구 경희궁아파트"), anyInt());
+        verify(client, never()).searchKeyword(eq("종로구 경희궁"), anyInt());
+        verify(complexRepository, never()).fillCoordinatesIfNull(anyLong(), any(), any(), anyString(), any());
+        verify(redisState).markNotFound(1L, "NO_RESULT/KEYWORD_INCOMPLETE");
+        assertThat(result.calls()).isEqualTo(1 + KakaoGeocodingClient.KEYWORD_MAX_PAGES);
+    }
+
+    @Test
+    void 페이지_사이에_같은_문서가_다시_와도_한_번만_센다() {
+        keywordTarget();
+        KakaoGeocodingClient.KeywordPlace place = apartment("경희궁아파트", "서울 종로구 내수동 75");
+        when(client.searchKeyword("종로구 경희궁아파트", 1)).thenReturn(page(place));
+        when(client.searchKeyword("종로구 경희궁아파트", 2)).thenReturn(lastPage(place));
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        assertThat(result.foundByKeyword()).isEqualTo(1);
+    }
+
+    @Test
+    void 뒤_페이지의_5xx는_그_페이지만_다시_보낸다() {
+        keywordTarget();
+        KakaoGeocodingClient.KeywordPlace place = apartment("경희궁아파트", "서울 종로구 내수동 75");
+        when(client.searchKeyword("종로구 경희궁아파트", 1)).thenReturn(page());
+        when(client.searchKeyword("종로구 경희궁아파트", 2))
+                .thenThrow(new GeocodingTransientException("HTTP_503"))
+                .thenReturn(lastPage(place));
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        verify(client, times(1)).searchKeyword("종로구 경희궁아파트", 1);
+        verify(client, times(2)).searchKeyword("종로구 경희궁아파트", 2);
+        assertThat(result.calls()).isEqualTo(4); // 주소 1 + 1쪽 1 + 2쪽 2
+        assertThat(result.foundByKeyword()).isEqualTo(1);
     }
 
     // APPROXIMATE 재판정
@@ -458,8 +550,8 @@ class ComplexGeocodingServiceTest {
     void 재판정에서_다시_채택되고_좌표가_같으면_그대로_둔다() {
         approximate(1L, "강남구", "대치동", "대치푸르지오써밋", "37.5014784", "127.0617312");
         when(complexRepository.findApproximateTargets()).thenReturn(approximate);
-        when(client.searchKeyword("강남구 대치푸르지오써밋"))
-                .thenReturn(List.of(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")));
+        when(client.searchKeyword("강남구 대치푸르지오써밋", 1))
+                .thenReturn(lastPage(apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032")));
 
         ComplexGeocodingService.RecheckResult result = service().recheckApproximate(Integer.MAX_VALUE);
 
@@ -474,7 +566,7 @@ class ComplexGeocodingServiceTest {
         approximate(1L, "강남구", "대치동", "대치푸르지오써밋", "37.0000000", "127.0000000");
         when(complexRepository.findApproximateTargets()).thenReturn(approximate);
         KakaoGeocodingClient.KeywordPlace place = apartment("대치푸르지오써밋아파트", "서울 강남구 대치동 1032");
-        when(client.searchKeyword("강남구 대치푸르지오써밋")).thenReturn(List.of(place));
+        when(client.searchKeyword("강남구 대치푸르지오써밋", 1)).thenReturn(lastPage(place));
 
         ComplexGeocodingService.RecheckResult result = service().recheckApproximate(Integer.MAX_VALUE);
 
@@ -488,7 +580,8 @@ class ComplexGeocodingServiceTest {
     void 재판정에서_탈락하면_좌표를_되돌리고_못_찾음_표시를_남긴다() {
         approximate(1L, "화성동탄구", "영천동", "동탄파크자이아파트", "37.2", "127.1");
         when(complexRepository.findApproximateTargets()).thenReturn(approximate);
-        when(client.searchKeyword(anyString())).thenReturn(List.of(new KakaoGeocodingClient.KeywordPlace("동탄역자이아파트",
+        when(client.searchKeyword(anyString(), anyInt())).thenReturn(lastPage(
+                new KakaoGeocodingClient.KeywordPlace("동탄역자이아파트",
                 "부동산 > 주거시설 > 아파트", "서울 화성동탄구 영천동 892", new BigDecimal("37.2"), new BigDecimal("127.1"))));
 
         ComplexGeocodingService.RecheckResult result = service().recheckApproximate(Integer.MAX_VALUE);
@@ -504,11 +597,11 @@ class ComplexGeocodingServiceTest {
         approximate(1L, "강남구", "대치동", "대치푸르지오써밋", "37.5", "127.0");
         approximate(2L, "강남구", "대치동", "대치아이파크", "37.5", "127.0");
         when(complexRepository.findApproximateTargets()).thenReturn(approximate);
-        when(client.searchKeyword(anyString())).thenThrow(new GeocodingRateLimitedException("429"));
+        when(client.searchKeyword(anyString(), anyInt())).thenThrow(new GeocodingRateLimitedException("429"));
 
         ComplexGeocodingService.RecheckResult result = service().recheckApproximate(Integer.MAX_VALUE);
 
-        verify(client, times(1)).searchKeyword(anyString());
+        verify(client, times(1)).searchKeyword(anyString(), anyInt());
         verify(complexRepository, never()).clearApproximateCoordinates(anyLong(), any());
         assertThat(result.stopReason()).isEqualTo(StopReason.RATE_LIMITED);
     }

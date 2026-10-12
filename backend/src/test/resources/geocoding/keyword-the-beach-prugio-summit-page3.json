@@ -1,0 +1,86 @@
+{
+  "documents": [
+    {
+      "id": "537612916",
+      "place_name": "미즈에스테틱",
+      "category_name": "가정,생활 > 미용 > 피부관리",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.1078491647",
+      "y": "35.1377136650955",
+      "place_url": "http://place.map.kakao.com/537612916"
+    },
+    {
+      "id": "765986751",
+      "place_name": "제이피엠필라테스 운동과학연구소",
+      "category_name": "스포츠,레저 > 요가,필라테스",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.10740588315747",
+      "y": "35.13775291833025",
+      "place_url": "http://place.map.kakao.com/765986751"
+    },
+    {
+      "id": "1575643987",
+      "place_name": "큐팜부동산컨설팅공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.108064753628",
+      "y": "35.1375657285479",
+      "place_url": "http://place.map.kakao.com/1575643987"
+    },
+    {
+      "id": "254054710",
+      "place_name": "대영부동산공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.10759345449065",
+      "y": "35.13779471268918",
+      "place_url": "http://place.map.kakao.com/254054710"
+    },
+    {
+      "id": "762104741",
+      "place_name": "루시나아카데미",
+      "category_name": "교육,학문 > 온라인교육",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.1078057216336",
+      "y": "35.13773064184429",
+      "place_url": "http://place.map.kakao.com/762104741"
+    },
+    {
+      "id": "182582057",
+      "place_name": "큐팜",
+      "category_name": "부동산 > 부동산서비스 > 부동산컨설팅",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.108022918272",
+      "y": "35.137602502813",
+      "place_url": "http://place.map.kakao.com/182582057"
+    },
+    {
+      "id": "1701658048",
+      "place_name": "부산 더비치 푸르지오 써밋 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.110083299165",
+      "y": "35.1358670508545",
+      "place_url": "http://place.map.kakao.com/1701658048"
+    }
+  ],
+  "meta": {
+    "total_count": 45,
+    "pageable_count": 37,
+    "is_end": true
+  }
+}

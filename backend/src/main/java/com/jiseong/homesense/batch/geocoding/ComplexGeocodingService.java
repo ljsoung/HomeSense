@@ -4,8 +4,10 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import org.springframework.cache.Cache;
@@ -46,6 +48,8 @@ public class ComplexGeocodingService {
     private static final String REASON_NO_CANDIDATE = "KEYWORD_NO_CANDIDATE";
     private static final String REASON_NAME_MISMATCH = "KEYWORD_NAME_MISMATCH";
     private static final String REASON_AMBIGUOUS = "KEYWORD_AMBIGUOUS";
+    /** 결과가 상한 페이지 안에 끝나지 않아 일부만 받았다 — 채택하지 않는다. */
+    private static final String REASON_INCOMPLETE = "KEYWORD_INCOMPLETE";
     private static final int SAMPLE_LIMIT = 15;
 
     public enum StopReason {
@@ -303,8 +307,11 @@ public class ComplexGeocodingService {
      * 주소 검색이 못 찾은 단지를 단지명 장소 검색으로 찾는다. 검색어는 {@link KeywordPlaceMatcher#queries} 순서다("{시군구} {단지명}",
      * 끝의 "아파트"를 뗀 것, 괄호를 지운 것). 앞 검색어에서 후보가 없거나 이름이 맞는 후보가 없으면 다음 검색어로 다시 찾고, 이름을
      * 포함하는 후보가 여럿이면 거기서 멈춘다(검색어를 넓혀도 여전히 여럿이거나 늘 뿐이다). 모든 검색어가 실패하면, 한 번이라도 이름
-     * 불일치였으면 그 사유를, 아니면 후보 없음을 돌려준다. 호출은 주소 검색과 같은 {@link #callWithRetry}를 거쳐 일일 카운터·재시도·
-     * 중단 규칙이 같다.
+     * 불일치였으면 그 사유를, 아니면 후보 없음을 돌려준다.
+     *
+     * <p>판정은 검색어 하나의 결과 전체를 받은 뒤에 한다({@link #fetchAllKeywordPages}) — 첫 페이지만 보면 뒤 페이지의 맞는
+     * 단지를 놓쳐 "후보 없음"을 30일 남기거나, 뒤 페이지의 같은 이름 후보를 못 보고 첫 페이지 후보를 잘못 채택할 수 있다. 결과
+     * 전체를 받지 못하면(상한 페이지까지 받아도 끝이 아니면) {@code KEYWORD_INCOMPLETE}로 채택하지 않고 멈춘다.
      */
     private KeywordPlaceMatcher.Result searchByKeyword(Target t, Counter counter) {
         if (t.complexName() == null || t.complexName().isBlank() || t.sido() == null) {
@@ -313,7 +320,10 @@ public class ComplexGeocodingService {
         KeywordPlaceMatcher.ComplexIdentity identity = t.identity();
         boolean nameMismatchSeen = false;
         for (String query : KeywordPlaceMatcher.queries(identity)) {
-            List<KakaoGeocodingClient.KeywordPlace> places = callWithRetry(() -> client.searchKeyword(query), counter);
+            List<KakaoGeocodingClient.KeywordPlace> places = fetchAllKeywordPages(query, counter);
+            if (places == null) {
+                return new KeywordPlaceMatcher.NoMatch(REASON_INCOMPLETE);
+            }
             KeywordPlaceMatcher.Result result = KeywordPlaceMatcher.match(identity, places);
             if (!(result instanceof KeywordPlaceMatcher.NoMatch noMatch) || REASON_AMBIGUOUS.equals(noMatch.reason())) {
                 return result;
@@ -321,6 +331,30 @@ public class ComplexGeocodingService {
             nameMismatchSeen |= REASON_NAME_MISMATCH.equals(noMatch.reason());
         }
         return new KeywordPlaceMatcher.NoMatch(nameMismatchSeen ? REASON_NAME_MISMATCH : REASON_NO_CANDIDATE);
+    }
+
+    /**
+     * 검색어 하나의 키워드 결과를 마지막 페이지(is_end)까지 모은다. 페이지마다 {@link #callWithRetry}를 거쳐 일일 카운터·재시도·
+     * 중단 규칙이 주소 검색과 같다(5xx 재시도는 그 페이지만 다시 보낸다). 카카오는 최대 45건을 15건씩 내주므로
+     * {@link KakaoGeocodingClient#KEYWORD_MAX_PAGES}쪽 안에 끝나야 한다 — 그래도 끝나지 않으면 일부만 받은 결과라 null을
+     * 돌려준다. 페이지 사이에 같은 문서가 다시 오면 한 번만 센다(두 번 세면 같은 단지가 여럿으로 보여 채택하지 못한다).
+     */
+    private List<KakaoGeocodingClient.KeywordPlace> fetchAllKeywordPages(String query, Counter counter) {
+        Set<KakaoGeocodingClient.KeywordPlace> places = new LinkedHashSet<>();
+        for (int page = 1; page <= KakaoGeocodingClient.KEYWORD_MAX_PAGES; page++) {
+            int current = page;
+            KakaoGeocodingClient.KeywordPage result = callWithRetry(() -> client.searchKeyword(query, current), counter);
+            places.addAll(result.places());
+            if (result.isEnd()) {
+                return List.copyOf(places);
+            }
+        }
+        log.atWarn()
+                .addKeyValue("programId", "BAT-GEO-01")
+                .addKeyValue("query", query)
+                .log("BAT-GEO-01 키워드 검색 결과가 {}쪽 안에 끝나지 않아 판정하지 않는다: {}",
+                        KakaoGeocodingClient.KEYWORD_MAX_PAGES, query);
+        return null;
     }
 
     /**

@@ -1,0 +1,20 @@
+{
+  "documents": [
+    {
+      "id": "1638153086",
+      "place_name": "다시봄교육심리상담센터",
+      "category_name": "의료,건강 > 상담 > 심리상담소",
+      "category_group_code": "",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.020537810804",
+      "y": "37.5686966155046",
+      "place_url": "http://place.map.kakao.com/1638153086"
+    }
+  ],
+  "meta": {
+    "total_count": 56,
+    "pageable_count": 31,
+    "is_end": true
+  }
+}

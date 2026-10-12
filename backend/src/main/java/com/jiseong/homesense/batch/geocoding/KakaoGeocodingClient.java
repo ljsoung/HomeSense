@@ -37,6 +37,12 @@ public class KakaoGeocodingClient {
 
     static final String ADDRESS_SEARCH_PATH = "/v2/local/search/address.json";
     static final String KEYWORD_SEARCH_PATH = "/v2/local/search/keyword.json";
+    /**
+     * 키워드 검색 페이지 크기(카카오 최대 15). 카카오가 내주는 문서는 최대 45건(pageable_count)이라 15건씩이면
+     * {@link #KEYWORD_MAX_PAGES}쪽 안에 끝난다.
+     */
+    static final int KEYWORD_PAGE_SIZE = 15;
+    static final int KEYWORD_MAX_PAGES = 3;
     private static final int COORDINATE_SCALE = 7;
 
     private final RestClient restClient;
@@ -69,7 +75,7 @@ public class KakaoGeocodingClient {
      *                      documents[0]을 쓴다(설계서 4.8절).
      */
     public GeocodeResult geocode(String query, boolean requireUnique) {
-        Response<AddressSearchResponse> response = call(ADDRESS_SEARCH_PATH, query, AddressSearchResponse.class);
+        Response<AddressSearchResponse> response = call(ADDRESS_SEARCH_PATH, query, null, AddressSearchResponse.class);
         if (!response.successful()) {
             return new NotFound("HTTP_" + response.status());
         }
@@ -77,24 +83,37 @@ public class KakaoGeocodingClient {
     }
 
     /**
-     * 키워드 장소 검색(GET /v2/local/search/keyword.json). 상태 코드 처리는 {@link #geocode}와 같다 — 429·401·403은 실행 중단
-     * 예외, 5xx·네트워크 오류는 재시도 대상 예외. 다시 보내도 같을 4xx는 빈 목록이다. 후보를 고르는 규칙은 호출자
-     * ({@link KeywordPlaceMatcher})가 맡는다.
+     * 키워드 검색 한 페이지.
+     *
+     * @param isEnd 마지막 페이지인지(카카오 meta.is_end). meta가 없으면 다음 페이지를 알 수 없어 true로 본다.
      */
-    public List<KeywordPlace> searchKeyword(String query) {
-        Response<KeywordSearchResponse> response = call(KEYWORD_SEARCH_PATH, query, KeywordSearchResponse.class);
-        if (!response.successful() || response.body() == null || response.body().documents() == null) {
-            return List.of();
+    public record KeywordPage(List<KeywordPlace> places, boolean isEnd) {
+    }
+
+    /**
+     * 키워드 장소 검색(GET /v2/local/search/keyword.json) 한 페이지. 페이지 크기는 카카오 최대값 {@link #KEYWORD_PAGE_SIZE}다.
+     * 상태 코드 처리는 {@link #geocode}와 같다 — 429·401·403은 실행 중단 예외, 5xx·네트워크 오류는 재시도 대상 예외. 다시
+     * 보내도 같을 4xx는 빈 마지막 페이지다. 페이지를 이어 받는 것과 후보를 고르는 규칙은 호출자(ComplexGeocodingService,
+     * {@link KeywordPlaceMatcher})가 맡는다 — 페이지마다 호출 한 번이라 일일 카운터·재시도를 페이지 단위로 거쳐야 한다.
+     *
+     * @param page 1부터
+     */
+    public KeywordPage searchKeyword(String query, int page) {
+        Response<KeywordSearchResponse> response = call(KEYWORD_SEARCH_PATH, query, page, KeywordSearchResponse.class);
+        if (!response.successful() || response.body() == null) {
+            return new KeywordPage(List.of(), true);
         }
+        KeywordSearchResponse body = response.body();
+        boolean isEnd = body.meta() == null || body.meta().isEnd() == null || body.meta().isEnd();
         List<KeywordPlace> places = new ArrayList<>();
-        for (PlaceDocument d : response.body().documents()) {
+        for (PlaceDocument d : body.documents() == null ? List.<PlaceDocument>of() : body.documents()) {
             BigDecimal latitude = coordinate(d.y());
             BigDecimal longitude = coordinate(d.x());
             if (latitude != null && longitude != null) {
                 places.add(new KeywordPlace(d.placeName(), d.categoryName(), d.addressName(), latitude, longitude));
             }
         }
-        return places;
+        return new KeywordPage(places, isEnd);
     }
 
     /** 2xx면 body, 다시 보내도 같을 4xx면 body 없이 status만 담는다. */
@@ -104,10 +123,16 @@ public class KakaoGeocodingClient {
         }
     }
 
-    private <B> Response<B> call(String path, String query, Class<B> bodyType) {
+    private <B> Response<B> call(String path, String query, Integer page, Class<B> bodyType) {
         try {
             return restClient.get()
-                    .uri(uriBuilder -> uriBuilder.path(path).queryParam("query", query).build())
+                    .uri(uriBuilder -> {
+                        uriBuilder.path(path).queryParam("query", query);
+                        if (page != null) {
+                            uriBuilder.queryParam("page", page).queryParam("size", KEYWORD_PAGE_SIZE);
+                        }
+                        return uriBuilder.build();
+                    })
                     .exchange((request, response) -> {
                         HttpStatusCode status = response.getStatusCode();
                         if (status.is2xxSuccessful()) {
@@ -171,7 +196,11 @@ public class KakaoGeocodingClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record KeywordSearchResponse(List<PlaceDocument> documents) {
+    record KeywordSearchResponse(List<PlaceDocument> documents, KeywordMeta meta) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record KeywordMeta(@JsonProperty("is_end") Boolean isEnd) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
