@@ -14,7 +14,8 @@ import jakarta.validation.constraints.Min;
  *   <li>{@code dailyLimit}: 하루(KST) 호출 상한. 무료 쿼터는 앱 단위로 집계되므로(NFR-11) 러너와 정기 실행이 Redis
  *       카운터 하나를 같이 센다. 닿으면 그날 실행을 멈추고 남은 단지는 다음 실행으로 넘긴다. 카카오 콘솔
  *       [통계]>[쿼터]의 일일 한도보다 낮게 잡는다.</li>
- *   <li>{@code maxRetries}/{@code retryBackoffMillis}: 429·5xx·네트워크 오류 재시도 횟수와 간격(시도마다 배수로 늘림).</li>
+ *   <li>{@code maxRetries}/{@code retryBackoffMillis}: 5xx·네트워크 오류 재시도 횟수와 간격(시도마다 배수로 늘림). 429와
+ *       401·403은 재시도하지 않고 그 실행을 멈춘다.</li>
  *   <li>{@code maxConsecutiveTransientFailures}: 재시도까지 실패한 단지가 이만큼 연달아 나오면 그 실행을 멈춘다 —
  *       카카오 장애 중에 쿼터만 소진하지 않게 한다.</li>
  *   <li>{@code notFoundRetryDays}: "주소를 못 찾음" 단지를 다시 호출하지 않는 기간(Redis 키 TTL).</li>

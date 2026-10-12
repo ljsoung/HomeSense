@@ -53,7 +53,7 @@ public class AuditLogger {
 
     /**
      * 지오코딩 실패 기록(BAT-GEO-01). {@code retryable}로 두 종류를 나눈다 — false는 카카오가 주소를 못 찾은 경우(재시도하지
-     * 않고 일정 기간 건너뛴다), true는 429·5xx·네트워크 오류로 재시도까지 실패한 경우(다음 실행이 다시 시도한다).
+     * 않고 일정 기간 건너뛴다), true는 5xx·네트워크 오류로 재시도까지 실패한 경우(다음 실행이 다시 시도한다).
      */
     public void logGeocodingFailure(Long complexId, String address, String reason, boolean retryable) {
         log.atWarn()

@@ -1,6 +1,7 @@
 package com.jiseong.homesense.batch.geocoding;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -88,7 +89,7 @@ class ComplexGeocodingMariaDbIT {
         Complex existing = complex("GEO-2", "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동",
                 new BigDecimal("37.0000000"), new BigDecimal("127.0000000"));
         Complex noJibun = complex("GEO-3", "서울특별시 종로구 내수동  신축아파트", "내수동", null, null);
-        when(client.geocode("서울특별시 종로구 내수동 73")).thenReturn(JONGNO);
+        when(client.geocode("서울특별시 종로구 내수동 73", false)).thenReturn(JONGNO);
         when(redisState.recordCall()).thenReturn(1L);
 
         ComplexGeocodingService.RunResult result = geocodingService.run(Integer.MAX_VALUE);
@@ -102,14 +103,14 @@ class ComplexGeocodingMariaDbIT {
         assertThat(complexRepository.findById(existing.getComplexId()).orElseThrow().getLatitude())
                 .isEqualByComparingTo("37.0000000");
         assertThat(complexRepository.findById(noJibun.getComplexId()).orElseThrow().getLatitude()).isNull();
-        verify(client, times(1)).geocode(anyString());
+        verify(client, times(1)).geocode(anyString(), anyBoolean());
     }
 
     @Test
     void 중간에_멈춘_뒤_다시_실행하면_남은_단지부터_이어간다() {
         Complex first = complex("GEO-A", "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동", null, null);
         Complex second = complex("GEO-B", "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동", null, null);
-        when(client.geocode(anyString())).thenReturn(JONGNO);
+        when(client.geocode(anyString(), anyBoolean())).thenReturn(JONGNO);
         when(redisState.recordCall()).thenReturn(1L);
 
         ComplexGeocodingService.RunResult firstRun = geocodingService.run(1);
@@ -122,8 +123,8 @@ class ComplexGeocodingMariaDbIT {
         assertThat(secondRun.targets()).isEqualTo(1);
         assertThat(secondRun.written()).isEqualTo(1);
         assertThat(complexRepository.findById(second.getComplexId()).orElseThrow().getLatitude()).isNotNull();
-        verify(client, times(1)).geocode("서울특별시 종로구 내수동 72");
-        verify(client, times(1)).geocode("서울특별시 종로구 내수동 73");
+        verify(client, times(1)).geocode("서울특별시 종로구 내수동 72", false);
+        verify(client, times(1)).geocode("서울특별시 종로구 내수동 73", false);
     }
 
     @Test
@@ -137,6 +138,6 @@ class ComplexGeocodingMariaDbIT {
         assertThat(updated).isZero();
         assertThat(complexRepository.findById(existing.getComplexId()).orElseThrow().getLatitude())
                 .isEqualByComparingTo("37.0000000");
-        verify(client, never()).geocode(anyString());
+        verify(client, never()).geocode(anyString(), anyBoolean());
     }
 }

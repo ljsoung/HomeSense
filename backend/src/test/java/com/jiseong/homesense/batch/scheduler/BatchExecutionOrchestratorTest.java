@@ -497,6 +497,38 @@ class BatchExecutionOrchestratorTest {
     }
 
     @Test
+    void 지오코딩이_예외를_던져도_이번_런에_적재된_거래로_알림_평가를_부른다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")))
+                .thenReturn(new LoadResult(0, 0, 0, 0));
+        when(complexGeocodingService.run(Integer.MAX_VALUE)).thenThrow(new IllegalStateException("Redis 장애"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        ArgumentCaptor<NotificationTriggerContext> ctx = ArgumentCaptor.forClass(NotificationTriggerContext.class);
+        verify(watchConditionEvaluator).evaluateAfterLoad(ctx.capture());
+        assertThat(ctx.getValue().complexIds()).containsExactly(10L);
+        assertThat(ctx.getValue().legalDongCds()).containsExactly("4111110100");
+    }
+
+    @Test
+    void 조기_중단된_런에서_지오코딩이_예외를_던져도_알림_평가를_부른다() {
+        when(collector.collect(any(), any(), any(), any()))
+                .thenReturn(success("15126469"))
+                .thenThrow(new OpenApiResultCodeException("15126469", "30", ErrorCodeJudgment.ABORT_BATCH));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")));
+        when(complexGeocodingService.run(Integer.MAX_VALUE)).thenThrow(new IllegalStateException("Redis 장애"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(complexGeocodingService).run(Integer.MAX_VALUE);
+        verify(watchConditionEvaluator).evaluateAfterLoad(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
     void 지오코딩이_실패해도_알림_평가와_완료_이벤트는_그대로_진행된다() {
         when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
         when(complexGeocodingService.run(Integer.MAX_VALUE)).thenThrow(new IllegalStateException("Redis 장애"));

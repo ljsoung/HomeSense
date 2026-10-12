@@ -21,7 +21,7 @@ import lombok.extern.slf4j.Slf4j;
  * ({@code homesense.geocoding.daily-limit})에 닿으면 멈추고, 다음 날 다시 실행하거나 03:00 정기 런이 이어서 처리한다.
  *
  * <p>legal_dong_cd 백필 러너와 같이 웹 서버·{@code @Scheduled}를 띄우지 않고, 끝나면 종료 코드를 반환한다 —
- * 성공 0(일일 상한 도달 포함), 실패 1(인증 오류·예외).
+ * 성공 0(일일 상한 도달 포함), 실패 1(401·403 인증 오류, 429 카카오 요청 한도, 예외).
  */
 @Slf4j
 @Component
@@ -54,7 +54,7 @@ public class ComplexGeocodingCommandLineRunner implements CommandLineRunner {
                     .orElse(Integer.MAX_VALUE);
             ComplexGeocodingService.RunResult result = geocodingService.run(limit);
             return switch (result.stopReason()) {
-                case CONFIGURATION_ERROR, INTERRUPTED -> 1;
+                case CONFIGURATION_ERROR, RATE_LIMITED, INTERRUPTED -> 1;
                 default -> 0;
             };
         } catch (RuntimeException e) {

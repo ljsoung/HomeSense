@@ -67,4 +67,11 @@ class ComplexGeocodingCommandLineRunnerTest {
 
         assertThat(runner.execute(List.of("--apply"))).isEqualTo(1);
     }
+
+    @Test
+    void 카카오_요청_한도_429로_멈추면_종료_코드_1이다() {
+        when(geocodingService.run(Integer.MAX_VALUE)).thenReturn(result(StopReason.RATE_LIMITED));
+
+        assertThat(runner.execute(List.of("--apply"))).isEqualTo(1);
+    }
 }

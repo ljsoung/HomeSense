@@ -45,10 +45,12 @@ public class ComplexGeocodingService {
         MAX_COMPLEXES,
         /** 오늘(KST) 호출 상한에 닿았다. 남은 단지는 다음 실행으로 넘어간다. */
         DAILY_LIMIT,
-        /** 재시도까지 실패한 단지가 연달아 나왔다(카카오 장애 의심). */
+        /** 재시도(5xx·네트워크 오류)까지 실패한 단지가 연달아 나왔다(카카오 장애 의심). */
         CONSECUTIVE_TRANSIENT_FAILURES,
         /** 401·403 — 키·앱 설정 문제. */
         CONFIGURATION_ERROR,
+        /** 429 — 카카오 요청 한도. 재시도하지 않고 바로 멈춘다. */
+        RATE_LIMITED,
         /** 대기 중 인터럽트됐다(종료 신호). */
         INTERRUPTED
     }
@@ -109,8 +111,8 @@ public class ComplexGeocodingService {
         List<String> noJibunSamples = new ArrayList<>();
         List<String> refinedSamples = new ArrayList<>();
         for (Target t : targets) {
-            Optional<String> query = GeocodingAddressRefiner.refine(t.address(), t.dongRi());
-            if (query.isEmpty()) {
+            Optional<GeocodingAddressRefiner.RefinedAddress> refined = GeocodingAddressRefiner.refine(t.address(), t.dongRi());
+            if (refined.isEmpty()) {
                 if (noJibunSamples.size() < SAMPLE_LIMIT) {
                     noJibunSamples.add(t.complexId() + " addr=" + t.address());
                 }
@@ -118,7 +120,8 @@ public class ComplexGeocodingService {
             }
             refinable++;
             if (refinedSamples.size() < SAMPLE_LIMIT) {
-                refinedSamples.add(t.complexId() + " " + t.address() + " → " + query.get());
+                refinedSamples.add(t.complexId() + " " + t.address() + " → " + refined.get().query()
+                        + (refined.get().requireUnique() ? " (유일한 결과만)" : ""));
             }
             if (redisState.isMarkedNotFound(t.complexId())) {
                 marked++;
@@ -147,8 +150,8 @@ public class ComplexGeocodingService {
         int attempted = 0;
         try {
             for (Target t : targets) {
-                Optional<String> query = GeocodingAddressRefiner.refine(t.address(), t.dongRi());
-                if (query.isEmpty()) {
+                Optional<GeocodingAddressRefiner.RefinedAddress> refined = GeocodingAddressRefiner.refine(t.address(), t.dongRi());
+                if (refined.isEmpty()) {
                     counter.noJibun++;
                     continue;
                 }
@@ -164,13 +167,13 @@ public class ComplexGeocodingService {
 
                 KakaoGeocodingClient.GeocodeResult result;
                 try {
-                    result = callWithRetry(query.get(), counter);
+                    result = callWithRetry(refined.get(), counter);
                 } catch (DailyLimitReachedException e) {
                     stopReason = StopReason.DAILY_LIMIT;
                     break;
                 } catch (GeocodingTransientException e) {
                     counter.transientFailed++;
-                    auditLogger.logGeocodingFailure(t.complexId(), query.get(), e.getMessage(), true);
+                    auditLogger.logGeocodingFailure(t.complexId(), refined.get().query(), e.getMessage(), true);
                     if (++consecutiveTransient >= properties.maxConsecutiveTransientFailures()) {
                         stopReason = StopReason.CONSECUTIVE_TRANSIENT_FAILURES;
                         break;
@@ -190,12 +193,15 @@ public class ComplexGeocodingService {
                     case KakaoGeocodingClient.NotFound notFound -> {
                         counter.notFound++;
                         redisState.markNotFound(t.complexId(), notFound.reason());
-                        auditLogger.logGeocodingFailure(t.complexId(), query.get(), notFound.reason(), false);
+                        auditLogger.logGeocodingFailure(t.complexId(), refined.get().query(), notFound.reason(), false);
                     }
                 }
             }
         } catch (GeocodingConfigurationException e) {
             stopReason = StopReason.CONFIGURATION_ERROR;
+            auditLogger.logBatchFailure("BAT-GEO-01", e);
+        } catch (GeocodingRateLimitedException e) {
+            stopReason = StopReason.RATE_LIMITED;
             auditLogger.logBatchFailure("BAT-GEO-01", e);
         } catch (GeocodingInterruptedException e) {
             stopReason = StopReason.INTERRUPTED;
@@ -225,13 +231,18 @@ public class ComplexGeocodingService {
         return runResult;
     }
 
-    private KakaoGeocodingClient.GeocodeResult callWithRetry(String query, Counter counter) {
+    /**
+     * 호출 시도마다(재시도 포함, 응답이 오류여도) 오늘 카운터를 먼저 하나 늘린다. 5xx·네트워크 오류만 백오프 후 재시도하고,
+     * 429·401·403은 클라이언트가 던진 예외 그대로 run()까지 올라가 그 실행을 멈춘다.
+     */
+    private KakaoGeocodingClient.GeocodeResult callWithRetry(GeocodingAddressRefiner.RefinedAddress address,
+            Counter counter) {
         for (int attempt = 0; ; attempt++) {
             reserveCall();
             counter.calls++;
             pace();
             try {
-                return client.geocode(query);
+                return client.geocode(address.query(), address.requireUnique());
             } catch (GeocodingTransientException e) {
                 if (attempt >= properties.maxRetries()) {
                     throw e;

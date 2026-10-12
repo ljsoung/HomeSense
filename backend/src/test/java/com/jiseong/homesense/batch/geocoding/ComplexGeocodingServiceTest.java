@@ -2,6 +2,7 @@ package com.jiseong.homesense.batch.geocoding;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -90,7 +91,7 @@ class ComplexGeocodingServiceTest {
     @Test
     void 좌표를_얻으면_PRECISE로_쓰고_단지_상세_캐시를_지운다() {
         target(1L, "서울특별시 종로구 내수동 73- 경희궁의아침4단지", "내수동");
-        when(client.geocode("서울특별시 종로구 내수동 73")).thenReturn(SEOUL);
+        when(client.geocode("서울특별시 종로구 내수동 73", false)).thenReturn(SEOUL);
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
@@ -109,7 +110,7 @@ class ComplexGeocodingServiceTest {
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client, never()).geocode(anyString());
+        verify(client, never()).geocode(anyString(), anyBoolean());
         assertThat(result.noJibun()).isEqualTo(1);
         assertThat(result.skipped()).isEqualTo(1);
         assertThat(result.calls()).isZero();
@@ -118,11 +119,11 @@ class ComplexGeocodingServiceTest {
     @Test
     void 주소를_못_찾으면_건너뛸_표시를_남기고_재시도하지_않는다() {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
-        when(client.geocode(anyString())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
+        when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client, times(1)).geocode(anyString());
+        verify(client, times(1)).geocode(anyString(), anyBoolean());
         verify(redisState).markNotFound(1L, "NO_RESULT");
         verify(auditLogger).logGeocodingFailure(1L, "서울특별시 종로구 내수동 72", "NO_RESULT", false);
         verify(complexRepository, never()).fillCoordinatesIfNull(anyLong(), any(), any(), anyString(), any());
@@ -130,22 +131,24 @@ class ComplexGeocodingServiceTest {
     }
 
     @Test
-    void 일시_오류는_재시도하고_끝내_실패하면_표시_없이_다음_실행으로_넘긴다() {
+    void 서버_오류는_백오프_후_재시도하고_끝내_실패하면_표시_없이_다음_실행으로_넘긴다() {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
         target(2L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
-        when(client.geocode("서울특별시 종로구 내수동 72")).thenThrow(new GeocodingTransientException("HTTP_429"));
-        when(client.geocode("서울특별시 종로구 내수동 73"))
+        when(client.geocode("서울특별시 종로구 내수동 72", false)).thenThrow(new GeocodingTransientException("HTTP_500"));
+        when(client.geocode("서울특별시 종로구 내수동 73", false))
                 .thenThrow(new GeocodingTransientException("HTTP_503"))
                 .thenReturn(SEOUL);
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client, times(3)).geocode("서울특별시 종로구 내수동 72"); // 처음 + 재시도 2회
+        verify(client, times(3)).geocode("서울특별시 종로구 내수동 72", false); // 처음 + 재시도 2회
         verify(redisState, never()).markNotFound(eq(1L), anyString());
-        verify(auditLogger).logGeocodingFailure(1L, "서울특별시 종로구 내수동 72", "HTTP_429", true);
+        verify(auditLogger).logGeocodingFailure(1L, "서울특별시 종로구 내수동 72", "HTTP_500", true);
         assertThat(result.transientFailed()).isEqualTo(1);
         assertThat(result.found()).isEqualTo(1);
         assertThat(result.calls()).isEqualTo(5);
+        // 오류 응답을 받은 시도도 하나씩 센다 — 72는 3회, 73은 2회
+        verify(redisState, times(5)).recordCall();
         assertThat(result.stopReason()).isEqualTo(StopReason.COMPLETED);
     }
 
@@ -154,11 +157,11 @@ class ComplexGeocodingServiceTest {
         for (long id = 1; id <= 5; id++) {
             target(id, "서울특별시 종로구 내수동 " + id + " 단지", "내수동");
         }
-        when(client.geocode(anyString())).thenThrow(new GeocodingTransientException("HTTP_502"));
+        when(client.geocode(anyString(), anyBoolean())).thenThrow(new GeocodingTransientException("HTTP_502"));
 
         ComplexGeocodingService.RunResult result = service(10_000, 0, 3, 100).run(Integer.MAX_VALUE);
 
-        verify(client, times(3)).geocode(anyString());
+        verify(client, times(3)).geocode(anyString(), anyBoolean());
         assertThat(result.stopReason()).isEqualTo(StopReason.CONSECUTIVE_TRANSIENT_FAILURES);
     }
 
@@ -167,11 +170,11 @@ class ComplexGeocodingServiceTest {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
         target(2L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
         todayCalls.set(9);
-        when(client.geocode("서울특별시 종로구 내수동 72")).thenReturn(SEOUL);
+        when(client.geocode("서울특별시 종로구 내수동 72", false)).thenReturn(SEOUL);
 
         ComplexGeocodingService.RunResult result = service(10, 2, 5, 100).run(Integer.MAX_VALUE);
 
-        verify(client, times(1)).geocode(anyString());
+        verify(client, times(1)).geocode(anyString(), anyBoolean());
         verify(redisState).releaseCall();
         verify(complexRepository).fillCoordinatesIfNull(eq(1L), any(), any(), eq("PRECISE"), any());
         assertThat(result.stopReason()).isEqualTo(StopReason.DAILY_LIMIT);
@@ -183,12 +186,12 @@ class ComplexGeocodingServiceTest {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
         target(2L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
         target(3L, "서울특별시 종로구 내수동 74 경희궁의아침5단지", "내수동");
-        when(client.geocode("서울특별시 종로구 내수동 72")).thenReturn(SEOUL);
-        when(client.geocode("서울특별시 종로구 내수동 73")).thenThrow(new GeocodingConfigurationException("401"));
+        when(client.geocode("서울특별시 종로구 내수동 72", false)).thenReturn(SEOUL);
+        when(client.geocode("서울특별시 종로구 내수동 73", false)).thenThrow(new GeocodingConfigurationException("401"));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
 
-        verify(client, never()).geocode("서울특별시 종로구 내수동 74");
+        verify(client, never()).geocode("서울특별시 종로구 내수동 74", false);
         verify(auditLogger).logBatchFailure(eq("BAT-GEO-01"), any(GeocodingConfigurationException.class));
         assertThat(result.stopReason()).isEqualTo(StopReason.CONFIGURATION_ERROR);
         assertThat(result.written()).isEqualTo(1);
@@ -199,11 +202,11 @@ class ComplexGeocodingServiceTest {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
         target(2L, "서울특별시 중랑구 망우동  신내역 힐데스하임아파트", "망우동");
         target(3L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
-        when(client.geocode(anyString())).thenReturn(SEOUL);
+        when(client.geocode(anyString(), anyBoolean())).thenReturn(SEOUL);
 
         ComplexGeocodingService.RunResult result = service().run(1);
 
-        verify(client, times(1)).geocode(anyString());
+        verify(client, times(1)).geocode(anyString(), anyBoolean());
         assertThat(result.stopReason()).isEqualTo(StopReason.MAX_COMPLEXES);
         assertThat(result.noJibun()).isEqualTo(1);
     }
@@ -213,7 +216,7 @@ class ComplexGeocodingServiceTest {
         for (long id = 1; id <= 5; id++) {
             target(id, "서울특별시 종로구 내수동 " + id + " 단지", "내수동");
         }
-        when(client.geocode(anyString())).thenReturn(SEOUL);
+        when(client.geocode(anyString(), anyBoolean())).thenReturn(SEOUL);
 
         ComplexGeocodingService.RunResult result = service(10_000, 2, 5, 2).run(Integer.MAX_VALUE);
 
@@ -224,7 +227,7 @@ class ComplexGeocodingServiceTest {
     @Test
     void 캐시_삭제가_실패해도_좌표_기록_결과는_그대로다() {
         target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
-        when(client.geocode(anyString())).thenReturn(SEOUL);
+        when(client.geocode(anyString(), anyBoolean())).thenReturn(SEOUL);
         when(detailCache.evictIfPresent(1L)).thenThrow(new IllegalStateException("Redis 장애"));
 
         ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
@@ -242,8 +245,52 @@ class ComplexGeocodingServiceTest {
 
         ComplexGeocodingService.DryRunResult result = service().dryRun();
 
-        verify(client, never()).geocode(anyString());
+        verify(client, never()).geocode(anyString(), anyBoolean());
         verify(redisState, never()).recordCall();
         assertThat(result).isEqualTo(new ComplexGeocodingService.DryRunResult(3, 2, 1, 1));
+    }
+
+    @Test
+    void 요청_한도_429를_받으면_재시도하지_않고_그_실행을_즉시_멈춘다() {
+        target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
+        target(2L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
+        target(3L, "서울특별시 종로구 내수동 74 경희궁의아침5단지", "내수동");
+        when(client.geocode("서울특별시 종로구 내수동 72", false)).thenReturn(SEOUL);
+        when(client.geocode("서울특별시 종로구 내수동 73", false))
+                .thenThrow(new GeocodingRateLimitedException("429"));
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        verify(client, times(1)).geocode("서울특별시 종로구 내수동 73", false); // 재시도 없음
+        verify(client, never()).geocode("서울특별시 종로구 내수동 74", false);
+        verify(redisState, times(2)).recordCall(); // 429 응답을 받은 시도도 센다
+        verify(redisState, never()).markNotFound(eq(2L), anyString());
+        verify(auditLogger).logBatchFailure(eq("BAT-GEO-01"), any(GeocodingRateLimitedException.class));
+        assertThat(result.stopReason()).isEqualTo(StopReason.RATE_LIMITED);
+        assertThat(result.written()).isEqualTo(1);
+    }
+
+    @Test
+    void 권한_없음_403을_받으면_재시도하지_않고_그_실행을_즉시_멈춘다() {
+        target(1L, "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동");
+        target(2L, "서울특별시 종로구 내수동 73 경희궁의아침4단지", "내수동");
+        when(client.geocode("서울특별시 종로구 내수동 72", false)).thenThrow(new GeocodingConfigurationException("403"));
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        verify(client, times(1)).geocode(anyString(), anyBoolean());
+        verify(redisState, times(1)).recordCall();
+        assertThat(result.stopReason()).isEqualTo(StopReason.CONFIGURATION_ERROR);
+    }
+
+    @Test
+    void 동리가_없는_단지는_결과가_하나일_때만_좌표를_쓰도록_요청한다() {
+        target(1L, "전남광주통합특별시 광양시 광양읍  484-28 광양목성파크뷰 부영2단지", null);
+        when(client.geocode("전남광주통합특별시 광양시 광양읍 484-28", true)).thenReturn(SEOUL);
+
+        ComplexGeocodingService.RunResult result = service().run(Integer.MAX_VALUE);
+
+        assertThat(result.written()).isEqualTo(1);
+        assertThat(result.noJibun()).isZero();
     }
 }
