@@ -1,5 +1,6 @@
 package com.jiseong.homesense.complex.repository;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -58,5 +59,29 @@ public interface ComplexRepository extends JpaRepository<Complex, Long>, Complex
             WHERE complex_id = :complexId AND legal_dong_cd IS NULL
             """, nativeQuery = true)
     int fillLegalDongCdIfNull(@Param("complexId") Long complexId, @Param("legalDongCd") String legalDongCd,
+            @Param("now") LocalDateTime now);
+
+    /**
+     * BAT-GEO-01 지오코딩 대상 — 좌표가 없는 단지의 주소 필드만 가져온다. [complexId, legalDongAddress, dongRi]
+     * NULL인 것만 고르므로 중단 후 다시 실행하면 남은 단지부터 이어진다.
+     */
+    @Query("""
+            SELECT c.complexId, c.legalDongAddress, c.dongRi
+            FROM Complex c WHERE c.latitude IS NULL ORDER BY c.complexId
+            """)
+    List<Object[]> findGeocodingTargets();
+
+    /**
+     * BAT-GEO-01 좌표 쓰기. {@code latitude IS NULL}을 WHERE에 두어 이미 좌표가 있는 행은 덮지 않는다(재실행 안전).
+     * JPQL·네이티브 벌크 UPDATE는 auditing을 우회하므로 updated_at을 직접 넘긴다.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE complex SET latitude = :latitude, longitude = :longitude, location_precision = :precision,
+                updated_at = :now
+            WHERE complex_id = :complexId AND latitude IS NULL
+            """, nativeQuery = true)
+    int fillCoordinatesIfNull(@Param("complexId") Long complexId, @Param("latitude") BigDecimal latitude,
+            @Param("longitude") BigDecimal longitude, @Param("precision") String precision,
             @Param("now") LocalDateTime now);
 }

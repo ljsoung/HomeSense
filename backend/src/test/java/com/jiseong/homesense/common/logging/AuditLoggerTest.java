@@ -117,8 +117,8 @@ class AuditLoggerTest {
     }
 
     @Test
-    void logGeocodingFailure는_WARN_레벨로_주소와_사유를_구조화_필드로_남긴다() {
-        auditLogger.logGeocodingFailure("서울특별시 강남구 역삼동 123-4", "카카오맵 좌표 응답 없음");
+    void logGeocodingFailure는_WARN_레벨로_단지_주소_사유_재시도여부를_구조화_필드로_남긴다() {
+        auditLogger.logGeocodingFailure(42L, "서울특별시 강남구 역삼동 123-4", "NO_RESULT", false);
 
         assertThat(appender.list).hasSize(1);
         ILoggingEvent event = appender.list.get(0);
@@ -127,7 +127,9 @@ class AuditLoggerTest {
                 .extracting(kv -> kv.key, kv -> kv.value)
                 .contains(
                         tuple("auditEvent", "GEOCODING_FAILURE"),
+                        tuple("complexId", 42L),
                         tuple("address", "서울특별시 강남구 역삼동 123-4"),
-                        tuple("reason", "카카오맵 좌표 응답 없음"));
+                        tuple("reason", "NO_RESULT"),
+                        tuple("retryable", false));
     }
 }

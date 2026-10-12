@@ -67,16 +67,27 @@ class ExternalApiPropertiesTest {
                 });
     }
 
-    /**
-     * BAT-GEO-01(지오코딩)이 아직 구현되지 않아 이 키를 소비하는 코드가 없다 — 다른 두 시크릿과
-     * 달리 지금은 비어 있어도 기동을 막지 않아야 한다(KakaoProperties 클래스 주석 참고).
-     */
+    /** BAT-GEO-01이 소비자가 되면서 다른 두 시크릿과 같이 비어 있으면 기동을 막는다(KakaoProperties). */
     @Test
-    void kakao_apiKey는_비어있어도_기동을_막지_않는다() {
+    void kakao_apiKey가_없으면_기동에_실패한다() {
         contextRunner.withUserConfiguration(KakaoTestConfig.class)
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void kakao_apiKey가_비어있으면_기동에_실패한다() {
+        contextRunner.withUserConfiguration(KakaoTestConfig.class)
+                .withPropertyValues("homesense.external.kakao.api-key= ")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void kakao_apiKey가_채워져_있으면_정상_기동한다() {
+        contextRunner.withUserConfiguration(KakaoTestConfig.class)
+                .withPropertyValues("homesense.external.kakao.api-key=real-rest-api-key")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertThat(context.getBean(KakaoProperties.class).apiKey()).isNull();
+                    assertThat(context.getBean(KakaoProperties.class).apiKey()).isEqualTo("real-rest-api-key");
                 });
     }
 
