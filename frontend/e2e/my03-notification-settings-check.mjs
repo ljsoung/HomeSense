@@ -13,7 +13,7 @@
 // 11. 비로그인 → 로그인 → 쿼리 그대로 복귀
 // 12. 저장 중(PUT 응답 전) 입력 잠금 → 응답 뒤 다시 열림
 // 13. PUT 성공 + 재조회 GET 실패 → 저장한 값 유지, 완료 토스트, 오류 배너 없음
-// 14. 키보드 저장 → 저장 중 aria-disabled·aria-busy(입력 무시), 응답 뒤 포커스 유지
+// 14. 키보드 저장 → 저장 중 aria-disabled·aria-busy(입력 무시), 응답 뒤 포커스 유지. 키보드 "다시 시도" 성공 뒤 포커스가 저장 버튼
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -398,6 +398,25 @@ async function scenarioKeyboardSaveFocus(label, viewport) {
   await slider(page).focus();
   ok(`${label} 14: 포커스가 떠나면 disabled`, (await saveButton(page).getAttribute('disabled')) !== null);
   await context.close();
+
+  // 키보드로 "다시 시도" → 성공하면 배너가 사라져도 포커스가 저장 버튼에 있다.
+  const retryRun = await open(viewport, { query: '?favoritePropertyId=1', putMode: 'failOnce' });
+  const p2 = retryRun.page;
+  await ready(p2);
+  await setSlider(p2, 11);
+  await saveButton(p2).focus();
+  await p2.keyboard.press('Enter');
+  const alert = p2.getByRole('alert').filter({ hasText: '저장하지 못했습니다' });
+  ok(`${label} 14: 첫 저장 실패 → 배너`, await alert.waitFor({ timeout: 5000 }).then(() => true, () => false));
+  await alert.getByRole('button', { name: '다시 시도' }).focus();
+  await p2.keyboard.press('Enter');
+  ok(`${label} 14: 다시 시도 → 성공 토스트`, await p2.getByText('알림 설정을 저장했어요').waitFor({ timeout: 5000 }).then(() => true, () => false));
+  await p2.waitForTimeout(200);
+  ok(`${label} 14: 다시 시도 성공 뒤 배너 없음`, (await alert.count()) === 0);
+  ok(`${label} 14: 다시 시도 성공 뒤 포커스는 저장 버튼`, await saveButton(p2).evaluate((el) => el === document.activeElement),
+    await p2.evaluate(() => document.activeElement?.tagName + ' ' + (document.activeElement?.textContent ?? '')));
+  ok(`${label} 14: 다시 시도 → PUT 2회(실패 1·성공 1)`, puts(retryRun.calls).length === 2);
+  await retryRun.context.close();
 }
 
 async function scenarioEmpty(label, viewport) {

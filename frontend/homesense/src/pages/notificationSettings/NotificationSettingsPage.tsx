@@ -225,6 +225,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
   // 포커스가 body로 빠지지 않게 한다.
   const [saveFocused, setSaveFocused] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLLabelElement>());
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
   const ids = {
     hint: useId(),
     applyNote: useId(),
@@ -243,10 +244,10 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
   const { values, mixed, hadDifferences } = deriveForm(selectedKeys, settingsByKey, overrides);
   const changed = changedTargets(selectedKeys, settingsByKey, values);
   const draftValid = thresholdDraft === null || parseThresholdDraft(thresholdDraft) !== null;
+  // 저장 가능 여부는 이 값 하나다 — 저장 버튼 활성, "다시 시도" 활성, save() 진입이 모두 이것만 본다(D5).
   const saveEnabled = canSave(selectedKeys.length, changed.length, draftValid, saving);
   // 저장 버튼 막기: 저장 중이거나 포커스가 있으면 aria-disabled(포커스 유지), 그 밖의 비활성(대상 미선택·변경 없음)은 disabled.
-  const saveBlocked = !saveEnabled;
-  const saveSoftDisabled = saveBlocked && (saving || saveFocused);
+  const saveSoftDisabled = !saveEnabled && (saving || saveFocused);
   const hint = saveHint(selectedKeys.length, changed.length);
   const noSelection = selectedKeys.length === 0;
   const zero = values.threshold === 0;
@@ -518,7 +519,12 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
             </p>
             <button
               type="button"
-              onClick={() => void save()}
+              onClick={() => {
+                // 저장을 시작하면 배너가 사라져 이 버튼에 있던 포커스가 body로 빠진다 — 먼저 저장 버튼으로 옮긴다.
+                // 저장 버튼은 포커스가 있는 동안 aria-disabled로만 막혀(저장 중) 포커스를 잃지 않고, 성공 뒤에도 그대로 남는다.
+                if (saveEnabled) saveButtonRef.current?.focus();
+                void save();
+              }}
               disabled={!saveEnabled}
               aria-describedby={ids.hint}
               className="rounded-[10px] bg-white px-3.5 py-1.5 text-[13px] font-semibold text-[#e7000b] shadow-[0_1px_2px_rgba(0,0,0,0.1)] disabled:cursor-not-allowed disabled:opacity-60"
@@ -540,16 +546,15 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
           </div>
           <button
             type="button"
-            onClick={() => {
-              if (!saveBlocked) void save();
-            }}
+            ref={saveButtonRef}
+            onClick={() => void save()}
             onFocus={() => setSaveFocused(true)}
             onBlur={() => setSaveFocused(false)}
-            disabled={saveBlocked && !saveSoftDisabled}
+            disabled={!saveEnabled && !saveSoftDisabled}
             aria-disabled={saveSoftDisabled || undefined}
             aria-busy={saving || undefined}
             aria-describedby={[ids.hint, hadDifferences && selectedKeys.length > 1 ? ids.applyNote : null].filter(Boolean).join(' ')}
-            className={`rounded-[14px] bg-brand font-bold text-white shadow-[0_4px_14px_rgba(15,92,84,0.3)] transition-colors ${saveBlocked ? '' : 'hover:bg-brand/90'} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:bg-[#e5e7eb] disabled:text-[#9ca3af] disabled:shadow-none aria-disabled:cursor-not-allowed aria-disabled:bg-[#e5e7eb] aria-disabled:text-[#9ca3af] aria-disabled:shadow-none ${
+            className={`rounded-[14px] bg-brand font-bold text-white shadow-[0_4px_14px_rgba(15,92,84,0.3)] transition-colors ${saveEnabled ? 'hover:bg-brand/90' : ''} focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:bg-[#e5e7eb] disabled:text-[#9ca3af] disabled:shadow-none aria-disabled:cursor-not-allowed aria-disabled:bg-[#e5e7eb] aria-disabled:text-[#9ca3af] aria-disabled:shadow-none ${
               layout === 'desktop' ? 'shrink-0 px-6 py-2.5 text-[14px]' : 'h-[50px] w-full text-[15px]'
             }`}
           >
