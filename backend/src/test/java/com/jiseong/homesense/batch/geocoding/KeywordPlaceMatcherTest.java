@@ -60,11 +60,59 @@ class KeywordPlaceMatcherTest {
     }
 
     @Test
-    void 조건을_통과한_후보가_여럿이면_채택하지_않는다() {
+    void 이름이_정확히_같은_후보가_하나면_다른_후보가_있어도_채택한다() {
+        KeywordPlace exact = place("대치푸르지오써밋아파트", APARTMENT, "서울 강남구 대치동 1032");
+
         assertThat(KeywordPlaceMatcher.match(DAECHI, List.of(
-                place("대치푸르지오써밋아파트", APARTMENT, "서울 강남구 대치동 1032"),
-                place("대치푸르지오써밋아파트 2단지", APARTMENT, "서울 강남구 대치동 1033"))))
+                place("대치푸르지오써밋2단지", APARTMENT, "서울 강남구 대치동 1033"), exact)))
+                .isEqualTo(new Matched(exact));
+    }
+
+    @Test
+    void 정확히_같은_이름이_없고_이름을_포함하는_후보가_여럿이면_채택하지_않는다() {
+        ComplexIdentity prugio = new ComplexIdentity("서울특별시", "강남구", "대치동", "대치푸르지오");
+
+        assertThat(KeywordPlaceMatcher.match(prugio, List.of(
+                place("대치푸르지오1단지", APARTMENT, "서울 강남구 대치동 1"),
+                place("대치푸르지오2단지", APARTMENT, "서울 강남구 대치동 2"))))
                 .isEqualTo(new NoMatch("KEYWORD_AMBIGUOUS"));
+    }
+
+    @Test
+    void 이름을_포함하는_후보가_하나면_채택한다() {
+        KeywordPlace place = place("래미안장위퍼스트하이아파트", APARTMENT, "서울 성북구 장위동 320");
+        ComplexIdentity jangwi = new ComplexIdentity("서울특별시", "성북구", "장위동", "장위퍼스트하이");
+
+        assertThat(KeywordPlaceMatcher.match(jangwi, List.of(place))).isEqualTo(new Matched(place));
+    }
+
+    @Test
+    void 조건을_통과한_후보가_하나여도_이름이_다르면_채택하지_않는다() {
+        ComplexIdentity dongtan = new ComplexIdentity("경기도", "화성동탄구", "영천동", "동탄파크자이아파트");
+
+        assertThat(KeywordPlaceMatcher.match(dongtan, List.of(
+                place("동탄역자이아파트", APARTMENT, "경기 화성시 동탄구 영천동 892"))))
+                .isEqualTo(new NoMatch("KEYWORD_NAME_MISMATCH"));
+    }
+
+    @Test
+    void 이름_정규화는_괄호_공백_특수문자_대소문자_끝의_아파트와_실측_표기_차이를_맞춘다() {
+        assertThat(KeywordPlaceMatcher.normalizeName("고척아이파크아파트(MD)")).isEqualTo("고척ipark");
+        assertThat(KeywordPlaceMatcher.normalizeName("역삼센트럴자이아파트 (2028년08월예정)")).isEqualTo("역삼센트럴자이");
+        assertThat(KeywordPlaceMatcher.normalizeName("감전엘에이치")).isEqualTo(KeywordPlaceMatcher.normalizeName("감전LH아파트"));
+        assertThat(KeywordPlaceMatcher.normalizeName("테헤란 IPARK")).isEqualTo(KeywordPlaceMatcher.normalizeName("테헤란아이파크아파트"));
+        assertThat(KeywordPlaceMatcher.normalizeName("영통 SK VIEW 아파트")).isEqualTo(KeywordPlaceMatcher.normalizeName("영통SK뷰아파트"));
+        assertThat(KeywordPlaceMatcher.normalizeName("e-편한세상 여수 더퍼스트아파트")).isEqualTo("e편한세상여수더퍼스트");
+        assertThat(KeywordPlaceMatcher.normalizeName("왕십리텐즈힐1단지(임대)")).isEqualTo("왕십리텐즈힐1단지");
+        assertThat(KeywordPlaceMatcher.normalizeName(null)).isEmpty();
+    }
+
+    @Test
+    void 괄호가_있는_단지명은_괄호를_지운_검색어를_더한다() {
+        assertThat(KeywordPlaceMatcher.queries(new ComplexIdentity("서울특별시", "성동구", "하왕십리동", "왕십리텐즈힐1단지(임대)")))
+                .containsExactly("성동구 왕십리텐즈힐1단지(임대)", "성동구 왕십리텐즈힐1단지");
+        assertThat(KeywordPlaceMatcher.queries(new ComplexIdentity("인천광역시", "서해구", "가정동", "한국지엠(주)사원임대아파트")))
+                .containsExactly("서해구 한국지엠(주)사원임대아파트", "서해구 한국지엠(주)사원임대", "서해구 한국지엠 사원임대아파트");
     }
 
     @Test

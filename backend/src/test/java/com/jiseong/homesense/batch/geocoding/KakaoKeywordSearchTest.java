@@ -56,13 +56,53 @@ class KakaoKeywordSearchTest {
         }
     }
 
-    private KeywordPlace searchAndMatch(ComplexIdentity complex, String fixture) throws IOException {
-        String query = KeywordPlaceMatcher.queries(complex).get(0);
+    private KeywordPlaceMatcher.Result search(ComplexIdentity complex, String query, String fixture) throws IOException {
         expectKeyword(query).andRespond(withSuccess(fixture(fixture), MediaType.APPLICATION_JSON));
-        List<KeywordPlace> places = client.searchKeyword(query);
-        KeywordPlaceMatcher.Result result = KeywordPlaceMatcher.match(complex, places);
+        return KeywordPlaceMatcher.match(complex, client.searchKeyword(query));
+    }
+
+    private KeywordPlace searchAndMatch(ComplexIdentity complex, String fixture) throws IOException {
+        KeywordPlaceMatcher.Result result = search(complex, KeywordPlaceMatcher.queries(complex).get(0), fixture);
         assertThat(result).isInstanceOf(Matched.class);
         return ((Matched) result).place();
+    }
+
+    @Test
+    void 동탄파크자이는_후보가_동탄역자이_하나뿐이라도_이름이_달라_탈락한다() throws IOException {
+        ComplexIdentity complex = new ComplexIdentity("경기도", "화성동탄구", "영천동", "동탄파크자이아파트");
+
+        assertThat(search(complex, "화성동탄구 동탄파크자이아파트", "keyword-dongtan-park-xi.json"))
+                .isEqualTo(new KeywordPlaceMatcher.NoMatch("KEYWORD_NAME_MISMATCH"));
+    }
+
+    @Test
+    void 감전엘에이치는_표기_차이를_맞춰_감전LH아파트를_채택한다() throws IOException {
+        KeywordPlace place = searchAndMatch(
+                new ComplexIdentity("부산광역시", "사상구", "감전동", "감전엘에이치"), "keyword-gamjeon-lh.json");
+
+        assertThat(place.placeName()).isEqualTo("감전LH아파트");
+        assertThat(place.addressName()).isEqualTo("부산 사상구 감전동 961");
+    }
+
+    @Test
+    void 역삼자이는_같은_동의_역삼센트럴자이를_두고_정확히_같은_이름을_고른다() throws IOException {
+        KeywordPlace place = searchAndMatch(
+                new ComplexIdentity("서울특별시", "강남구", "역삼동", "역삼자이아파트"), "keyword-yeoksam-xi.json");
+
+        assertThat(place.placeName()).isEqualTo("역삼자이아파트");
+        assertThat(place.addressName()).isEqualTo("서울 강남구 역삼동 711-3");
+    }
+
+    @Test
+    void 괄호를_지운_검색어로_왕십리텐즈힐1단지를_찾는다() throws IOException {
+        ComplexIdentity complex = new ComplexIdentity("서울특별시", "성동구", "하왕십리동", "왕십리텐즈힐1단지(임대)");
+        String parenthesisRemoved = KeywordPlaceMatcher.queries(complex).get(1);
+
+        KeywordPlaceMatcher.Result result = search(complex, parenthesisRemoved, "keyword-wangsimni-tenshill-1.json");
+
+        assertThat(parenthesisRemoved).isEqualTo("성동구 왕십리텐즈힐1단지");
+        assertThat(result).isInstanceOf(Matched.class);
+        assertThat(((Matched) result).place().placeName()).isEqualTo("텐즈힐1단지아파트");
     }
 
     @Test

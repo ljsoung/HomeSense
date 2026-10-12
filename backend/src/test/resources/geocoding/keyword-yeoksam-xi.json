@@ -1,0 +1,119 @@
+{
+  "documents": [
+    {
+      "id": "26303797",
+      "place_name": "역삼자이아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 711-3",
+      "road_address_name": "서울 강남구 언주로 420",
+      "x": "127.04437885710304",
+      "y": "37.500386994160536",
+      "place_url": "http://place.map.kakao.com/26303797"
+    },
+    {
+      "id": "201125808",
+      "place_name": "역삼센트럴자이아파트 (2028년08월예정)",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 758",
+      "road_address_name": "",
+      "x": "127.04771638589",
+      "y": "37.4972051412092",
+      "place_url": "http://place.map.kakao.com/201125808"
+    },
+    {
+      "id": "1446906510",
+      "place_name": "역삼자이아파트 후문",
+      "category_name": "교통,수송 > 입출구",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 711-3",
+      "road_address_name": "서울 강남구 언주로 420",
+      "x": "127.044281131095",
+      "y": "37.5015087831915",
+      "place_url": "http://place.map.kakao.com/1446906510"
+    },
+    {
+      "id": "1791172978",
+      "place_name": "역삼자이공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 강남구 역삼동 711-6",
+      "road_address_name": "서울 강남구 언주로 408",
+      "x": "127.04469719994461",
+      "y": "37.49942820368288",
+      "place_url": "http://place.map.kakao.com/1791172978"
+    },
+    {
+      "id": "405680041",
+      "place_name": "스파드자이",
+      "category_name": "가정,생활 > 미용 > 체형관리",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 840-10",
+      "road_address_name": "서울 강남구 도곡로 147",
+      "x": "127.036039671338",
+      "y": "37.4911518106479",
+      "place_url": "http://place.map.kakao.com/405680041"
+    },
+    {
+      "id": "162749041",
+      "place_name": "엔유헤어 역삼점",
+      "category_name": "가정,생활 > 미용 > 미용실",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 711-6",
+      "road_address_name": "서울 강남구 언주로 408",
+      "x": "127.044670071532",
+      "y": "37.4994498380844",
+      "place_url": "http://place.map.kakao.com/162749041"
+    },
+    {
+      "id": "9694914",
+      "place_name": "강남사임당어린이집",
+      "category_name": "교육,학문 > 유아교육 > 어린이집",
+      "category_group_code": "PS3",
+      "address_name": "서울 강남구 역삼동 711-3",
+      "road_address_name": "서울 강남구 언주로 420",
+      "x": "127.044047863337",
+      "y": "37.50100070309351",
+      "place_url": "http://place.map.kakao.com/9694914"
+    },
+    {
+      "id": "144194373",
+      "place_name": "퓨어스파 선릉점",
+      "category_name": "가정,생활 > 미용 > 체형관리 > 다이어트,비만",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 711-6",
+      "road_address_name": "서울 강남구 언주로 408",
+      "x": "127.044670071532",
+      "y": "37.4994498380915",
+      "place_url": "http://place.map.kakao.com/144194373"
+    },
+    {
+      "id": "1808938719",
+      "place_name": "역삼자이아파트 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 711-3",
+      "road_address_name": "서울 강남구 언주로 420",
+      "x": "127.04400054060984",
+      "y": "37.50129985468162",
+      "place_url": "http://place.map.kakao.com/1808938719"
+    },
+    {
+      "id": "959357315",
+      "place_name": "역삼자이 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 강남구 역삼동 711-3",
+      "road_address_name": "서울 강남구 언주로 420",
+      "x": "127.04404755476887",
+      "y": "37.50047541673648",
+      "place_url": "http://place.map.kakao.com/959357315"
+    }
+  ],
+  "meta": {
+    "total_count": 17,
+    "pageable_count": 10,
+    "is_end": true
+  }
+}

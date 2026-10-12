@@ -43,6 +43,9 @@ public class ComplexGeocodingService {
      * (schema/location_precision_varchar12.sql).
      */
     static final String PRECISION_APPROXIMATE = "APPROXIMATE";
+    private static final String REASON_NO_CANDIDATE = "KEYWORD_NO_CANDIDATE";
+    private static final String REASON_NAME_MISMATCH = "KEYWORD_NAME_MISMATCH";
+    private static final String REASON_AMBIGUOUS = "KEYWORD_AMBIGUOUS";
     private static final int SAMPLE_LIMIT = 15;
 
     public enum StopReason {
@@ -77,6 +80,15 @@ public class ComplexGeocodingService {
             int notFound, int transientFailed, int calls, StopReason stopReason) {
     }
 
+    /**
+     * @param kept    다시 채택돼 좌표가 그대로인 단지 수
+     * @param moved   다시 채택됐지만 다른 장소가 골라져 좌표를 바꾼 단지 수
+     * @param dropped 탈락해 좌표를 NULL로 되돌리고 "못 찾음" 표시를 남긴 단지 수
+     */
+    public record RecheckResult(int targets, int kept, int moved, int dropped, int transientFailed, int calls,
+            StopReason stopReason) {
+    }
+
     /** @param refinable 지번을 뽑아 호출할 수 있는 단지 수, @param markedNotFound 그중 "못 찾음" 표시로 건너뛸 단지 수 */
     public record DryRunResult(int targets, int refinable, int noJibun, int markedNotFound) {
     }
@@ -90,6 +102,9 @@ public class ComplexGeocodingService {
     }
 
     private record Coordinate(Long complexId, BigDecimal latitude, BigDecimal longitude, String precision) {
+    }
+
+    private record ApproximateTarget(Target target, BigDecimal latitude, BigDecimal longitude) {
     }
 
     private final ComplexRepository complexRepository;
@@ -285,24 +300,115 @@ public class ComplexGeocodingService {
     }
 
     /**
-     * 주소 검색이 못 찾은 단지를 단지명 장소 검색으로 찾는다. 검색어는 "{시군구} {단지명}"이고, 후보가 없으면 단지명 끝의
-     * "아파트"를 뗀 검색어로 한 번 더 찾는다. 후보가 여럿이면 거기서 멈춘다(검색어를 넓혀도 여전히 여럿이거나 늘 뿐이다).
-     * 호출은 주소 검색과 같은 {@link #callWithRetry}를 거쳐 일일 카운터·재시도·중단 규칙이 같다.
+     * 주소 검색이 못 찾은 단지를 단지명 장소 검색으로 찾는다. 검색어는 {@link KeywordPlaceMatcher#queries} 순서다("{시군구} {단지명}",
+     * 끝의 "아파트"를 뗀 것, 괄호를 지운 것). 앞 검색어에서 후보가 없거나 이름이 맞는 후보가 없으면 다음 검색어로 다시 찾고, 이름을
+     * 포함하는 후보가 여럿이면 거기서 멈춘다(검색어를 넓혀도 여전히 여럿이거나 늘 뿐이다). 모든 검색어가 실패하면, 한 번이라도 이름
+     * 불일치였으면 그 사유를, 아니면 후보 없음을 돌려준다. 호출은 주소 검색과 같은 {@link #callWithRetry}를 거쳐 일일 카운터·재시도·
+     * 중단 규칙이 같다.
      */
     private KeywordPlaceMatcher.Result searchByKeyword(Target t, Counter counter) {
         if (t.complexName() == null || t.complexName().isBlank() || t.sido() == null) {
             return new KeywordPlaceMatcher.NoMatch("KEYWORD_SKIPPED");
         }
         KeywordPlaceMatcher.ComplexIdentity identity = t.identity();
-        KeywordPlaceMatcher.Result result = new KeywordPlaceMatcher.NoMatch("KEYWORD_NO_CANDIDATE");
+        boolean nameMismatchSeen = false;
         for (String query : KeywordPlaceMatcher.queries(identity)) {
             List<KakaoGeocodingClient.KeywordPlace> places = callWithRetry(() -> client.searchKeyword(query), counter);
-            result = KeywordPlaceMatcher.match(identity, places);
-            if (!(result instanceof KeywordPlaceMatcher.NoMatch noMatch)
-                    || !"KEYWORD_NO_CANDIDATE".equals(noMatch.reason())) {
+            KeywordPlaceMatcher.Result result = KeywordPlaceMatcher.match(identity, places);
+            if (!(result instanceof KeywordPlaceMatcher.NoMatch noMatch) || REASON_AMBIGUOUS.equals(noMatch.reason())) {
                 return result;
             }
+            nameMismatchSeen |= REASON_NAME_MISMATCH.equals(noMatch.reason());
         }
+        return new KeywordPlaceMatcher.NoMatch(nameMismatchSeen ? REASON_NAME_MISMATCH : REASON_NO_CANDIDATE);
+    }
+
+    /**
+     * 이미 저장한 APPROXIMATE 좌표를 현재 키워드 판정 규칙으로 다시 판정한다(러너 {@code --recheck-approximate}). 판정 규칙을 바꾼 뒤
+     * 예전 규칙으로 채택한 좌표를 정리하는 경로다. 주소 검색은 이미 못 찾은 단지라 다시 하지 않는다.
+     * <ul>
+     *   <li>다시 채택되면 좌표가 같으면 그대로 두고, 다른 장소가 골라졌으면 그 좌표로 바꾼다(APPROXIMATE 유지).</li>
+     *   <li>탈락하면 좌표를 NULL로 되돌리고 "못 찾음" 표시를 남긴다 — 이후 {@code --retry-failed}로 다시 돌릴 수 있다.</li>
+     * </ul>
+     * 호출 규칙(일일 카운터·429·401·403 중단·5xx 재시도)은 {@link #run}과 같다. 단지마다 바로 커밋한다(건수가 적다).
+     */
+    public RecheckResult recheckApproximate(int maxComplexes) {
+        List<ApproximateTarget> targets = complexRepository.findApproximateTargets().stream()
+                .map(r -> new ApproximateTarget(new Target(((Number) r[0]).longValue(), (String) r[1], (String) r[2],
+                        (String) r[3], (String) r[4], (String) r[5]), (BigDecimal) r[6], (BigDecimal) r[7]))
+                .toList();
+        Counter counter = new Counter();
+        int kept = 0;
+        int moved = 0;
+        int dropped = 0;
+        int checked = 0;
+        StopReason stopReason = StopReason.COMPLETED;
+        try {
+            for (ApproximateTarget a : targets) {
+                if (checked >= maxComplexes) {
+                    stopReason = StopReason.MAX_COMPLEXES;
+                    break;
+                }
+                KeywordPlaceMatcher.Result result;
+                try {
+                    result = searchByKeyword(a.target(), counter);
+                } catch (DailyLimitReachedException e) {
+                    stopReason = StopReason.DAILY_LIMIT;
+                    break;
+                } catch (GeocodingTransientException e) {
+                    // 판정하지 못한 단지는 그대로 둔다(좌표 유지). 다음 recheck 실행이 다시 본다.
+                    counter.transientFailed++;
+                    auditLogger.logGeocodingFailure(a.target().complexId(), a.target().address(), e.getMessage(), true);
+                    checked++;
+                    continue;
+                }
+                checked++;
+                Long complexId = a.target().complexId();
+                LocalDateTime now = LocalDateTime.now(clock);
+                if (result instanceof KeywordPlaceMatcher.Matched matched) {
+                    KakaoGeocodingClient.KeywordPlace place = matched.place();
+                    if (place.latitude().compareTo(a.latitude()) == 0 && place.longitude().compareTo(a.longitude()) == 0) {
+                        kept++;
+                        continue;
+                    }
+                    transactionTemplate.execute(status -> complexRepository.updateApproximateCoordinates(
+                            complexId, place.latitude(), place.longitude(), now));
+                    moved++;
+                    logKeywordMatch(a.target(), place);
+                } else {
+                    String reason = "RECHECK/" + ((KeywordPlaceMatcher.NoMatch) result).reason();
+                    transactionTemplate.execute(status -> complexRepository.clearApproximateCoordinates(complexId, now));
+                    redisState.markNotFound(complexId, reason);
+                    auditLogger.logGeocodingFailure(complexId, a.target().address(), reason, false);
+                    dropped++;
+                }
+                evictDetailCache(List.of(new Coordinate(complexId, null, null, null)));
+            }
+        } catch (GeocodingConfigurationException e) {
+            stopReason = StopReason.CONFIGURATION_ERROR;
+            auditLogger.logBatchFailure("BAT-GEO-01", e);
+        } catch (GeocodingRateLimitedException e) {
+            stopReason = StopReason.RATE_LIMITED;
+            auditLogger.logBatchFailure("BAT-GEO-01", e);
+        } catch (GeocodingInterruptedException e) {
+            stopReason = StopReason.INTERRUPTED;
+            Thread.currentThread().interrupt();
+        }
+        RecheckResult result = new RecheckResult(targets.size(), kept, moved, dropped, counter.transientFailed,
+                counter.calls, stopReason);
+        log.atInfo()
+                .addKeyValue("programId", "BAT-GEO-01")
+                .addKeyValue("recheckApproximate", true)
+                .addKeyValue("targets", result.targets())
+                .addKeyValue("kept", result.kept())
+                .addKeyValue("moved", result.moved())
+                .addKeyValue("dropped", result.dropped())
+                .addKeyValue("transientFailed", result.transientFailed())
+                .addKeyValue("calls", result.calls())
+                .addKeyValue("stopReason", result.stopReason())
+                .log("BAT-GEO-01 APPROXIMATE 재판정 종료: 대상 {}건, 유지 {}건, 좌표 변경 {}건, 탈락 {}건, 일시 실패 {}건, 호출 {}건, "
+                        + "종료 사유 {}", result.targets(), result.kept(), result.moved(), result.dropped(),
+                        result.transientFailed(), result.calls(), result.stopReason());
         return result;
     }
 

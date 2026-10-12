@@ -85,4 +85,31 @@ public interface ComplexRepository extends JpaRepository<Complex, Long>, Complex
     int fillCoordinatesIfNull(@Param("complexId") Long complexId, @Param("latitude") BigDecimal latitude,
             @Param("longitude") BigDecimal longitude, @Param("precision") String precision,
             @Param("now") LocalDateTime now);
+
+    /**
+     * BAT-GEO-01 APPROXIMATE 재판정 대상 — 키워드 보완으로 좌표를 쓴 단지.
+     * [complexId, legalDongAddress, dongRi, sido, sigungu, complexName, latitude, longitude]
+     */
+    @Query("""
+            SELECT c.complexId, c.legalDongAddress, c.dongRi, c.sido, c.sigungu, c.complexName, c.latitude, c.longitude
+            FROM Complex c WHERE c.locationPrecision = 'APPROXIMATE' ORDER BY c.complexId
+            """)
+    List<Object[]> findApproximateTargets();
+
+    /** APPROXIMATE 재판정에서 다른 장소가 골라졌을 때 좌표만 바꾼다(정밀도는 APPROXIMATE 그대로). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE complex SET latitude = :latitude, longitude = :longitude, updated_at = :now
+            WHERE complex_id = :complexId AND location_precision = 'APPROXIMATE'
+            """, nativeQuery = true)
+    int updateApproximateCoordinates(@Param("complexId") Long complexId, @Param("latitude") BigDecimal latitude,
+            @Param("longitude") BigDecimal longitude, @Param("now") LocalDateTime now);
+
+    /** APPROXIMATE 재판정에서 탈락한 단지의 좌표를 되돌린다. PRECISE 좌표는 건드리지 않는다. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE complex SET latitude = NULL, longitude = NULL, location_precision = NULL, updated_at = :now
+            WHERE complex_id = :complexId AND location_precision = 'APPROXIMATE'
+            """, nativeQuery = true)
+    int clearApproximateCoordinates(@Param("complexId") Long complexId, @Param("now") LocalDateTime now);
 }

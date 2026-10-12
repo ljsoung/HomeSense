@@ -17,7 +17,8 @@ import lombok.extern.slf4j.Slf4j;
  * 기본은 dry-run — 카카오를 호출하지 않고 정제 결과만 센다. {@code --apply}를 붙여야 호출하고 좌표를 쓴다.
  * {@code --limit=N}을 붙이면 카카오에 보낼 단지 수를 N으로 제한한다(표본 확인용). {@code --retry-failed}를 붙이면 "못 찾음"
  * 표시(Redis {@code geo:fail}, TTL 30일)가 남아 있는 단지만 다시 처리한다 — 키워드 보완을 도입하기 전에 실패한 단지를
- * 표시를 수동으로 지우지 않고 다시 돌리는 경로다.
+ * 표시를 수동으로 지우지 않고 다시 돌리는 경로다. {@code --recheck-approximate}를 붙이면 이미 저장한 APPROXIMATE 좌표를 현재
+ * 키워드 판정 규칙으로 다시 판정한다(탈락하면 좌표를 NULL로 되돌리고 "못 찾음" 표시를 남긴다).
  *
  * <p>좌표가 NULL인 단지만 고르므로 중단 후 같은 명령을 다시 실행하면 남은 단지부터 이어진다. 일일 호출 상한
  * ({@code homesense.geocoding.daily-limit})에 닿으면 멈추고, 다음 날 다시 실행하거나 03:00 정기 런이 이어서 처리한다.
@@ -34,6 +35,7 @@ public class ComplexGeocodingCommandLineRunner implements CommandLineRunner {
     private static final String APPLY_ARG = "--apply";
     private static final String LIMIT_PREFIX = "--limit=";
     private static final String RETRY_FAILED_ARG = "--retry-failed";
+    private static final String RECHECK_APPROXIMATE_ARG = "--recheck-approximate";
 
     private final ComplexGeocodingService geocodingService;
     private final ApplicationContext applicationContext;
@@ -55,8 +57,10 @@ public class ComplexGeocodingCommandLineRunner implements CommandLineRunner {
                     .map(arg -> Integer.parseInt(arg.substring(LIMIT_PREFIX.length())))
                     .findFirst()
                     .orElse(Integer.MAX_VALUE);
-            ComplexGeocodingService.RunResult result = geocodingService.run(limit, args.contains(RETRY_FAILED_ARG));
-            return switch (result.stopReason()) {
+            ComplexGeocodingService.StopReason stopReason = args.contains(RECHECK_APPROXIMATE_ARG)
+                    ? geocodingService.recheckApproximate(limit).stopReason()
+                    : geocodingService.run(limit, args.contains(RETRY_FAILED_ARG)).stopReason();
+            return switch (stopReason) {
                 case CONFIGURATION_ERROR, RATE_LIMITED, INTERRUPTED -> 1;
                 default -> 0;
             };

@@ -1,0 +1,141 @@
+{
+  "documents": [
+    {
+      "id": "23209032",
+      "place_name": "감전LH아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "부산 사상구 감전동 961",
+      "road_address_name": "부산 사상구 백양대로 539",
+      "x": "128.993785553358",
+      "y": "35.1560831253695",
+      "place_url": "http://place.map.kakao.com/23209032"
+    },
+    {
+      "id": "133211672",
+      "place_name": "LH감전꿈꾸는작은도서관",
+      "category_name": "교육,학문 > 학습시설 > 도서관 > 작은도서관",
+      "category_group_code": "",
+      "address_name": "부산 사상구 감전동 961",
+      "road_address_name": "부산 사상구 백양대로 539",
+      "x": "128.993774626323",
+      "y": "35.1560400488614",
+      "place_url": "http://place.map.kakao.com/133211672"
+    },
+    {
+      "id": "27372263",
+      "place_name": "보듬이나눔이 감전엘에이치어린이집",
+      "category_name": "교육,학문 > 유아교육 > 어린이집",
+      "category_group_code": "PS3",
+      "address_name": "부산 사상구 감전동 961",
+      "road_address_name": "부산 사상구 백양대로 539",
+      "x": "128.9935903478435",
+      "y": "35.155907906096445",
+      "place_url": "http://place.map.kakao.com/27372263"
+    },
+    {
+      "id": "26451921",
+      "place_name": "감전LH아파트 관리사무소",
+      "category_name": "서비스,산업 > 관리,운영 > 건물관리사무소",
+      "category_group_code": "",
+      "address_name": "부산 사상구 감전동 961",
+      "road_address_name": "부산 사상구 백양대로 539",
+      "x": "128.993799595074",
+      "y": "35.1561189412017",
+      "place_url": "http://place.map.kakao.com/26451921"
+    },
+    {
+      "id": "18294192",
+      "place_name": "괘법LH아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "부산 사상구 괘법동 522-3",
+      "road_address_name": "부산 사상구 광장로21번길 66",
+      "x": "128.980018466174",
+      "y": "35.1666580958345",
+      "place_url": "http://place.map.kakao.com/18294192"
+    },
+    {
+      "id": "161390706",
+      "place_name": "엘에이치",
+      "category_name": "가정,생활 > 전자제품 > 전자제품판매 > 휴대폰판매",
+      "category_group_code": "",
+      "address_name": "부산 사상구 주례동 412-21",
+      "road_address_name": "부산 사상구 가야대로 291",
+      "x": "129.00445721856414",
+      "y": "35.15091537474135",
+      "place_url": "http://place.map.kakao.com/161390706"
+    },
+    {
+      "id": "1764200037",
+      "place_name": "이마트24 감전LH점",
+      "category_name": "가정,생활 > 편의점 > 이마트24",
+      "category_group_code": "CS2",
+      "address_name": "부산 사상구 감전동 961",
+      "road_address_name": "부산 사상구 백양대로 537",
+      "x": "128.99441830876685",
+      "y": "35.156112358696966",
+      "place_url": "http://place.map.kakao.com/1764200037"
+    },
+    {
+      "id": "1186682716",
+      "place_name": "GS25 괘법LH점",
+      "category_name": "가정,생활 > 편의점 > GS25",
+      "category_group_code": "CS2",
+      "address_name": "부산 사상구 괘법동 523-1",
+      "road_address_name": "부산 사상구 낙동대로1210번길 78",
+      "x": "128.980932319524",
+      "y": "35.1670522839497",
+      "place_url": "http://place.map.kakao.com/1186682716"
+    },
+    {
+      "id": "301576397",
+      "place_name": "부산사상 감전엘에이치1 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "부산 사상구 감전동 961",
+      "road_address_name": "부산 사상구 백양대로 539",
+      "x": "128.99423989051465",
+      "y": "35.15532136163794",
+      "place_url": "http://place.map.kakao.com/301576397"
+    },
+    {
+      "id": "291767218",
+      "place_name": "부산사상 감전엘에이치2 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "부산 사상구 감전동 961",
+      "road_address_name": "부산 사상구 백양대로 539",
+      "x": "128.99423989051465",
+      "y": "35.15532136163794",
+      "place_url": "http://place.map.kakao.com/291767218"
+    },
+    {
+      "id": "160844277",
+      "place_name": "부산사상 괘법LH1단지아파트 1 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "부산 사상구 괘법동 522-3",
+      "road_address_name": "부산 사상구 광장로21번길 66",
+      "x": "128.980074670343",
+      "y": "35.1663057181381",
+      "place_url": "http://place.map.kakao.com/160844277"
+    },
+    {
+      "id": "1213410599",
+      "place_name": "부산사상 괘법LH1단지아파트 2 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "부산 사상구 괘법동 522-3",
+      "road_address_name": "부산 사상구 광장로21번길 66",
+      "x": "128.980079529736",
+      "y": "35.1668229137166",
+      "place_url": "http://place.map.kakao.com/1213410599"
+    }
+  ],
+  "meta": {
+    "total_count": 21,
+    "pageable_count": 12,
+    "is_end": true
+  }
+}

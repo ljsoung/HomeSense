@@ -158,4 +158,30 @@ class ComplexGeocodingMariaDbIT {
         assertThat(reloaded.getLocationPrecision()).isEqualTo("APPROXIMATE");
         assertThat(reloaded.getLatitude()).isEqualByComparingTo("37.5726145");
     }
+
+    @Test
+    void 재판정_탈락은_APPROXIMATE만_되돌리고_PRECISE는_건드리지_않는다() {
+        Complex approximate = complexRepository.saveAndFlush(Complex.builder()
+                .sourceComplexCd("GEO-R").complexName("동탄파크자이아파트").complexType("아파트")
+                .sido("서울특별시").sigungu("종로구").dongRi("내수동").legalDongAddress("서울특별시 종로구 내수동 1 동탄파크자이아파트")
+                .latitude(new BigDecimal("37.2000000")).longitude(new BigDecimal("127.1000000")).locationPrecision("APPROXIMATE")
+                .elevatorPassengerCount((short) 1).elevatorCargoCount((short) 0).elevatorCombinedCount((short) 0)
+                .dataUpdatedAt(LocalDate.of(2026, 1, 1)).build());
+        Complex precise = complex("GEO-P", "서울특별시 종로구 내수동 72 경희궁의아침3단지", "내수동",
+                new BigDecimal("37.0000000"), new BigDecimal("127.0000000"));
+        when(client.searchKeyword(anyString())).thenReturn(List.of(new KakaoGeocodingClient.KeywordPlace("동탄역자이아파트",
+                "부동산 > 주거시설 > 아파트", "서울 종로구 내수동 892", JONGNO.latitude(), JONGNO.longitude())));
+        when(redisState.recordCall()).thenReturn(1L);
+
+        ComplexGeocodingService.RecheckResult result = geocodingService.recheckApproximate(Integer.MAX_VALUE);
+
+        assertThat(result.dropped()).isEqualTo(1);
+        Complex reloaded = complexRepository.findById(approximate.getComplexId()).orElseThrow();
+        assertThat(reloaded.getLatitude()).isNull();
+        assertThat(reloaded.getLocationPrecision()).isNull();
+        assertThat(complexRepository.clearApproximateCoordinates(precise.getComplexId(), LocalDateTime.now())).isZero();
+        assertThat(complexRepository.findById(precise.getComplexId()).orElseThrow().getLatitude())
+                .isEqualByComparingTo("37.0000000");
+        verify(redisState).markNotFound(approximate.getComplexId(), "RECHECK/KEYWORD_NAME_MISMATCH");
+    }
 }
