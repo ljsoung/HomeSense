@@ -277,6 +277,12 @@ NULL로 되돌린 뒤 실행한다.
    ```bash
    java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --retry-failed
    ```
+7. 키워드 판정 규칙을 바꾼 뒤에는 이미 저장한 APPROXIMATE 좌표를 새 규칙으로 다시 판정한다. 탈락한 단지는 좌표가 NULL로
+   돌아가고 `geo:fail` 표시가 남으므로, 이어서 6단계(`--retry-failed`)를 실행한다.
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --recheck-approximate
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --retry-failed
+   ```
 
 ### APPROXIMATE 단지 재지오코딩 — 단지 마스터를 다시 적재해 K-apt 지번이 갱신됐을 때
 
