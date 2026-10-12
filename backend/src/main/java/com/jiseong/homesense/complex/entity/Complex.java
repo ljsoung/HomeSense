@@ -177,7 +177,7 @@ public class Complex {
     @Column(name = "longitude", precision = 10, scale = 7)
     private BigDecimal longitude;
 
-    @Column(name = "location_precision", length = 10)
+    @Column(name = "location_precision", length = 12)
     private String locationPrecision;
 
     @Column(name = "data_updated_at", nullable = false)

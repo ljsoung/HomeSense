@@ -151,7 +151,7 @@ public class Trade {
     @Column(name = "longitude", precision = 10, scale = 7)
     private BigDecimal longitude;
 
-    @Column(name = "location_precision", length = 10)
+    @Column(name = "location_precision", length = 12)
     private String locationPrecision;
 
     @Column(name = "dedup_hash", nullable = false, unique = true, length = 64)

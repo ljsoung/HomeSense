@@ -163,7 +163,7 @@ CREATE TABLE complex (
     ev_parking_underground_count  SMALLINT UNSIGNED  NULL,
     latitude                      DECIMAL(10,7)      NULL,
     longitude                     DECIMAL(10,7)      NULL,
-    location_precision            VARCHAR(10)        NULL,
+    location_precision            VARCHAR(12)        NULL,      -- PRECISE / APPROXIMATE(키워드 보완). 2026-10-12 BAT-GEO-01: 10→12, 기존 DB는 schema/location_precision_varchar12.sql
     data_updated_at               DATE               NOT NULL,
     created_at                    DATETIME           NOT NULL,
     updated_at                    DATETIME           NOT NULL,
@@ -212,7 +212,7 @@ CREATE TABLE trade (
     match_confidence     DECIMAL(4,3)     NULL,
     latitude             DECIMAL(10,7)    NULL,
     longitude            DECIMAL(10,7)    NULL,
-    location_precision   VARCHAR(10)      NULL,
+    location_precision   VARCHAR(12)      NULL,
     dedup_hash           CHAR(64)         NOT NULL,
     created_at           DATETIME         NOT NULL,
     updated_at           DATETIME         NOT NULL,

@@ -73,7 +73,7 @@ CREATE TABLE complex (
     ev_parking_underground_count SMALLINT,
     latitude DECIMAL(10, 7),
     longitude DECIMAL(10, 7),
-    location_precision VARCHAR(10),
+    location_precision VARCHAR(12),
     data_updated_at DATE NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
