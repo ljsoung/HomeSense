@@ -245,6 +245,10 @@ NULL로 되돌린 뒤 실행한다.
 `complex.latitude IS NULL`인 단지만 카카오 주소 검색(REST API 키, `KAKAO_API_KEY`)으로 좌표를 채운다. 운영 DB는
 **백엔드 첫 배포 때** 이 단계로 채운다. 단지당 호출 1회라 전체 백필은 약 2.1만 회다.
 
+0. **`location_precision`을 VARCHAR(12)로 넓힌다**(키워드 보완 좌표 'APPROXIMATE'를 저장하려면 필요, 재실행 안전).
+   ```bash
+   mysql -h "$DB_HOST" -P 3307 -u "$DB_USER" -p homesense < backend/src/main/resources/schema/location_precision_varchar12.sql
+   ```
 1. 카카오 개발자 콘솔 [통계] > [쿼터]에서 일일 한도와 오늘 사용량을 확인하고, 그보다 낮게 `GEOCODING_DAILY_LIMIT`을
    정한다(기본 10000). 이 상한은 러너와 03:00 정기 런이 Redis 카운터 `geo:calls:{yyyyMMdd}` 하나로 같이 센다.
 2. dry-run(카카오 호출 없음) — 정제 가능 건수와 지번 없는 단지 표본을 확인한다.
@@ -268,3 +272,19 @@ NULL로 되돌린 뒤 실행한다.
    좌표가 끝내 NULL로 남는 단지는 지번이 없는 단지(약 1.0%)와 카카오가 주소를 못 찾은 단지다. 못 찾은 단지는 Redis
    `geo:fail:{complexId}`가 남아 있는 동안(기본 30일) 다시 호출하지 않는다 — 즉시 다시 시도하려면 그 키를 지운다.
 5. 캐시 — 러너가 좌표를 쓴 단지의 `complexDetailV3` 항목을 청크마다 지운다(evictIfPresent). 별도 작업은 없다.
+6. 주소 검색이 못 찾은 단지는 같은 실행 안에서 단지명 키워드 검색으로 한 번 더 찾고, 찾으면 `location_precision='APPROXIMATE'`로
+   쓴다. 이전 실행에서 못 찾아 `geo:fail` 표시가 남은 단지를 다시 처리하려면 `--retry-failed`를 붙인다(표시를 수동으로 지우지 않는다).
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --retry-failed
+   ```
+
+### APPROXIMATE 단지 재지오코딩 — 단지 마스터를 다시 적재해 K-apt 지번이 갱신됐을 때
+
+키워드 보완 좌표(APPROXIMATE)는 K-apt가 사업 전 지번을 갖고 있어서 생긴 것이다. 재적재로 지번이 갱신되면 주소 검색으로
+다시 찾아 PRECISE로 덮어쓴다. 러너는 좌표가 NULL인 단지만 고르므로 먼저 비운다.
+
+```sql
+UPDATE complex SET latitude = NULL, longitude = NULL, location_precision = NULL WHERE location_precision = 'APPROXIMATE';
+```
+
+그다음 3단계(apply)를 다시 실행한다. 주소 검색이 여전히 못 찾으면 같은 실행 안에서 키워드로 다시 APPROXIMATE가 된다.
