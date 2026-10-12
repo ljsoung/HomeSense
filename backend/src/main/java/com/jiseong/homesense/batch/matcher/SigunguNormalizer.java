@@ -22,12 +22,12 @@ package com.jiseong.homesense.batch.matcher;
  * 있으므로, 공백이 없는 단일 시/군 표기는 무조건 원본 그대로 반환하도록 전제 조건을 추가했다 —
  * 이제 "시"가 몇 번 등장하든, 어느 위치에 있든 공백 없는 입력에는 영향을 주지 않는다.</b>
  */
-final class SigunguNormalizer {
+public final class SigunguNormalizer {
 
     private SigunguNormalizer() {
     }
 
-    static String normalize(String raw) {
+    public static String normalize(String raw) {
         if (raw == null || !raw.contains(" ")) {
             return raw;
         }

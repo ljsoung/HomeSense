@@ -1,0 +1,174 @@
+{
+  "documents": [
+    {
+      "id": "27037402",
+      "place_name": "힐스테이트청계아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.04760981436473",
+      "y": "37.57152873927553",
+      "place_url": "http://place.map.kakao.com/27037402"
+    },
+    {
+      "id": "983199179",
+      "place_name": "힐스테이트청계아파트 상가",
+      "category_name": "가정,생활 > 상가,아케이드",
+      "category_group_code": "",
+      "address_name": "서울 동대문구 답십리동 465-18",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.048828684804",
+      "y": "37.5711173876516",
+      "place_url": "http://place.map.kakao.com/983199179"
+    },
+    {
+      "id": "1299768491",
+      "place_name": "힐스테이트청계아파트 관리사무소",
+      "category_name": "서비스,산업 > 관리,운영 > 건물관리사무소",
+      "category_group_code": "",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.04687309529602",
+      "y": "37.57184438235711",
+      "place_url": "http://place.map.kakao.com/1299768491"
+    },
+    {
+      "id": "825217012",
+      "place_name": "아소비 서울힐스테이트청계점",
+      "category_name": "교육,학문 > 학습시설",
+      "category_group_code": "",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.04821182141657",
+      "y": "37.57121134466977",
+      "place_url": "http://place.map.kakao.com/825217012"
+    },
+    {
+      "id": "708392981",
+      "place_name": "힐스테이트청계센트럴오피스텔",
+      "category_name": "부동산 > 주거시설 > 오피스텔",
+      "category_group_code": "",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.020352112103",
+      "y": "37.5684704977686",
+      "place_url": "http://place.map.kakao.com/708392981"
+    },
+    {
+      "id": "333271361",
+      "place_name": "송평익스프레스 황학힐스테이트청계센트럴점",
+      "category_name": "음식점 > 한식",
+      "category_group_code": "FD6",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.02058414571236",
+      "y": "37.56842630874774",
+      "place_url": "http://place.map.kakao.com/333271361"
+    },
+    {
+      "id": "1796692709",
+      "place_name": "빨간펜수학의달인 청계힐스테이트점",
+      "category_name": "교육,학문 > 학원 > 수학학원",
+      "category_group_code": "AC5",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "",
+      "x": "127.04882192650568",
+      "y": "37.57116874717077",
+      "place_url": "http://place.map.kakao.com/1796692709"
+    },
+    {
+      "id": "1064912960",
+      "place_name": "수학의달인 수학교습소 청계힐스테이트점",
+      "category_name": "교육,학문 > 학원 > 수학학원",
+      "category_group_code": "AC5",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.04869400850046",
+      "y": "37.57116069104563",
+      "place_url": "http://place.map.kakao.com/1064912960"
+    },
+    {
+      "id": "11167210",
+      "place_name": "종로청계힐스테이트아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.02115112917707",
+      "y": "37.576030606858694",
+      "place_url": "http://place.map.kakao.com/11167210"
+    },
+    {
+      "id": "26439437",
+      "place_name": "종로청계힐스테이트 경로당",
+      "category_name": "가정,생활 > 친목 > 노인정,노인회",
+      "category_group_code": "",
+      "address_name": "서울 종로구 숭인동 766",
+      "road_address_name": "서울 종로구 숭인동길 21",
+      "x": "127.021055850683",
+      "y": "37.5753674919165",
+      "place_url": "http://place.map.kakao.com/26439437"
+    },
+    {
+      "id": "766713199",
+      "place_name": "힐스테이트단지내공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.020537810556",
+      "y": "37.568695714509",
+      "place_url": "http://place.map.kakao.com/766713199"
+    },
+    {
+      "id": "770550070",
+      "place_name": "힐스테이트공인중개사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.020537810556",
+      "y": "37.568695714509",
+      "place_url": "http://place.map.kakao.com/770550070"
+    },
+    {
+      "id": "291367734",
+      "place_name": "황학동힐스테이트공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 중구 황학동 1229",
+      "road_address_name": "서울 중구 마장로 95",
+      "x": "127.020537810556",
+      "y": "37.568695714509",
+      "place_url": "http://place.map.kakao.com/291367734"
+    },
+    {
+      "id": "2055108107",
+      "place_name": "GS25 청계힐스테이트점",
+      "category_name": "가정,생활 > 편의점 > GS25",
+      "category_group_code": "CS2",
+      "address_name": "서울 동대문구 답십리동 1009",
+      "road_address_name": "서울 동대문구 천호대로55길 11",
+      "x": "127.0486702687721",
+      "y": "37.571209354573384",
+      "place_url": "http://place.map.kakao.com/2055108107"
+    },
+    {
+      "id": "1665670278",
+      "place_name": "이대째백년부동산공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 동대문구 전농동 690",
+      "road_address_name": "서울 동대문구 사가정로 65",
+      "x": "127.05062178457885",
+      "y": "37.57454852194097",
+      "place_url": "http://place.map.kakao.com/1665670278"
+    }
+  ],
+  "meta": {
+    "total_count": 56,
+    "pageable_count": 31,
+    "is_end": false
+  }
+}

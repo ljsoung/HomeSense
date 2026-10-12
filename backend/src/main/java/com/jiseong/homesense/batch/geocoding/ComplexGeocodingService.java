@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -36,6 +37,12 @@ import lombok.extern.slf4j.Slf4j;
 public class ComplexGeocodingService {
 
     static final String PRECISION_PRECISE = "PRECISE";
+    /**
+     * 키워드 장소 검색(단지명)으로 얻은 좌표. 이름으로 맞춘 결과라 다른 단지를 잘못 집었을 가능성이 남아 근사로 둔다 — UI정의서
+     * 7.2절의 근사 정의와 같고, 상세·지도 화면은 PRECISE가 아니면 "근사 위치입니다"를 보인다. 11자라 컬럼을 VARCHAR(12)로 넓혔다
+     * (schema/location_precision_varchar12.sql).
+     */
+    static final String PRECISION_APPROXIMATE = "APPROXIMATE";
     private static final int SAMPLE_LIMIT = 15;
 
     public enum StopReason {
@@ -59,24 +66,30 @@ public class ComplexGeocodingService {
      * @param targets   좌표가 없는 단지 수
      * @param noJibun   지번을 못 뽑아 호출하지 않은 단지 수
      * @param skipped   "주소를 못 찾음" 표시가 남아 있어 건너뛴 단지 수
-     * @param found     좌표를 얻은 단지 수
+     * @param found     좌표를 얻은 단지 수(주소 검색 + 키워드 보완)
+     * @param foundByKeyword 그중 키워드 장소 검색으로 얻어 APPROXIMATE로 쓴 단지 수
      * @param written   실제로 DB에 쓴 단지 수(그사이 다른 실행이 먼저 채웠으면 found보다 작다)
      * @param notFound  카카오가 주소를 못 찾은 단지 수
      * @param transientFailed 재시도까지 실패한 단지 수
      * @param calls     이번 실행에서 보낸 카카오 호출 수(재시도 포함)
      */
-    public record RunResult(int targets, int noJibun, int skipped, int found, int written, int notFound,
-            int transientFailed, int calls, StopReason stopReason) {
+    public record RunResult(int targets, int noJibun, int skipped, int found, int foundByKeyword, int written,
+            int notFound, int transientFailed, int calls, StopReason stopReason) {
     }
 
     /** @param refinable 지번을 뽑아 호출할 수 있는 단지 수, @param markedNotFound 그중 "못 찾음" 표시로 건너뛸 단지 수 */
     public record DryRunResult(int targets, int refinable, int noJibun, int markedNotFound) {
     }
 
-    private record Target(Long complexId, String address, String dongRi) {
+    private record Target(Long complexId, String address, String dongRi, String sido, String sigungu,
+            String complexName) {
+
+        KeywordPlaceMatcher.ComplexIdentity identity() {
+            return new KeywordPlaceMatcher.ComplexIdentity(sido, sigungu, dongRi, complexName);
+        }
     }
 
-    private record Coordinate(Long complexId, BigDecimal latitude, BigDecimal longitude) {
+    private record Coordinate(Long complexId, BigDecimal latitude, BigDecimal longitude, String precision) {
     }
 
     private final ComplexRepository complexRepository;
@@ -136,13 +149,29 @@ public class ComplexGeocodingService {
         return result;
     }
 
-    /**
-     * 좌표 없는 단지를 처리한다.
-     *
-     * @param maxComplexes 이번 실행에서 카카오에 보낼 단지 수 상한(재시도는 한 단지로 센다). 제한 없으면 {@link Integer#MAX_VALUE}
-     */
+    /** 좌표 없는 단지 중 "못 찾음" 표시가 없는 단지를 처리한다(정기 런·러너 기본). */
     public RunResult run(int maxComplexes) {
+        return run(maxComplexes, false);
+    }
+
+    /**
+     * 좌표 없는 단지를 처리한다. 단지마다 주소 검색을 먼저 하고, 못 찾으면 키워드 장소 검색으로 한 번 더 찾는다(정기 런과 러너가
+     * 같은 순서).
+     *
+     * @param maxComplexes 이번 실행에서 카카오에 보낼 단지 수 상한(재시도·키워드 검색도 한 단지로 센다). 제한 없으면
+     *                     {@link Integer#MAX_VALUE}
+     * @param retryFailed  true면 "못 찾음" 표시({@code geo:fail})가 남아 있는 단지<b>만</b> 다시 처리한다(러너의
+     *                     {@code --retry-failed}). 표시를 수동으로 지우지 않고 이전 실패를 다시 돌리는 경로다. 좌표를 얻으면 표시를
+     *                     지우고, 또 못 찾으면 표시를 새 사유와 TTL로 다시 쓴다.
+     */
+    public RunResult run(int maxComplexes, boolean retryFailed) {
         List<Target> targets = loadTargets();
+        if (retryFailed) {
+            targets = targets.stream()
+                    .filter(t -> GeocodingAddressRefiner.refine(t.address(), t.dongRi()).isPresent())
+                    .filter(t -> redisState.isMarkedNotFound(t.complexId()))
+                    .toList();
+        }
         Counter counter = new Counter();
         List<Coordinate> pending = new ArrayList<>();
         StopReason stopReason = StopReason.COMPLETED;
@@ -155,7 +184,7 @@ public class ComplexGeocodingService {
                     counter.noJibun++;
                     continue;
                 }
-                if (redisState.isMarkedNotFound(t.complexId())) {
+                if (!retryFailed && redisState.isMarkedNotFound(t.complexId())) {
                     counter.skipped++;
                     continue;
                 }
@@ -165,9 +194,27 @@ public class ComplexGeocodingService {
                 }
                 attempted++;
 
-                KakaoGeocodingClient.GeocodeResult result;
+                Coordinate coordinate;
+                String notFoundReason = null;
                 try {
-                    result = callWithRetry(refined.get(), counter);
+                    GeocodingAddressRefiner.RefinedAddress address = refined.get();
+                    KakaoGeocodingClient.GeocodeResult result = callWithRetry(
+                            () -> client.geocode(address.query(), address.requireUnique()), counter);
+                    switch (result) {
+                        case KakaoGeocodingClient.Found found -> coordinate = new Coordinate(t.complexId(),
+                                found.latitude(), found.longitude(), PRECISION_PRECISE);
+                        case KakaoGeocodingClient.NotFound notFound -> {
+                            KeywordPlaceMatcher.Result keyword = searchByKeyword(t, counter);
+                            if (keyword instanceof KeywordPlaceMatcher.Matched matched) {
+                                coordinate = new Coordinate(t.complexId(), matched.place().latitude(),
+                                        matched.place().longitude(), PRECISION_APPROXIMATE);
+                                logKeywordMatch(t, matched.place());
+                            } else {
+                                coordinate = null;
+                                notFoundReason = notFound.reason() + "/" + ((KeywordPlaceMatcher.NoMatch) keyword).reason();
+                            }
+                        }
+                    }
                 } catch (DailyLimitReachedException e) {
                     stopReason = StopReason.DAILY_LIMIT;
                     break;
@@ -182,19 +229,22 @@ public class ComplexGeocodingService {
                 }
                 consecutiveTransient = 0;
 
-                switch (result) {
-                    case KakaoGeocodingClient.Found found -> {
-                        counter.found++;
-                        pending.add(new Coordinate(t.complexId(), found.latitude(), found.longitude()));
-                        if (pending.size() >= properties.chunkSize()) {
-                            counter.written += flush(pending);
-                        }
+                if (coordinate != null) {
+                    counter.found++;
+                    if (PRECISION_APPROXIMATE.equals(coordinate.precision())) {
+                        counter.foundByKeyword++;
                     }
-                    case KakaoGeocodingClient.NotFound notFound -> {
-                        counter.notFound++;
-                        redisState.markNotFound(t.complexId(), notFound.reason());
-                        auditLogger.logGeocodingFailure(t.complexId(), refined.get().query(), notFound.reason(), false);
+                    if (retryFailed) {
+                        redisState.clearNotFound(t.complexId());
                     }
+                    pending.add(coordinate);
+                    if (pending.size() >= properties.chunkSize()) {
+                        counter.written += flush(pending);
+                    }
+                } else {
+                    counter.notFound++;
+                    redisState.markNotFound(t.complexId(), notFoundReason);
+                    auditLogger.logGeocodingFailure(t.complexId(), refined.get().query(), notFoundReason, false);
                 }
             }
         } catch (GeocodingConfigurationException e) {
@@ -212,11 +262,14 @@ public class ComplexGeocodingService {
         }
 
         RunResult runResult = new RunResult(targets.size(), counter.noJibun, counter.skipped, counter.found,
-                counter.written, counter.notFound, counter.transientFailed, counter.calls, stopReason);
+                counter.foundByKeyword, counter.written, counter.notFound, counter.transientFailed, counter.calls,
+                stopReason);
         log.atInfo()
                 .addKeyValue("programId", "BAT-GEO-01")
+                .addKeyValue("retryFailed", retryFailed)
                 .addKeyValue("targets", runResult.targets())
                 .addKeyValue("found", runResult.found())
+                .addKeyValue("foundByKeyword", runResult.foundByKeyword())
                 .addKeyValue("written", runResult.written())
                 .addKeyValue("notFound", runResult.notFound())
                 .addKeyValue("noJibun", runResult.noJibun())
@@ -224,25 +277,57 @@ public class ComplexGeocodingService {
                 .addKeyValue("transientFailed", runResult.transientFailed())
                 .addKeyValue("calls", runResult.calls())
                 .addKeyValue("stopReason", runResult.stopReason())
-                .log("BAT-GEO-01 지오코딩 종료: 대상 {}건, 좌표 {}건(기록 {}건), 못 찾음 {}건, 지번 없음 {}건, 건너뜀 {}건, "
-                        + "일시 실패 {}건, 호출 {}건, 종료 사유 {}", runResult.targets(), runResult.found(),
-                        runResult.written(), runResult.notFound(), runResult.noJibun(), runResult.skipped(),
-                        runResult.transientFailed(), runResult.calls(), runResult.stopReason());
+                .log("BAT-GEO-01 지오코딩 종료: 대상 {}건, 좌표 {}건(그중 키워드 {}건, 기록 {}건), 못 찾음 {}건, 지번 없음 {}건, "
+                        + "건너뜀 {}건, 일시 실패 {}건, 호출 {}건, 종료 사유 {}", runResult.targets(), runResult.found(),
+                        runResult.foundByKeyword(), runResult.written(), runResult.notFound(), runResult.noJibun(),
+                        runResult.skipped(), runResult.transientFailed(), runResult.calls(), runResult.stopReason());
         return runResult;
     }
 
     /**
-     * 호출 시도마다(재시도 포함, 응답이 오류여도) 오늘 카운터를 먼저 하나 늘린다. 5xx·네트워크 오류만 백오프 후 재시도하고,
-     * 429·401·403은 클라이언트가 던진 예외 그대로 run()까지 올라가 그 실행을 멈춘다.
+     * 주소 검색이 못 찾은 단지를 단지명 장소 검색으로 찾는다. 검색어는 "{시군구} {단지명}"이고, 후보가 없으면 단지명 끝의
+     * "아파트"를 뗀 검색어로 한 번 더 찾는다. 후보가 여럿이면 거기서 멈춘다(검색어를 넓혀도 여전히 여럿이거나 늘 뿐이다).
+     * 호출은 주소 검색과 같은 {@link #callWithRetry}를 거쳐 일일 카운터·재시도·중단 규칙이 같다.
      */
-    private KakaoGeocodingClient.GeocodeResult callWithRetry(GeocodingAddressRefiner.RefinedAddress address,
-            Counter counter) {
+    private KeywordPlaceMatcher.Result searchByKeyword(Target t, Counter counter) {
+        if (t.complexName() == null || t.complexName().isBlank() || t.sido() == null) {
+            return new KeywordPlaceMatcher.NoMatch("KEYWORD_SKIPPED");
+        }
+        KeywordPlaceMatcher.ComplexIdentity identity = t.identity();
+        KeywordPlaceMatcher.Result result = new KeywordPlaceMatcher.NoMatch("KEYWORD_NO_CANDIDATE");
+        for (String query : KeywordPlaceMatcher.queries(identity)) {
+            List<KakaoGeocodingClient.KeywordPlace> places = callWithRetry(() -> client.searchKeyword(query), counter);
+            result = KeywordPlaceMatcher.match(identity, places);
+            if (!(result instanceof KeywordPlaceMatcher.NoMatch noMatch)
+                    || !"KEYWORD_NO_CANDIDATE".equals(noMatch.reason())) {
+                return result;
+            }
+        }
+        return result;
+    }
+
+    private void logKeywordMatch(Target t, KakaoGeocodingClient.KeywordPlace place) {
+        log.atInfo()
+                .addKeyValue("auditEvent", "GEOCODING_KEYWORD_MATCH")
+                .addKeyValue("complexId", t.complexId())
+                .addKeyValue("complexName", t.complexName())
+                .addKeyValue("address", t.address())
+                .addKeyValue("placeName", place.placeName())
+                .addKeyValue("placeAddress", place.addressName())
+                .log("GEOCODING_KEYWORD_MATCH complexId={} place={}", t.complexId(), place.placeName());
+    }
+
+    /**
+     * 호출 시도마다(재시도 포함, 응답이 오류여도) 오늘 카운터를 먼저 하나 늘린다. 5xx·네트워크 오류만 백오프 후 재시도하고,
+     * 429·401·403은 클라이언트가 던진 예외 그대로 run()까지 올라가 그 실행을 멈춘다. 주소 검색과 키워드 검색이 같이 쓴다.
+     */
+    private <T> T callWithRetry(Supplier<T> call, Counter counter) {
         for (int attempt = 0; ; attempt++) {
             reserveCall();
             counter.calls++;
             pace();
             try {
-                return client.geocode(address.query(), address.requireUnique());
+                return call.get();
             } catch (GeocodingTransientException e) {
                 if (attempt >= properties.maxRetries()) {
                     throw e;
@@ -294,7 +379,7 @@ public class ComplexGeocodingService {
         LocalDateTime now = LocalDateTime.now(clock);
         Integer written = transactionTemplate.execute(status -> chunk.stream()
                 .mapToInt(c -> complexRepository.fillCoordinatesIfNull(c.complexId(), c.latitude(), c.longitude(),
-                        PRECISION_PRECISE, now))
+                        c.precision(), now))
                 .sum());
         evictDetailCache(chunk);
         return written == null ? 0 : written;
@@ -317,7 +402,8 @@ public class ComplexGeocodingService {
 
     private List<Target> loadTargets() {
         return complexRepository.findGeocodingTargets().stream()
-                .map(r -> new Target(((Number) r[0]).longValue(), (String) r[1], (String) r[2]))
+                .map(r -> new Target(((Number) r[0]).longValue(), (String) r[1], (String) r[2], (String) r[3],
+                        (String) r[4], (String) r[5]))
                 .toList();
     }
 
@@ -325,6 +411,7 @@ public class ComplexGeocodingService {
         int noJibun;
         int skipped;
         int found;
+        int foundByKeyword;
         int written;
         int notFound;
         int transientFailed;

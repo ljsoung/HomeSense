@@ -1,0 +1,86 @@
+{
+  "documents": [
+    {
+      "id": "2079187033",
+      "place_name": "대치푸르지오써밋아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "서울 강남구 대치동 1032",
+      "road_address_name": "서울 강남구 삼성로72길 12",
+      "x": "127.0617311838319",
+      "y": "37.50147842810233",
+      "place_url": "http://place.map.kakao.com/2079187033"
+    },
+    {
+      "id": "228158709",
+      "place_name": "대치푸르지오써밋아파트 정문",
+      "category_name": "교통,수송 > 입출구",
+      "category_group_code": "",
+      "address_name": "서울 강남구 대치동 1032",
+      "road_address_name": "서울 강남구 삼성로72길 12",
+      "x": "127.06265179235953",
+      "y": "37.50152749874691",
+      "place_url": "http://place.map.kakao.com/228158709"
+    },
+    {
+      "id": "653158779",
+      "place_name": "대치푸르지오써밋아파트 후문",
+      "category_name": "교통,수송 > 입출구",
+      "category_group_code": "",
+      "address_name": "서울 강남구 대치동 1032",
+      "road_address_name": "서울 강남구 삼성로72길 12",
+      "x": "127.0612223590741",
+      "y": "37.50158681358419",
+      "place_url": "http://place.map.kakao.com/653158779"
+    },
+    {
+      "id": "1548790832",
+      "place_name": "멜라 대치점",
+      "category_name": "음식점 > 양식",
+      "category_group_code": "FD6",
+      "address_name": "서울 강남구 대치동 1032",
+      "road_address_name": "서울 강남구 삼성로72길 12",
+      "x": "127.06120021869883",
+      "y": "37.502172478764194",
+      "place_url": "http://place.map.kakao.com/1548790832"
+    },
+    {
+      "id": "487958255",
+      "place_name": "부동산114공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 강남구 대치동 974",
+      "road_address_name": "서울 강남구 삼성로64길 5",
+      "x": "127.060349097766",
+      "y": "37.5013493974148",
+      "place_url": "http://place.map.kakao.com/487958255"
+    },
+    {
+      "id": "488027119",
+      "place_name": "브레인밸리학원 별관",
+      "category_name": "교육,학문 > 학원 > 보습학원",
+      "category_group_code": "AC5",
+      "address_name": "서울 강남구 대치동 1032",
+      "road_address_name": "서울 강남구 삼성로72길 12",
+      "x": "127.06101488135913",
+      "y": "37.50233835967629",
+      "place_url": "http://place.map.kakao.com/488027119"
+    },
+    {
+      "id": "1273925744",
+      "place_name": "강남아빠부동산중개법인",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "서울 강남구 대치동 974",
+      "road_address_name": "서울 강남구 삼성로64길 5",
+      "x": "127.06015793538286",
+      "y": "37.501302642617034",
+      "place_url": "http://place.map.kakao.com/1273925744"
+    }
+  ],
+  "meta": {
+    "total_count": 16,
+    "pageable_count": 7,
+    "is_end": true
+  }
+}

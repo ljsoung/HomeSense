@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -139,5 +140,22 @@ class ComplexGeocodingMariaDbIT {
         assertThat(complexRepository.findById(existing.getComplexId()).orElseThrow().getLatitude())
                 .isEqualByComparingTo("37.0000000");
         verify(client, never()).geocode(anyString(), anyBoolean());
+    }
+
+    @Test
+    void 키워드_검색으로_얻은_좌표는_APPROXIMATE로_저장된다() {
+        // location_precision을 VARCHAR(12)로 넓힌 스키마에서 11자 값이 실제로 들어가는지 본다(VARCHAR(10)이면 Data too long)
+        Complex target = complex("GEO-K", "서울특별시 종로구 내수동 963 재건축단지", "내수동", null, null);
+        when(client.geocode(anyString(), anyBoolean())).thenReturn(new KakaoGeocodingClient.NotFound("NO_RESULT"));
+        when(client.searchKeyword("종로구 GEO-K")).thenReturn(List.of(new KakaoGeocodingClient.KeywordPlace(
+                "GEO-K아파트", "부동산 > 주거시설 > 아파트", "서울 종로구 내수동 1032", JONGNO.latitude(), JONGNO.longitude())));
+        when(redisState.recordCall()).thenReturn(1L);
+
+        ComplexGeocodingService.RunResult result = geocodingService.run(Integer.MAX_VALUE);
+
+        assertThat(result.foundByKeyword()).isEqualTo(1);
+        Complex reloaded = complexRepository.findById(target.getComplexId()).orElseThrow();
+        assertThat(reloaded.getLocationPrecision()).isEqualTo("APPROXIMATE");
+        assertThat(reloaded.getLatitude()).isEqualByComparingTo("37.5726145");
     }
 }

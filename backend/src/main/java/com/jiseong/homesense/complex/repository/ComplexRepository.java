@@ -62,11 +62,12 @@ public interface ComplexRepository extends JpaRepository<Complex, Long>, Complex
             @Param("now") LocalDateTime now);
 
     /**
-     * BAT-GEO-01 지오코딩 대상 — 좌표가 없는 단지의 주소 필드만 가져온다. [complexId, legalDongAddress, dongRi]
+     * BAT-GEO-01 지오코딩 대상 — 좌표가 없는 단지의 주소·이름 필드만 가져온다.
+     * [complexId, legalDongAddress, dongRi, sido, sigungu, complexName] — 뒤의 셋은 키워드 보완 검색어·후보 판정에 쓴다.
      * NULL인 것만 고르므로 중단 후 다시 실행하면 남은 단지부터 이어진다.
      */
     @Query("""
-            SELECT c.complexId, c.legalDongAddress, c.dongRi
+            SELECT c.complexId, c.legalDongAddress, c.dongRi, c.sido, c.sigungu, c.complexName
             FROM Complex c WHERE c.latitude IS NULL ORDER BY c.complexId
             """)
     List<Object[]> findGeocodingTargets();

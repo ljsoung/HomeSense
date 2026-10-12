@@ -48,6 +48,11 @@ public class GeocodingRedisState {
         redisTemplate.opsForValue().set(FAIL_KEY_PREFIX + complexId, reason, notFoundTtl);
     }
 
+    /** 이전에 못 찾았던 단지가 좌표를 얻으면 표시를 지운다(--retry-failed). */
+    public void clearNotFound(Long complexId) {
+        redisTemplate.delete(FAIL_KEY_PREFIX + complexId);
+    }
+
     /** 호출 한 번을 센 뒤 오늘 누적 호출 수를 돌려준다. */
     public long recordCall() {
         String key = callsKey();
