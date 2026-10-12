@@ -284,7 +284,7 @@ async function scenarioMixed(label, viewport) {
   await context.close();
 }
 
-async function scenarioSaveFailure(label, viewport) {
+async function scenarioSaveFailure(label, viewport, layout) {
   const { context, page, calls } = await open(viewport, { query: '?favoritePropertyId=3', putMode: 'failOnce' });
   await ready(page);
   ok(`${label} 5: 미설정 대상만 골라도 저장 가능`, await saveButton(page).isEnabled());
@@ -295,7 +295,31 @@ async function scenarioSaveFailure(label, viewport) {
   ok(`${label} 5: 입력 유지(신규거래 꺼짐)`, (await page.getByRole('switch', { name: '신규거래 알림 수신' }).getAttribute('aria-checked')) === 'false');
   ok(`${label} 5: 선택 유지`, await rowBox(page, 'property:3').isChecked());
   ok(`${label} 5: 성공 토스트 없음`, (await page.getByText('알림 설정을 저장했어요').count()) === 0);
-  await alert.getByRole('button', { name: '다시 시도' }).click();
+  // 다시 시도는 저장 버튼과 같은 조건을 거친다(코드리뷰 P2) — 변경이 없거나 입력이 무효면 보내지 않는다.
+  const retry = alert.getByRole('button', { name: '다시 시도' });
+  const toggle = page.getByRole('switch', { name: '신규거래 알림 수신' });
+  ok(`${label} 5: 실패 직후 다시 시도 가능`, await retry.isEnabled());
+  if (layout !== 'desktop') {
+    const input = page.getByRole('textbox', { name: '변동 임계치(%)' });
+    for (const bad of ['25', 'abc']) {
+      await input.fill(bad);
+      ok(`${label} 5: 숫자 입력 ${bad} → 다시 시도·저장 비활성`, (await retry.isDisabled()) && (await saveButton(page).isDisabled()));
+      await retry.dispatchEvent('click');
+      await page.waitForTimeout(150);
+      ok(`${label} 5: 숫자 입력 ${bad} → PUT 안 나감·입력 유지`, puts(calls).length === 1 && (await input.inputValue()) === bad);
+    }
+    await input.fill('5');
+    ok(`${label} 5: 유효한 값으로 고치면 다시 시도 가능`, await retry.isEnabled());
+  }
+  // 이 대상은 설정이 없어 저장하면 항상 행이 생긴다(변경 없음 상태가 없다) — 선택을 풀어 저장 조건을 깨 본다.
+  await row(page, 'property:3').click();
+  ok(`${label} 5: 대상 선택을 풀면 다시 시도 비활성`, await retry.isDisabled());
+  await retry.dispatchEvent('click');
+  await page.waitForTimeout(150);
+  ok(`${label} 5: 대상 미선택 → PUT 안 나감`, puts(calls).length === 1);
+  await row(page, 'property:3').click();
+  ok(`${label} 5: 다시 고르면 다시 시도 가능(입력 유지)`, (await retry.isEnabled()) && (await toggle.getAttribute('aria-checked')) === 'false');
+  await retry.click();
   ok(`${label} 5: 다시 시도 → 성공 토스트`, await page.getByText('알림 설정을 저장했어요').waitFor({ timeout: 5000 }).then(() => true, () => false));
   ok(`${label} 5: 다시 시도 후 오류 배너 사라짐`, await waitFor(async () => (await page.getByRole('alert').filter({ hasText: '저장하지 못했습니다' }).count()) === 0));
   const bodies = puts(calls).map((c) => c.body);
@@ -493,7 +517,7 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioPreselect(label, viewport, layout);
   await scenarioZero(label, viewport);
   await scenarioMixed(label, viewport);
-  await scenarioSaveFailure(label, viewport);
+  await scenarioSaveFailure(label, viewport, layout);
   await scenarioLockedWhileSaving(label, viewport, layout);
   await scenarioRefetchFailure(label, viewport);
   await scenarioKeyboardSaveFocus(label, viewport);

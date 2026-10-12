@@ -279,8 +279,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
   };
 
   const save = async () => {
-    // 저장 버튼은 saveEnabled일 때만 눌리고, 오류 배너의 "다시 시도"는 같은 값을 다시 보낸다.
-    if (saving || selectedKeys.length === 0) return;
+    // 저장 버튼과 오류 배너의 "다시 시도"가 같은 조건(D5)을 거친다 — 실패 뒤 숫자 입력을 25·abc처럼 고치거나 저장값으로 되돌렸으면
+    // 다시 시도도 보내지 않는다(2026-10-12 코드리뷰 P2: 전에는 직전 숫자 값을 보내고 입력을 비운 뒤 성공을 알렸다).
+    if (!saveEnabled) return;
     setSaving(true);
     setSaveError(null);
     const items = buildSaveItems(selectedTargets, values);
@@ -518,8 +519,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
             <button
               type="button"
               onClick={() => void save()}
-              disabled={saving}
-              className="rounded-[10px] bg-white px-3.5 py-1.5 text-[13px] font-semibold text-[#e7000b] shadow-[0_1px_2px_rgba(0,0,0,0.1)] disabled:opacity-60"
+              disabled={!saveEnabled}
+              aria-describedby={ids.hint}
+              className="rounded-[10px] bg-white px-3.5 py-1.5 text-[13px] font-semibold text-[#e7000b] shadow-[0_1px_2px_rgba(0,0,0,0.1)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               다시 시도
             </button>
