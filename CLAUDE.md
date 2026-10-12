@@ -2038,15 +2038,16 @@ complex WHERE dong_ri='주봉리'` 등 3개 표본), **정규화 로직 오류�
 | 항목 | 결정 | 근거 | 무효화 조건 |
 | --- | --- | --- | --- |
 | **지번 단일 경로(설계서 이탈)** | 설계서 4.8절의 "도로명 우선, 실패 시 지번" 대신 지번만 쓴다. 지번을 못 뽑는 단지는 호출하지 않고 좌표 NULL로 둔다. 이런 단지는 지도에 나오지 않는다 | complex에서 road_address 컬럼을 이미 제거했다(미사용 컬럼 제거 원칙). 로컬 실측(2026-10-12)에서 지번 없는 단지는 227건(1.05%)이다. UI정의서 7.3절 "매칭 대기(약 1.1%)"와 같은 범주로 본다 | 지번 없는 단지를 지도에 꼭 띄워야 하면 road_address 재도입(단지 마스터 재적재 포함)을 검토한다 |
-| **주소 정제** | `GeocodingAddressRefiner`가 정제한다. 쉼표로 나눈 조각 중 지번이 있는 첫 조각을 고르고, 동리 **토큰** 바로 뒤의 "(산)본번(-부번)"까지만 남긴다. 끝의 하이픈("73-")과 단지명은 버리고 연속 공백은 하나로 줄인다. 본번 0은 지번으로 보지 않는다. 지번 추출은 BAT-MAT-02의 정규식을 `batch.matcher.JibunExtractor`로 꺼내 두 곳이 같이 쓴다(ComplexMasterMatcher 동작은 그대로이고 기존 테스트도 통과한다) | 로컬 실측: 원본 "법정동주소"는 전부 뒤에 단지명이 붙어 있다. 부번 없이 하이픈만 남은 경우가 1,014건, 쉼표로 이어진 다중 주소가 1,374건이다. 동리를 `indexOf`가 아니라 토큰 일치로 찾는 이유는 단지명 안의 같은 글자("신월동아파트")를 잡지 않기 위해서다. `dong_ri`가 NULL인 9건은 동리 위치를 특정할 수 없어 정제하지 않는다. 그중 3건은 읍·면 단위 지번이 있지만 버린다 | K-apt 원본의 주소 표기 규칙이 바뀌면 재검증한다 |
+| **주소 정제** | `GeocodingAddressRefiner`가 정제한다. 쉼표로 나눈 조각 중 지번이 있는 첫 조각을 고르고, 동리 **토큰** 바로 뒤의 "(산)본번(-부번)"까지만 남긴다. 끝의 하이픈("73-")과 단지명은 버리고 연속 공백은 하나로 줄인다. 본번 0은 지번으로 보지 않는다. 지번 추출은 BAT-MAT-02의 정규식을 `batch.matcher.JibunExtractor`로 꺼내 두 곳이 같이 쓴다(ComplexMasterMatcher 동작은 그대로이고 기존 테스트도 통과한다) | 로컬 실측: 원본 "법정동주소"는 전부 뒤에 단지명이 붙어 있다. 부번 없이 하이픈만 남은 경우가 1,014건, 쉼표로 이어진 다중 주소가 1,374건이다. 동리를 `indexOf`가 아니라 토큰 일치로 찾는 이유는 단지명 안의 같은 글자("신월동아파트")를 잡지 않기 위해서다. **`dong_ri`가 NULL인 9건(2026-10-12 PR 전 리뷰로 추가):** 원본 주소를 지번까지 잘라 보내는 방식이라 dong_ri 없이도 처리한다. 숫자로 시작하는 토큰 앞의 행정구역 토큰 중 바로 뒤에 지번이 오는 것을 기준으로 삼고, 동·리·가 기준을 읍·면 기준보다 우선한다(뒤 조각에 "덕소리 619-"가 있으면 그것을 쓴다). 읍·면 기준("광양읍 484-28")은 **결과가 하나일 때만** 좌표를 쓴다 — 지번은 리 단위로 매겨지므로 리가 빠진 주소는 여러 리에 걸릴 수 있다(실측: "이천시 마장면 354" → 9건, 그래서 `AMBIGUOUS`로 못 찾음 처리). 실제 호출 결과 9건 중 6건이 좌표를 얻고, 마장면 354(여러 리)·덕하리 2(결과 없음)·지번 없음 1건이 남는다 | K-apt 원본의 주소 표기 규칙이 바뀌면 재검증한다 |
 | **시군구 표기는 원본 그대로** | "화성만세구", "창원의창구" 같은 K-apt 표기를 고치지 않고 보낸다 | 2026-10-12에 10건을 실제로 호출해 확인했다. 카카오 주소 검색은 K-apt 표기, 2026년 신설 행정구역("전남광주통합특별시", "제물포구"), 끝의 하이픈을 모두 정확히 찾았다. 참고: Git Bash의 curl `--data-urlencode`는 한글 쿼리를 잘못 인코딩해 전부 0건이 나온다. 수동 확인은 node `fetch`로 한다 | 카카오가 옛 표기를 지원하지 않게 되면 `legal_district_code.legal_dong_name`(공식 표기) + 지번으로 바꾼다 |
-| **결과 분류** | 성공하면 `location_precision='PRECISE'`로 고정한다(MVP, 설계서 4.8절). documents가 빈 배열이거나 다시 보내도 같을 4xx면 "못 찾음"으로 보고 재시도하지 않는다. 429·5xx·네트워크 오류는 재시도한다(기본 2회, 배수 백오프). 끝내 실패하면 표시 없이 다음 실행으로 넘긴다. 401·403이면 그 실행 전체를 멈추고(`CONFIGURATION_ERROR`) `logBatchFailure`를 남긴다. 재시도까지 실패한 단지가 연달아 5건 나와도 멈춘다. 실패 로그는 `AuditLogger.logGeocodingFailure(complexId, address, reason, retryable)`로 남긴다 | 401·403은 키·앱 설정 문제라 단지마다 반복해도 결과가 같다. 연속 실패에서 멈추는 이유는 카카오 장애 중에 쿼터만 소진하지 않기 위해서다 | — |
+| **결과 분류** | 성공하면 `location_precision='PRECISE'`로 고정한다(MVP, 설계서 4.8절). documents가 빈 배열이거나, 유일해야 하는데 결과가 여럿이거나, 다시 보내도 같을 4xx면 "못 찾음"으로 보고 재시도하지 않는다. **5xx·네트워크 오류만** 재시도한다(기본 2회, 배수 백오프). 끝내 실패하면 표시 없이 다음 실행으로 넘긴다. **429는 재시도하지 않고 그 실행 전체를 즉시 멈추고**(`RATE_LIMITED`), 401·403도 즉시 멈춘다(`CONFIGURATION_ERROR`). 둘 다 `logBatchFailure`를 남기고 러너 종료 코드는 1이다. 재시도까지 실패한 단지가 연달아 5건 나와도 멈춘다. 실패 로그는 `AuditLogger.logGeocodingFailure(complexId, address, reason, retryable)`로 남긴다 | 401·403은 키·앱 설정 문제라 단지마다 반복해도 결과가 같다. 429는 카카오 쪽 요청 한도라 계속 보내면 호출 수만 늘고, 일일 쿼터 초과라면 그날은 다시 보내도 소용없다(2026-10-12 PR 전 리뷰로 재시도에서 중단으로 변경). 연속 실패에서 멈추는 이유는 카카오 장애 중에 쿼터만 소진하지 않기 위해서다 | 카카오가 초당 한도에만 429를 쓰고 일일 쿼터는 다른 코드로 알린다고 확인되면, 429를 짧은 대기 후 재시도로 되돌리는 것을 검토한다 |
 | **"못 찾음" 건너뛰기는 Redis 키(신규 판단)** | 키는 `geo:fail:{complexId}`이고 값은 사유, TTL은 기본 30일이다(`homesense.geocoding.not-found-retry-days`). 키가 남아 있는 동안 정기 실행과 러너가 그 단지를 호출하지 않는다. complex에는 컬럼을 추가하지 않았다 | 미사용 컬럼 추가 금지 원칙 — 이 값은 재시도 억제에만 쓰인다. Redis가 비어도(재시작·flush) 한 번 더 호출할 뿐이라 정확성 문제는 없다 | 실패 사유를 화면이나 관리자 기능에서 보여야 하면 DB로 옮긴다 |
-| **일일 호출 상한은 Redis 카운터(신규 판단)** | 카운터 키는 `geo:calls:{yyyyMMdd}`(KST, TTL 2일)다. 호출 직전 INCR로 한 건을 예약한다. 상한을 넘으면 DECR로 되돌리고 멈춘다(`DAILY_LIMIT`, 러너 종료 코드 0). 상한은 `homesense.geocoding.daily-limit`(환경변수 `GEOCODING_DAILY_LIMIT`, 기본 10000)이고, 재시도도 한 번으로 센다. Redis를 읽거나 쓰지 못하면 예외로 그 실행을 멈춘다 — 호출 수를 셀 수 없는 상태로 쿼터를 쓰지 않는다 | 무료 쿼터는 앱 단위로 집계되므로(NFR-11) 러너와 정기 실행이 같은 카운터를 봐야 한다. INCR로 예약하므로 둘이 동시에 돌아도 상한을 넘지 않는다. 기본값 10000은 카카오 한도를 확인하기 전의 보수적인 값이다 | 카카오 콘솔에서 실제 일일 한도를 확인하면, 그보다 낮은 값을 환경변수로 정한다 |
+| **일일 호출 상한은 Redis 카운터(신규 판단)** | 카운터 키는 `geo:calls:{yyyyMMdd}`(KST, TTL 2일)다. 호출 직전 INCR로 한 건을 예약한다. 상한을 넘으면 DECR로 되돌리고 멈춘다(`DAILY_LIMIT`, 러너 종료 코드 0). 상한은 `homesense.geocoding.daily-limit`(환경변수 `GEOCODING_DAILY_LIMIT`, 기본 10000)이고, 재시도를 포함해 **호출 시도마다**(응답이 429·5xx 같은 오류여도) 하나씩 센다. Redis를 읽거나 쓰지 못하면 예외로 그 실행을 멈춘다 — 호출 수를 셀 수 없는 상태로 쿼터를 쓰지 않는다 | 무료 쿼터는 앱 단위로 집계되므로(NFR-11) 러너와 정기 실행이 같은 카운터를 봐야 한다. INCR로 예약하므로 둘이 동시에 돌아도 상한을 넘지 않는다. 기본값 10000은 카카오 한도를 확인하기 전의 보수적인 값이다 | 카카오 콘솔에서 실제 일일 한도를 확인하면, 그보다 낮은 값을 환경변수로 정한다 |
 | 초당 호출 제한 | 호출 사이 최소 간격은 `homesense.geocoding.request-interval-millis`(기본 100ms = 초당 10건)다 | 로컬 표본: 20건 처리에 기동 포함 11초 | — |
 | 커밋·재개 | 좌표는 청크(기본 100건)마다 `TransactionTemplate`으로 커밋한다. 서비스 자체에는 트랜잭션을 걸지 않는다. 상한·중단·예외 등 어떤 경로로 끝나든 이미 받은 좌표는 `finally`에서 쓴다. 쓰기는 `latitude IS NULL` 조건부 UPDATE라 좌표가 있는 행은 덮지 않는다. 대상을 `latitude IS NULL`로 고르므로 다시 실행하면 남은 단지부터 이어진다 | 카카오를 수만 번 호출하는 동안 트랜잭션을 붙잡지 않기 위해서다. TradeRematchRunner의 "전체를 한 트랜잭션으로 묶은" 실수와 같은 이유다 | — |
 | 정기 실행 위치 | `BatchExecutionOrchestrator.orchestrate()`의 `finally`에서 `evaluateWatchConditions` 앞에 부른다. 예외는 흡수한다(수집·알림 평가를 막지 않음). 인터럽트로 끝난 런이거나 `homesense.geocoding.scheduled-enabled=false`면 건너뛴다. 백필(`orchestrateBackfill`)에서는 부르지 않는다 | 설계서 6.3절의 순서다. 단지 마스터는 저장소 밖에서 재적재될 때만 늘어나므로 평소엔 대상이 0건이다. 러너가 일일 상한에서 멈췄으면 정기 실행이 이어서 처리한다 | 단지 마스터 적재기가 저장소에 들어오면, 적재 직후에 바로 부르는 방식도 검토한다 |
 | 캐시 | 좌표를 쓴 청크의 단지마다 `complexDetailV3` 항목을 `evictIfPresent`로 지운다. 종료형 러너라 비동기 `evict()`는 쓰지 않는다(캐싱 절). 삭제 실패는 WARN을 남기고 흡수한다 | `ComplexDetailResponse`가 latitude/longitude/locationPrecision을 담는다. 인기 단지·검색 응답에는 좌표가 없다 | 좌표를 담는 다른 캐시가 생기면 함께 지운다 |
+| CI | `.github/workflows/ci.yml`은 `./gradlew build`(단위 테스트, 앱 컨텍스트를 띄우는 `HomeSenseApplicationTests` 포함)만 돌린다. 테스트는 `src/test/resources/application.properties`의 테스트용 `homesense.external.kakao.api-key`를 쓰므로 `KAKAO_API_KEY` 시크릿 없이 통과한다. 테스트에서 프로필을 켜는 곳(`@ActiveProfiles`)은 없다 | 2026-10-12 확인 | CI에 `integrationTest`나 실제 프로필로 기동하는 잡을 추가하면 키를 주입한다 |
 | RestClient를 빈으로 노출하지 않음 | `GeocodingConfig`는 `KakaoGeocodingClient`를 빈으로 등록하고, RestClient는 그 안에만 둔다 | RestClient 빈이 둘이 되면 타입으로 주입받는 `RealEstateApiCollector`의 주입이 모호해진다 | — |
 
 **운영 순서(runbook 8·10절):**
@@ -2057,7 +2058,7 @@ complex WHERE dong_ri='주봉리'` 등 3개 표본), **정규화 로직 오류�
 운영 DB는 백엔드 첫 배포 때 적용한다. 실행 전 카카오 콘솔 [통계] > [쿼터]에서 일일 한도와 사용량을 확인하고 `GEOCODING_DAILY_LIMIT`을 정한다.
 
 **로컬 실행 결과(2026-10-12):**
-- dry-run: 대상 21,680, 정제 가능 21,453, 지번 없음 227.
+- dry-run: 대상 21,680, 정제 가능 21,453, 지번 없음 227. dong_ri NULL 처리를 넣은 뒤 다시 돌린 dry-run(표본 20건 제외): 대상 21,660, 정제 가능 21,441, 지번 없음 219.
 - 표본 apply(`--limit=20`): 20건 모두 좌표를 받았고, 못 찾음·오류는 0건, 호출은 20회다.
 - **전체 백필은 아직 돌리지 않았다**(약 2.1만 회의 쿼터가 든다 — 콘솔 한도를 확인한 뒤 실행). 로컬 DB에서 좌표가 있는 단지는 이 표본 20건뿐이다.
 
@@ -2065,15 +2066,15 @@ complex WHERE dong_ri='주봉리'` 등 3개 표본), **정규화 로직 오류�
 - 단위 테스트:
   - `GeocodingAddressRefinerTest` — 실측 사례 4종, 산 지번, 본번 0, 토큰 경계, 연속 공백.
   - `JibunExtractorTest`.
-  - `KakaoGeocodingClientTest`(MockRestServiceServer) — 성공, 빈 결과, 400, 429, 502, 네트워크 오류, 401.
-  - `ComplexGeocodingServiceTest` — 일일 상한, 못 찾음 건너뛰기, 재시도, 연속 실패 중단, 인증 실패, 단지 수 상한, 청크 커밋, 캐시 실패 흡수, dry-run.
+  - `KakaoGeocodingClientTest`(MockRestServiceServer) — 성공, 빈 결과, 400, 429(실행 중단 예외), 502, 네트워크 오류, 401, 403, 결과가 여럿일 때 유일성 요구.
+  - `ComplexGeocodingServiceTest` — 일일 상한, 못 찾음 건너뛰기, 5xx 백오프 재시도, 429·401·403 즉시 중단(재시도 없음), 오류 응답을 포함한 시도마다 카운터 증가, 연속 실패 중단, 단지 수 상한, 청크 커밋, 캐시 실패 흡수, dong_ri NULL 단지의 유일성 요구, dry-run.
   - `GeocodingRedisStateTest` — KST 날짜 키, 첫 호출에만 만료 설정.
   - `ComplexGeocodingCommandLineRunnerTest`.
-  - `BatchExecutionOrchestratorTest` — 지오코딩이 알림 평가보다 먼저 실행, 실패 흡수, 꺼짐·인터럽트·백필에서는 호출하지 않음.
+  - `BatchExecutionOrchestratorTest` — 지오코딩이 알림 평가보다 먼저 실행, 지오코딩이 예외를 던져도 BAT-NTF-01이 이번 런의 적재 집합으로 실행됨(정상 종료·조기 중단 런 모두), 꺼짐·인터럽트·백필에서는 호출하지 않음. 지오코딩 예외를 흡수하지 않게 바꾸면 3건이 실패한다(변형 검증).
   - `ExternalApiPropertiesTest` — 카카오 키가 비면 기동 실패.
 - **`ComplexGeocodingMariaDbIT`** — 좌표 쓰기, 이미 있는 좌표 보존, 중단 후 재개. 카카오 클라이언트와 Redis 상태는 목으로 둬 개발 Redis의 호출 카운터를 건드리지 않는다.
 - 변형 검증: 조건부 UPDATE에서 `latitude IS NULL`을 빼면 IT 1건이 실패한다.
-- 전체: `./gradlew test` 726건, `./gradlew integrationTest` 106건(20개 클래스) 통과.
+- 전체: `./gradlew test` 738건, `./gradlew integrationTest` 106건(20개 클래스) 통과.
 
 ## 개발 단계 (MVP 로드맵)
 
