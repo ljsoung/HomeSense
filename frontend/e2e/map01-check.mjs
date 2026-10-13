@@ -470,6 +470,43 @@ const detailOf = (id, lat, lng, extra = {}) => ({
   await context.close();
 }
 
+// 12) 목록 접기·펼치기, 창 크기 변경 → 지도 크기가 바뀌면 바뀐 bounds로 다시 조회(가짜 SDK relayout은 idle을 내지 않는다)
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  await page.waitForTimeout(500);
+  const lngSpan = (params) => {
+    const [, swLng, , neLng] = params.get('bounds').split(',').map(Number);
+    return neLng - swLng;
+  };
+  const waitForNewRequest = async (count) => {
+    for (let i = 0; i < 40 && state.mapRequests.length <= count; i++) await page.waitForTimeout(50);
+    return state.mapRequests.length > count;
+  };
+  const baseSpan = lngSpan(state.mapRequests.at(-1));
+
+  let count = state.mapRequests.length;
+  await page.getByRole('button', { name: '목록 접기' }).click();
+  ok('12: 목록 접기 → 다시 조회', await waitForNewRequest(count));
+  const collapsedSpan = lngSpan(state.mapRequests.at(-1));
+  ok('12: 접으면 bounds 경도 폭이 넓어짐(380px만큼)', collapsedSpan > baseSpan * 1.3);
+
+  count = state.mapRequests.length;
+  await page.getByRole('button', { name: '목록 펼치기' }).click();
+  ok('12: 목록 펼치기 → 다시 조회', await waitForNewRequest(count));
+  ok('12: 펼치면 원래 폭으로', Math.abs(lngSpan(state.mapRequests.at(-1)) - baseSpan) < baseSpan * 0.05);
+
+  count = state.mapRequests.length;
+  await page.setViewportSize({ width: 1600, height: 900 });
+  ok('12: 창 크기 변경 → 다시 조회', await waitForNewRequest(count));
+  ok('12: 넓힌 창의 bounds가 더 넓음', lngSpan(state.mapRequests.at(-1)) > baseSpan * 1.2);
+  ok('12: URL 뷰포트 유지(레벨 6)', page.url().includes('level=6'));
+  await context.close();
+}
+
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

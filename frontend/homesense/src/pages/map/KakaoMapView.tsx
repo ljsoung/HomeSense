@@ -151,6 +151,8 @@ export function KakaoMapView({
   const clustererRef = useRef<KakaoMarkerClusterer | null>(null);
   const pinsRef = useRef(new Map<number, PinEntry>());
   const popupOverlayRef = useRef<KakaoCustomOverlay | null>(null);
+  /** 지금 지도의 중심·레벨·bounds를 onIdle로 알린다 — 지도가 만들어질 때 채운다. */
+  const publishViewRef = useRef<(() => void) | null>(null);
   /** 팝업 오버레이가 지금 지도에 붙어 있는지. */
   const popupShownRef = useRef(false);
   const [popupContainer] = useState(() => {
@@ -244,6 +246,7 @@ export function KakaoMapView({
         const handleClusterClick = (cluster: KakaoCluster) => {
           map.setBounds(cluster.getBounds());
         };
+        publishViewRef.current = handleIdle;
         maps.event.addListener(map, 'idle', handleIdle);
         maps.event.addListener(map, 'click', handleClick);
         maps.event.addListener(clusterer, 'clusterclick', handleClusterClick);
@@ -282,16 +285,31 @@ export function KakaoMapView({
       popupShownRef.current = false;
       clustererRef.current = null;
       mapRef.current = null;
+      publishViewRef.current = null;
     };
   }, [attempt, popupContainer]);
 
-  // 패널 접기·창 크기 변경 등으로 지도 컨테이너 크기가 바뀌면 relayout한다.
+  // 패널 접기·창 크기 변경 등으로 지도 컨테이너 크기가 바뀌면 relayout하고, 바뀐 bounds를 onIdle로 다시 알린다 — relayout은
+  // idle을 내지 않을 수 있어, 알리지 않으면 새로 드러난 영역엔 핀이 없고 목록엔 화면 밖 단지가 남는다. 창을 끄는 동안 연달아
+  // 오는 크기 변경은 프레임당 한 번으로 묶는다(조회 자체는 useMapPoints가 300ms 디바운스한다).
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => mapRef.current?.relayout());
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const map = mapRef.current;
+        if (!map) return;
+        map.relayout();
+        publishViewRef.current?.();
+      });
+    });
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, []);
 
   // 응답이 바뀌면 핀을 complexId로 비교해 바뀐 것만 다시 만든다.
