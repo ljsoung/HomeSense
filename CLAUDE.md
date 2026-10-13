@@ -1183,8 +1183,9 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 - 4.1절 BAT-SCH-01·6.3/6.4절 흐름: 조합 순회(조기 중단 포함) 직후 BAT-NTF-01 직접 호출, 백필 미호출(2026-10-06).
 - 3.8절 SVC-NTF-01 `updateSettings()`: 요청이 대상 목록(`settings`, 1~200건)이고 한 트랜잭션, 임계치 0~20 정수·세 값 필수·같은 대상 중복 400(`DUPLICATE_NOTIFICATION_TARGET`)·남의 대상 403·없는 대상 404(2026-10-07, "MY-03 백엔드 보강" 절).
 - **테이블정의서 3.5절 `price_change_threshold_pct`: 허용 범위 0~20 정수(API 검증, 컬럼은 DECIMAL(4,1) 그대로)(2026-10-07).**
-- 3.3절 SVC-CPX-01 `searchInBounds()`·API-CPX-01 `GET /map`: 필터가 `/search`와 같은 이름·같은 조건 코드, 응답 `{items, truncated, limit}`, 항목 필드는 `ComplexSummaryResponse`와 같은 이름 + latitude·longitude·locationPrecision, 정렬 complex_id 순, 상한 설정값(기본 500), bounds 범위 검증(위도 ±90·경도 ±180·남서 ≤ 북동)(2026-10-13, "MAP-01 백엔드 보강" 절).
+- 3.3절 SVC-CPX-01 `searchInBounds()`·API-CPX-01 `GET /map`: 필터가 `/search`와 같은 이름·같은 조건 코드, 응답 `{items, truncated, limit}`, 항목 필드는 `ComplexSummaryResponse`와 같은 이름 + latitude·longitude·locationPrecision·precisionBadge, 정렬 complex_id 해시 순(결정적), 상한 설정값(기본 500), bounds 범위 검증(위도 ±90·경도 ±180·남서 ≤ 북동)(2026-10-13, "MAP-01 백엔드 보강" 절).
 - **UI정의서 MAP-01 "카카오맵 REST API(좌표·클러스터링)": 클러스터링은 REST가 아니라 JS SDK clusterer가 한다(2026-10-13).**
+- 3.3절 SVC-CPX-01 `search()`·`getPopular()`·`getDetail()` 응답과 UI정의서 4.9절 UIC-09: `precisionBadge`(PRECISE/APPROXIMATE, SIMILAR 또는 근사 좌표면 근사) 추가, 캐시 이름 `complexDetailV4`·`popularComplexesV4`(2026-10-13).
 
 ### MAP-01 백엔드 보강 — 지도 범위 조회 (2026-10-13, `feature/backend/complex-map-support`)
 
@@ -1199,16 +1200,29 @@ MAP-01 프론트 착수 전 선행 작업이다(지오코딩 BAT-GEO-01 다음 �
 | locationPrecision | complex 컬럼 그대로 — PRECISE 또는 APPROXIMATE(BAT-GEO-01 키워드 장소 검색 결과, 로컬 실측 1,006건). 설계서의 "MVP는 항상 PRECISE"와 다르다 | 키워드 보완 결정 이후 실제 값이 두 가지다. MAP-01은 근사 핀 색·범례를 이 값으로 그린다 | — |
 | bounds 검증 | `swLat,swLng,neLat,neLng` 숫자 4개, 위도 -90~90·경도 -180~180, 남서 ≤ 북동. 어기면 400 `INVALID_BOUNDS`. 같은 점(넓이 0)은 허용. 끝에 빈 조각("…,")도 거절(split limit -1). 날짜변경선을 넘는 범위는 지원하지 않는다 | 작업 지시. 국내 서비스 | — |
 | 상한·truncated | `homesense.complex.map.max-results`(환경변수 `COMPLEX_MAP_MAX_RESULTS`, 기본 500, 1~5000, `ComplexMapProperties`). 한 건 더 조회해 넘으면 상한까지만 주고 truncated=true. 응답에 limit을 함께 싣는다 | 프로그램설계서 3.3절 | — |
-| 정렬 complex_id 순 — **알려진 한계** | 같은 범위·필터면 같은 결과다. 대신 잘릴 때(truncated) 화면 전체에 고르게 퍼진 500개가 아니라 complex_id가 작은 500개다 — 단지 마스터가 시도 순으로 적재돼 넓은 범위에서는 한쪽 지역에 몰린다. 프론트는 truncated면 "지도를 확대하세요"를 안내한다 | 작업 지시(결과 안정성). 공간 고르게 뽑기(격자 샘플링 등)는 쿼리가 무거워진다 | 줌아웃 화면에서 쏠림이 문제가 되면 서버 격자 집계(시군구 단위 개수 등)를 검토한다 |
+| **정렬 = complex_id의 결정적 해시(2026-10-13 변경)** | `ORDER BY MOD(complex_id × 2654435761, 2147483647), complex_id`(`ComplexRepositoryCustomImpl.mapSampleOrder()`). 같은 범위·필터면 항상 같은 결과다(무작위 함수가 아니라 id로만 정해진다). 모듈러가 소수라 complex_id가 약 21억 미만이면 서로 다른 단지는 키가 겹치지 않고, 곱은 약 34억까지 BIGINT 안이다. 처음엔 complex_id 순이었다 | complex_id 순으로 자르면 단지 마스터가 시도 순으로 적재돼 넓은 범위에서 한쪽에 몰렸다 — 실 좌표 DB에서 전국·필터 없음 500건이 **전부 서울**이었다. 해시 순은 16개 시도에 좌표 단지 수 비례로 나뉜다(아래 표). MariaDB가 complex 행만 해시로 정렬한 뒤 그 순서로 대표거래 서브쿼리를 붙여 limit에서 멈추므로 비용이 거의 늘지 않는다(전국·필터 없음 complex 613행 읽음) | 맞는 단지가 적은 넓은 범위(전국·매매 30억 이상)는 범위 안 단지를 모두 읽는다(0.46s). 이것이 1초에 가까워지면 2단계 조회(EXISTS로 후보 id만 해시 순 501개 → 대표거래)를 쓴다 — DB 실측 0.64s → 0.06s, 대신 흔한 조합은 +30~60ms. 단지 수가 크게 늘어 한 화면 표본이 부족해지면 서버 격자 집계를 검토한다 |
+| **정밀/근사 배지 = 서버 `precisionBadge`(2026-10-13)** | `PrecisionBadge.of(matchMethod, locationPrecision)`(`complex.dto`): 대표거래가 SIMILAR이거나 좌표가 APPROXIMATE면 `APPROXIMATE`, 대표거래가 EXACT이고 좌표가 근사가 아니면(좌표 NULL 포함) `PRECISE`, 대표거래가 없고 좌표도 근사가 아니면 null(키 생략). `ComplexSummaryResponse`(/search·/popular), `ComplexMapPointResponse`(/map, of()로 위임), `ComplexDetailResponse`(/complexes/{id})에 같은 값을 싣는다. matchMethod·locationPrecision 필드는 그대로 둔다. 캐시: `complexDetailV4`, `popularComplexesV4`로 올렸다(검색·지도는 캐시 없음). BAT-GEO-01이 좌표를 쓰면 인기 단지 캐시도 비운다(캐싱 절). 프론트: SRCH-01·HOME-01 카드(`ComplexCard`)와 DTL-01 헤더(`ComplexHeader`)의 `DataTrustBadge`가 이 값만 본다. 카드의 주황 테두리·안내도 이 값으로 켜고, 안내 문구만 이유에 따라 고른다(SIMILAR면 기존 매칭 안내, 아니면 "지도 위치는 근사 위치입니다."). DTL-01 유사 매칭 안내 상자는 matchMethod 그대로, 위치 카드의 "근사 위치입니다"는 locationPrecision 그대로다(위치 카드는 좌표를 그리지 않는다 — MAP-01 전) | UI정의서 4.9절: 근사 = SIMILAR 또는 APPROXIMATE. 화면마다 조합하면 같은 단지의 배지가 어긋난다. 좌표 NULL을 정밀로 둔 이유: 지도에 핀이 없을 뿐 위치를 잘못 보여 주지 않는다 | 근사의 정의가 바뀌면 `PrecisionBadge.of()` 하나만 고친다 |
 | 캐시 없음 | `@Cacheable`을 걸지 않는다(서비스 메서드 주석) | 키가 bounds(지도를 움직일 때마다 바뀌는 실수 4개)라 적중률이 없고, 적재 뒤 무효화 범위도 정할 수 없다 | — |
 | 비로그인 허용 | SecurityConfig `anyRequest().permitAll()`에 걸린다(별도 규칙 없음). IT가 실제 필터 체인으로 토큰 없이 200을 확인 | 비로그인 조회 전면 허용 원칙 | — |
 | 인덱스·DDL 위치 | `idx_complex_location(latitude, longitude)`은 이미 있다(`schema_all.sql`, 기존 DB용 `schema/indexes_v2_1.sql`) — 새 DDL 없음. **DDL 위치 규칙(이번에 기록):** 새 DB는 `schema_all.sql` 원문을 고치고, 이미 만든 DB용으로 `backend/src/main/resources/schema/{설명}.sql`(재실행 안전)을 함께 둔다(`indexes_v2_1.sql`·`notification_sent_at_nullable.sql`·`location_precision_varchar12.sql`과 같은 방식) | 자동 마이그레이션 도구가 없다 | Flyway 등 도입 시 |
 
-**실행계획·응답 시간(2026-10-13).** 로컬 DB(3307)는 2026-09-23 상태라 좌표가 하나도 없었다(BAT-GEO-01 결과가 이 DB에 없음 — `location_precision`도 VARCHAR(10) 그대로). 그래서 로컬 DB를 덤프해 일회용 MariaDB 10.11 컨테이너에 올리고, 단지 21,680건에 시도별 중심 ± 흔들기로 가짜 좌표를 넣었다(좌표 21,247건 — 실제 백필과 같은 수, 서울 박스 4,488건). 이 브랜치 jar를 그 DB에 붙여 측정했다(측정 후 컨테이너·덤프 삭제).
-- 실행계획: 넓은 범위는 complex를 PK 순(`index`)으로 읽다가 501행을 채우면 멈춘다(전국 필터 없음 r_rows 652). 좁은 범위(강남 일부)는 `idx_complex_location` range + filesort(172행). 대표거래는 단지마다 `idx_trade_complex_deal_date`로 max(deal_date) → max(trade_id)를 구한 뒤 trade를 PK로 읽는다(`eq_ref`).
-- 최악: 넓은 범위 + 맞는 단지가 적은 필터(전국·매매 30억 이상, 68건)는 단지 21,680건을 다 읽는다 — 0.33~0.65s. 그 밖의 16개 조합(강남 일부·서울·수도권·전국 × 필터 없음·매매·월세·매매 3억 이하)은 중앙값 59~171ms.
+**실행계획·응답 시간(2026-10-13, 실 좌표 DB).** 처음 측정(complex_id 순)은 좌표가 없던 로컬 DB를 덤프해 가짜 좌표를 넣은 컨테이너에서 했다. 해시 정렬로 바꾸며 BAT-GEO-01 결과가 들어간 로컬 DB(3307, 좌표 21,247건 — PRECISE 20,241·APPROXIMATE 1,006, trade 204,520건)에서 다시 쟀다. 범위: 전국 `33,124,39,132`, 수도권 `36.9,126.3,38.3,127.9`, 서울 `37.41,126.76,37.72,127.19`, 강남 일부 `37.49,127.02,37.53,127.07`. 상한 500.
+- 실행계획(해시 정렬, `ANALYZE`): complex를 `idx_complex_location` range로 읽어 filesort한 뒤 그 순서로 trade `eq_ref`(PK)·대표거래 서브쿼리 2단(`idx_trade_complex_deal_date`)을 붙인다. 전국·필터 없음은 complex 613행, 서울 613행, 강남 일부 134행만 읽고 멈춘다. 전국·매매 30억 이상은 21,247행 전부.
+- DB 단독(SQL, 중앙값): complex_id 순 대비 해시 순 — 전국 필터 없음 28 → 67ms, 매매 30억 이상 475 → 638ms(최대 764ms), 그 밖은 차이 수십 ms 이내. 2단계 조회 대안은 30억 이상 58ms, 흔한 조합 91~126ms.
+- API(HTTP, jar를 같은 DB에 붙여 워밍업 1회 뒤 5회 중앙값/최대):
 
-검증: `ComplexControllerTest`(응답 형태·필터 바인딩·bounds 오류 14종·같은 점 허용), `ComplexServiceTest`(limit+1 조회·상한 이하/정확히 상한/초과), **`ComplexMapSearchMariaDbIT`**(신규, 상한 2 — 범위 양 끝 포함과 1e-7 밖 제외, 좌표 NULL 제외, 필터 적용·대표거래, SRCH-01과 같은 대표거래, 상한 초과 truncated·정확히 상한, 비로그인 HTTP), `ComplexRepositoryMariaDbIT`·`ComplexSearchRegionKeywordMariaDbIT`(공유 조건 리팩터링 회귀). 변형 검증: 지도 쿼리에서 대표거래 조건을 빼면 IT 2건이 실패한다.
+| 범위 | 필터 없음 | 매매 | 월세 | 매매 3억 이하 | 매매 30억 이상 |
+| --- | --- | --- | --- | --- | --- |
+| 전국 | 101/128ms (500, 잘림) | 82/89 (500) | 91/98 (500) | 86/121 (500) | **463/467 (70)** |
+| 수도권 | 66/68 (500) | 71/78 (500) | 78/81 (500) | 114/128 (500) | 253/257 (70) |
+| 서울 | 56/60 (500) | 58/61 (500) | 54/58 (500) | 79/81 (169) | 79/81 (66) |
+| 강남 일부 | 14/15 (113) | 10/11 (26) | 15/17 (89) | 9/9 (0) | 10/11 (14) |
+
+괄호는 건수. 20개 조합 모두 같은 요청 5회의 items가 같았다(결정성).
+- 전국·필터 없음 500건의 시도별 분포(해시 순): 경기 131, 서울 77, 전남광주통합 48, 부산 30, 경남 30, 대구 27, 인천 26, 경북 24, 충남 21, 강원 20, 전북 20, 충북 15, 대전 13, 울산 10, 세종 4, 제주 4 — 좌표·거래가 있는 단지 수 비례 기대값(경기 135, 서울 74, 전남광주 46 …)과 같다. complex_id 순은 500건 전부 서울이었다.
+- 정밀/근사(실 데이터): 대표거래 EXACT + 근사 좌표 단지는 18개다. 그중 3개(194 라체르보푸르지오써밋, 2749 아크로삼성, 3060 e편한세상 고덕 어반브릿지)가 /search·/map·/complexes/{id} 모두 `APPROXIMATE`, SIMILAR 단지(4181)도 세 API 모두 `APPROXIMATE`. 전국 500건 중 근사 배지 29건.
+
+검증: `ComplexControllerTest`(응답 형태·필터 바인딩·bounds 오류 14종·같은 점 허용), `ComplexServiceTest`(limit+1 조회·상한 이하/정확히 상한/초과), **`ComplexMapSearchMariaDbIT`**(신규, 상한 2 — 범위 양 끝 포함과 1e-7 밖 제외, 좌표 NULL 제외, 필터 적용·대표거래, SRCH-01과 같은 대표거래, 상한 초과 시 해시 순 앞 2건·truncated, 잘릴 때 두 번 호출 결과 동일, 정확히 상한, 정확 매칭+근사 좌표 단지가 /search·/map·/complexes/{id}(HTTP) 모두 `APPROXIMATE`, 비로그인 HTTP), `PrecisionBadgeTest`(9조합), `ComplexGeocodingServiceTest`(좌표 쓰기·상세 삭제 실패 시에도 인기 단지 캐시 비움), `ComplexRepositoryMariaDbIT`·`ComplexSearchRegionKeywordMariaDbIT`(공유 조건 리팩터링 회귀). 변형 검증: 지도 쿼리에서 대표거래 조건을 빼면 IT 2건, 정렬을 complex_id 순으로 되돌리면 해시 순 IT 1건, `PrecisionBadge`가 locationPrecision을 무시하면 세 API IT 1건이 실패한다. 프론트: vitest `ComplexCard.test.tsx`(precisionBadge 우선·안내 문구 이유별), e2e `dtl01-detail-check`(EXACT+근사 좌표: 근사 배지·유사 안내 없음·위치 카드 문구) 105/105. `./gradlew test` 820건, `./gradlew integrationTest` 117건(21개 클래스, 건너뜀 0) 통과(2026-10-13).
 
 **완결 필요(DTL-01) — 중개사 소재지 `agent_sgg_nm` 미수집(BAT-PRS-01 매핑 확인 필요).** UI정의서 5.3절 거래상세 모달은 "거래유형 + 중개사 소재지(`estateAgentSggNm`, 시군구 단위)"를 요구하지만 `trade`에 대응 컬럼이 없고 파서(`TradeFieldMapper`)도 매핑하지 않는다. 모달에서는 그 행을 숨긴다. 표시하려면 원천 필드명 확인 → 컬럼 추가(DDL 3곳) → 파서 매핑 → `TradeDetailResponse` 순으로 한다.
 
@@ -1314,14 +1328,14 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 
 | 캐시 키 | 적용 대상 |
 | --- | --- |
-| `complexDetailV3::{complexId}` | 단지 상세 조회(V3: matchMethod 추가, 2026-09-30) |
-| `popularComplexesV3::{limit}` | 인기 단지 목록(V3: rentType·monthlyRentAmount 추가, 2026-09-23) |
+| `complexDetailV4::{complexId}` | 단지 상세 조회(V3: matchMethod 추가 2026-09-30, V4: precisionBadge 추가 2026-10-13) |
+| `popularComplexesV4::{limit}` | 인기 단지 목록(V3: rentType·monthlyRentAmount 추가 2026-09-23, V4: precisionBadge 추가 2026-10-13) |
 | `regionAutocomplete::{query}` | 지역 자동완성 |
 | `popularKeywords::{limit}` | 인기 검색어(TTL 1시간) |
 
 캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다. **캐시 이름은 반드시 `CacheNames` 상수로 쓰고, 새 캐시는 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다(`CacheConfigTest`·`CacheNameRegistrationTest`가 강제)** — 미등록 캐시는 자동 생성되지 않는다(2026-09-27 리스트 캐시 500 hotfix, "단지 검색 지역코드·키워드·거래유형" 절 참고). 캐시 조회·저장 실패는 `CacheErrorHandler`가 로그만 남기고 미스로 처리한다.
 
-**`ComplexDetailResponse`·인기 단지 응답에 들어가는 값(complex 컬럼, 대표 거래의 complex_id/match_method)을 바꾸는 모든 경로는 커밋 후 해당 캐시를 evict한다(단건은 이벤트, 일괄은 전체 clear).** 단건 경로: `TradeDataLoader`(적재), `TradeRematchRunner`(재매칭) → `TradeCacheEvictionEvent`. 일괄 경로: `ComplexLegalDongBackfillService`(complex.legal_dong_cd 백필) → 전체 비움. 좌표: `ComplexGeocodingService`(BAT-GEO-01)가 청크 커밋 뒤 좌표를 쓴 단지의 `complexDetailV3` 항목만 `evictIfPresent`로 지운다(인기 단지 응답에는 좌표가 없다). 단지 마스터 적재기가 저장소에 들어오면 그것도 이 규칙을 따른다.
+**`ComplexDetailResponse`·인기 단지 응답에 들어가는 값(complex 컬럼, 대표 거래의 complex_id/match_method)을 바꾸는 모든 경로는 커밋 후 해당 캐시를 evict한다(단건은 이벤트, 일괄은 전체 clear).** 단건 경로: `TradeDataLoader`(적재), `TradeRematchRunner`(재매칭) → `TradeCacheEvictionEvent`. 일괄 경로: `ComplexLegalDongBackfillService`(complex.legal_dong_cd 백필) → 전체 비움. 좌표: `ComplexGeocodingService`(BAT-GEO-01)가 청크 커밋 뒤 좌표를 쓴 단지의 `complexDetailV4` 항목을 `evictIfPresent`로 지우고, 인기 단지(`popularComplexesV4`)는 `invalidate()`로 전체 비운다 — 인기 단지 응답에 좌표는 없지만 `precisionBadge`가 `location_precision`에 달려 있다(2026-10-13). 단지 마스터 적재기가 저장소에 들어오면 그것도 이 규칙을 따른다.
 
 **코드에서 캐시를 지울 때는 `Cache.evict()`/`clear()`가 아니라 `evictIfPresent()`/`invalidate()`를 쓴다(2026-09-30).** Spring Data Redis 4.1.1은 Lettuce 연결에서 `evict()`/`clear()`를 비동기로 보내고 결과를 기다리지 않는다(`DefaultRedisCacheWriter.writeAsynchronously()`). 그래서 `System.exit`로 끝나는 1회성 러너에서는 삭제가 Redis에 닿기 전에 사라질 수 있고(백필 러너로 재현: `clear()` 뒤 `popularComplexesV3::8`이 남았다), Redis 오류도 호출부의 try-catch에 잡히지 않는다. `evictIfPresent()`/`invalidate()`는 Spring `Cache` 계약상 즉시 실행이다. `@CacheEvict` 애노테이션은 이 경로를 쓰지 않는다 — 쓰게 되면 `beforeInvocation`이나 즉시 실행 여부를 따로 확인한다.
 
@@ -1335,7 +1349,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 
 | 캐시 | 무효화 이벤트 | 발행 주체 | 주기 |
 | --- | --- | --- | --- |
-| `complexDetailV3::{complexId}` | `TradeCacheEvictionEvent` | BAT-LOD-01(`TradeDataLoader`), BAT-MAT-02 재매칭(`TradeRematchRunner`, 배치 커밋마다) | 일 1회 이상 / 재매칭 실행 시 |
+| `complexDetailV4::{complexId}` | `TradeCacheEvictionEvent` | BAT-LOD-01(`TradeDataLoader`), BAT-MAT-02 재매칭(`TradeRematchRunner`, 배치 커밋마다) | 일 1회 이상 / 재매칭 실행 시 |
 | `popularComplexes` | `TradeCacheEvictionEvent` (전체 evict) | BAT-LOD-01(`TradeDataLoader`), BAT-MAT-02 재매칭(`TradeRematchRunner`) | 일 1회 이상 / 재매칭 실행 시 |
 | `regionAutocomplete` | `LegalDistrictCodeReloadedEvent` (전체 evict) | BAT-MAT-01(`LegalDistrictCodeLoader`) | 비정기(CSV 재적재 시에만) |
 
@@ -2074,7 +2088,7 @@ complex WHERE dong_ri='주봉리'` 등 3개 표본), **정규화 로직 오류�
 | 초당 호출 제한 | 호출 사이 최소 간격은 `homesense.geocoding.request-interval-millis`(기본 100ms = 초당 10건)다 | 로컬 표본: 20건 처리에 기동 포함 11초 | — |
 | 커밋·재개 | 좌표는 청크(기본 100건)마다 `TransactionTemplate`으로 커밋한다. 서비스 자체에는 트랜잭션을 걸지 않는다. 상한·중단·예외 등 어떤 경로로 끝나든 이미 받은 좌표는 `finally`에서 쓴다. 쓰기는 `latitude IS NULL` 조건부 UPDATE라 좌표가 있는 행은 덮지 않는다. 대상을 `latitude IS NULL`로 고르므로 다시 실행하면 남은 단지부터 이어진다 | 카카오를 수만 번 호출하는 동안 트랜잭션을 붙잡지 않기 위해서다. TradeRematchRunner의 "전체를 한 트랜잭션으로 묶은" 실수와 같은 이유다 | — |
 | 정기 실행 위치 | `BatchExecutionOrchestrator.orchestrate()`의 `finally`에서 `evaluateWatchConditions` 앞에 부른다. 예외는 흡수한다(수집·알림 평가를 막지 않음). 인터럽트로 끝난 런이거나 `homesense.geocoding.scheduled-enabled=false`면 건너뛴다. 백필(`orchestrateBackfill`)에서는 부르지 않는다 | 설계서 6.3절의 순서다. 단지 마스터는 저장소 밖에서 재적재될 때만 늘어나므로 평소엔 대상이 0건이다. 러너가 일일 상한에서 멈췄으면 정기 실행이 이어서 처리한다 | 단지 마스터 적재기가 저장소에 들어오면, 적재 직후에 바로 부르는 방식도 검토한다 |
-| 캐시 | 좌표를 쓴 청크의 단지마다 `complexDetailV3` 항목을 `evictIfPresent`로 지운다. 종료형 러너라 비동기 `evict()`는 쓰지 않는다(캐싱 절). 삭제 실패는 WARN을 남기고 흡수한다 | `ComplexDetailResponse`가 latitude/longitude/locationPrecision을 담는다. 인기 단지·검색 응답에는 좌표가 없다 | 좌표를 담는 다른 캐시가 생기면 함께 지운다 |
+| 캐시 | 좌표를 쓴 청크의 단지마다 `complexDetailV4` 항목을 `evictIfPresent`로 지운다. **[2026-10-13] 인기 단지(`popularComplexesV4`)도 `invalidate()`로 전체 비운다** — 응답의 `precisionBadge`가 `location_precision`에 달려 있다(어느 limit 항목에 그 단지가 있는지 알 수 없어 전체). 종료형 러너라 비동기 `evict()`/`clear()`는 쓰지 않는다(캐싱 절). 삭제 실패는 WARN을 남기고 흡수하며, 상세가 실패해도 인기 단지는 따로 시도한다 | `ComplexDetailResponse`가 latitude/longitude/locationPrecision을 담는다. 검색 응답은 캐시하지 않는다 | 좌표나 precisionBadge를 담는 다른 캐시가 생기면 함께 지운다 |
 | **키워드 장소 검색 보완(2026-10-12, 지성 결정)** | 주소 검색이 "못 찾음"이면 카카오 키워드 장소 검색(`GET /v2/local/search/keyword.json`)으로 한 번 더 찾는다. 이렇게 얻은 좌표는 `location_precision='APPROXIMATE'`로 저장한다. 정기 런과 러너가 같은 순서(주소 → 키워드)를 쓴다. 키워드 호출도 같은 일일 카운터로 세고, 429·401·403 중단과 5xx 재시도 규칙도 같다(`callWithRetry` 공유) | 못 찾음 1,220건은 대부분 재건축 단지에서 K-apt가 사업 전 지번을 갖고 있는 경우였다. 이름으로 맞춘 결과라 다른 단지를 잘못 집었을 가능성이 있어 근사로 둔다 — UI정의서 7.2절의 근사 정의와 같고, MAP-01 근사 핀 색·범례·"근사 위치입니다" 문구가 이 값을 그대로 쓴다(DTL-01 위치 카드는 이미 PRECISE가 아니면 근사로 보인다) | **K-apt 원본의 지번이 갱신되면** 주소 검색으로 다시 찾아 PRECISE로 덮어쓴다 — runbook 10절 "APPROXIMATE 단지 재지오코딩" |
 | **키워드 후보 판정 — 잘못된 단지를 집지 않는 것이 우선** | `KeywordPlaceMatcher`. 검색어는 "{시군구} {단지명}"(세종은 시도)이다. 후보는 (1) category_name을 " > "로 나눈 단계 중 하나가 "주거시설" 또는 "아파트"와 **정확히 같고**, (2) address_name(지번 주소)이 단지의 시도·시군구로 시작하며 뒤 토큰 중 하나가 동·리 이름과 같아야 한다(공백 제거 후 비교). 통과한 후보가 **정확히 하나일 때만** 채택한다. 후보가 0개면 단지명 끝의 "아파트"를 뗀 검색어로 한 번 더 찾고, 여러 개면 거기서 멈춘다(검색어를 넓혀도 여럿이거나 늘 뿐이다) | 카테고리를 부분 문자열로 비교하면 "가정,생활 > 상가,아케이드 > 아파트상가"가 통과해 같은 단지의 상가가 두 번째 후보가 된다(실측: 더비치푸르지오써밋) — 그래서 단계 단위로 비교한다. 카카오는 시도를 11곳에서 줄여 쓰고("서울", "경기", "충남" 등), 5곳은 원래 이름을 쓴다(특별자치도·시, 전남광주통합특별시 — 2026-10-12 시도별 실측). 구가 있는 시는 두 토큰("화성시 동탄구")이라 `SigunguNormalizer`(이번에 public으로 바꿈)로 K-apt 표기("화성동탄구")에 맞춘다. "아파트"를 뗀 재검색은 원문의 "결과가 없으면"을 "조건을 통과한 후보가 없으면"(결과 0건 포함)으로 넓혀 적용했다 — 판정 조건은 그대로라 잘못 집을 위험은 늘지 않는다 | 카카오의 시도·시군구 표기가 바뀌면 시도 약칭 표와 정규화를 다시 잰다 |
 | **이름 확인 규칙(2026-10-12 2차, 지성 결정)** | 카테고리·지역 조건 위에 이름 확인을 더한다. 이름 정규화(`KeywordPlaceMatcher.normalizeName`): 괄호와 그 안 내용·공백·특수문자 제거, 소문자, 끝의 "아파트" 제거, 실측 표기 차이 3가지만 맞춤("엘에이치"→lh, "아이파크"→ipark, "뷰"→view). 판정: (1) 정규화 이름이 정확히 같은 후보가 하나면 채택(다른 후보가 있어도), (2) 아니면 한쪽이 다른 쪽을 포함하는 후보가 정확히 하나일 때만 채택, (3) 둘 다 아니면 못 찾음(`KEYWORD_NAME_MISMATCH`) — 후보가 하나뿐이어도 이름이 다르면 채택하지 않는다. 검색어에 괄호를 지운 단지명("왕십리텐즈힐1단지(임대)" → "왕십리텐즈힐1단지")을 더하고, 이름 불일치면 다음 검색어로 다시 찾는다(여럿이면 멈춤). 괄호 제거 검색어는 띄어쓰기를 남긴다 — 소문자화·표기 맞춤은 비교용이라 검색어에 쓰지 않는다 | 첫 규칙은 카테고리·지역만 봐서 이름이 전혀 다른 후보 하나도 채택했다(동탄파크자이 → "동탄역자이아파트"). 정확 일치 우선은 같은 동에 비슷한 단지가 있을 때 맞는 쪽을 고르게 한다(역삼자이 ↔ 역삼센트럴자이, 힐스테이트세운센트럴1단지 ↔ 같은 사업지 도시형생활주택). **알려진 손실:** 포함 비교라 이름 가운데에 지역·차수가 끼면 놓친다("래미안퍼스트하이" ↔ "래미안장위퍼스트하이아파트", "약수역 더시티" ↔ "약수더시티"). 재판정 탈락 94건 중 77건이 이름 유사도(2-gram dice) 0.6 이상이었다 — 같은 단지일 가능성이 높지만 규칙대로 못 찾음으로 남겼다. 괄호를 통째로 지워 "와이시티 (Y CITY)" ↔ "Y-CITY아파트(와이시티)"처럼 괄호 안이 본이름인 경우도 놓친다 | 놓친 단지를 되찾아야 하면 유사도 기준(예: dice 0.6 이상이고 그런 후보가 정확히 하나)을 3단계로 검토한다 — 지금은 넣지 않았다 |
