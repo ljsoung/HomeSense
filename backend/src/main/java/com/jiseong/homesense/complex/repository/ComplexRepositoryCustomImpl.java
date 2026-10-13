@@ -37,6 +37,10 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
     private static final QTrade trade = QTrade.trade;
     private static final QLegalDistrictCode legalDistrictCode = QLegalDistrictCode.legalDistrictCode;
     private static final char LIKE_ESCAPE = '!';
+    /** Knuth 곱셈 해시 상수(2^32 / 황금비). */
+    static final long MAP_SAMPLE_MULTIPLIER = 2_654_435_761L;
+    /** 2^31 - 1(소수). */
+    static final long MAP_SAMPLE_MODULUS = 2_147_483_647L;
 
     private final JPAQueryFactory queryFactory;
 
@@ -89,7 +93,13 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
      * 않는다 — search()도 regionCode 없이 keyword만 줄 때 legal_dong_cd NULL 단지를 막지 않는다.
      *
      * <p>BETWEEN은 latitude/longitude가 NULL인 행을 참으로 평가하지 않으므로 좌표 없는 단지(지오코딩 전·못 찾음)는 따로
-     * 조건을 걸지 않아도 빠진다. 범위는 양 끝을 포함한다. 정렬은 complex_id 오름차순이라 같은 범위·필터면 같은 결과다.
+     * 조건을 걸지 않아도 빠진다. 범위는 양 끝을 포함한다.
+     *
+     * <p>정렬은 {@link #mapSampleOrder()}(complex_id의 결정적 해시, 같으면 complex_id)라 같은 범위·필터면 항상 같은 결과다.
+     * complex_id 순으로 자르면 단지 마스터가 시도 순으로 적재돼 넓은 범위에서 한 시도(서울)에만 몰렸다 — 해시 순으로 자르면
+     * 화면 전체에서 고르게 뽑힌다(2026-10-13 실측: 전국 500건이 16개 시도에 좌표 단지 수 비례로 나뉨). MariaDB는 complex
+     * 행만 해시로 정렬한 뒤 그 순서로 대표거래를 붙여 limit에서 멈추므로, 맞는 단지가 많은 넓은 범위도 수백 행만 읽는다.
+     * 맞는 단지가 적은 필터(전국·매매 30억 이상)는 범위 안 단지를 모두 읽는다 — CLAUDE.md "MAP-01 백엔드 보강" 절의 측정값.
      */
     @Override
     public List<ComplexMapPointResponse> searchInBounds(BoundsCondition bounds, ComplexSearchCondition condition,
@@ -104,12 +114,22 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
                 .from(complex)
                 .join(trade).on(trade.complex.eq(complex))
                 .where(where)
-                .orderBy(complex.complexId.asc())
+                .orderBy(mapSampleOrder(), complex.complexId.asc())
                 .limit(limitPlusOne)
                 .fetch()
                 .stream()
                 .map(row -> ComplexMapPointResponse.of(row.get(complex), row.get(trade)))
                 .toList();
+    }
+
+    /**
+     * 지도 상한 정렬 키 — (complex_id × {@value #MAP_SAMPLE_MULTIPLIER}) mod {@value #MAP_SAMPLE_MODULUS}. 모듈러가 소수이고
+     * 곱수가 그 배수가 아니라 complex_id가 모듈러보다 작은 동안 서로 다른 단지는 서로 다른 값을 갖는다(같은 값이 나오면
+     * complex_id가 2차 키). 곱은 complex_id가 약 34억을 넘기 전까지 BIGINT 범위 안이다. 무작위 함수가 아니라 단지 id로만
+     * 정해지므로 같은 요청은 같은 결과를 낸다.
+     */
+    private static OrderSpecifier<Long> mapSampleOrder() {
+        return complex.complexId.multiply(MAP_SAMPLE_MULTIPLIER).mod(MAP_SAMPLE_MODULUS).asc();
     }
 
     /**

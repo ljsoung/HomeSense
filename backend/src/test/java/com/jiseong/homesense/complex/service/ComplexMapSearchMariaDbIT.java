@@ -7,6 +7,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -144,7 +146,7 @@ class ComplexMapSearchMariaDbIT {
 
         ComplexMapSearchResponse response = complexService.searchInBounds(SEOUL, ComplexSearchCondition.builder().build());
 
-        assertThat(ids(response)).containsExactly(sw.getComplexId(), ne.getComplexId());
+        assertThat(ids(response)).containsExactlyInAnyOrder(sw.getComplexId(), ne.getComplexId());
         assertThat(response.truncated()).isFalse();
     }
 
@@ -197,7 +199,7 @@ class ComplexMapSearchMariaDbIT {
         assertThat(saleUnder85k.items().get(0).floor()).isEqualTo((short) 5);
 
         ComplexMapSearchResponse noFilter = complexService.searchInBounds(SEOUL, ComplexSearchCondition.builder().build());
-        assertThat(ids(noFilter)).containsExactly(saleOnly.getComplexId(), mixed.getComplexId())
+        assertThat(ids(noFilter)).containsExactlyInAnyOrder(saleOnly.getComplexId(), mixed.getComplexId())
                 .doesNotContain(cancelledOnly.getComplexId(), noTrade.getComplexId());
         // 거래가 여러 건인 단지(mixed)도 대표거래 하나로 한 번만 나온다 — 한 번 더 나오면 상한(2)을 넘어 truncated가 된다.
         assertThat(noFilter.truncated()).isFalse();
@@ -236,26 +238,55 @@ class ComplexMapSearchMariaDbIT {
             }
         }
         // 필터 없음: A는 같은 날 두 건 중 큰 trade_id(EXACT·9층), B는 더 최신인 전세.
-        ComplexMapSearchResponse noFilter = complexService.searchInBounds(SEOUL, ComplexSearchCondition.builder().build());
-        assertThat(noFilter.items().get(0).matchMethod()).isEqualTo(MatchMethod.EXACT);
-        assertThat(noFilter.items().get(0).floor()).isEqualTo((short) 9);
-        assertThat(noFilter.items().get(1).rentType()).isEqualTo(RentType.JEONSE);
+        Map<Long, ComplexMapPointResponse> noFilter = complexService
+                .searchInBounds(SEOUL, ComplexSearchCondition.builder().build()).items().stream()
+                .collect(Collectors.toMap(ComplexMapPointResponse::complexId, Function.identity()));
+        assertThat(noFilter.get(a.getComplexId()).matchMethod()).isEqualTo(MatchMethod.EXACT);
+        assertThat(noFilter.get(a.getComplexId()).floor()).isEqualTo((short) 9);
+        assertThat(noFilter.get(b.getComplexId()).rentType()).isEqualTo(RentType.JEONSE);
+    }
+
+    /** 리포지토리의 지도 정렬 키와 같은 식. 시드 id로 기대 순서를 계산한다. */
+    private static long sampleKey(long complexId) {
+        return complexId * 2_654_435_761L % 2_147_483_647L;
+    }
+
+    private List<Long> seedFive() {
+        List<Long> seeded = new ArrayList<>();
+        for (String src : List.of("1", "2", "3", "4", "5")) {
+            Complex c = complex(src, "37.5" + src, "127.0" + src, "PRECISE");
+            sale(c, LocalDate.of(2026, 9, 1), 50000L, MatchMethod.EXACT, (short) 3, false);
+            seeded.add(c.getComplexId());
+        }
+        return seeded;
     }
 
     @Test
-    void 상한을_넘으면_complex_id_순으로_상한까지만_주고_truncated가_true다() {
-        Complex first = complex("1", "37.50", "127.00", "PRECISE");
-        Complex second = complex("2", "37.51", "127.01", "PRECISE");
-        Complex third = complex("3", "37.52", "127.02", "PRECISE");
-        for (Complex c : List.of(third, first, second)) {
-            sale(c, LocalDate.of(2026, 9, 1), 50000L, MatchMethod.EXACT, (short) 3, false);
-        }
+    void 상한을_넘으면_해시_순으로_상한까지만_주고_truncated가_true다() {
+        List<Long> seeded = seedFive();
+        List<Long> expected = seeded.stream()
+                .sorted(Comparator.comparingLong(ComplexMapSearchMariaDbIT::sampleKey).thenComparing(Long::longValue))
+                .limit(LIMIT).toList();
+        // complex_id 순 앞 2건과 다르게 골라지는 시드여야 이 테스트가 정렬을 실제로 검증한다.
+        assertThat(expected).isNotEqualTo(seeded.subList(0, LIMIT));
 
         ComplexMapSearchResponse response = complexService.searchInBounds(SEOUL, ComplexSearchCondition.builder().build());
 
         assertThat(response.limit()).isEqualTo(LIMIT);
         assertThat(response.truncated()).isTrue();
-        assertThat(ids(response)).containsExactly(first.getComplexId(), second.getComplexId());
+        assertThat(ids(response)).containsExactlyElementsOf(expected);
+    }
+
+    @Test
+    void 잘릴_때도_같은_범위와_필터면_두_번_호출한_결과가_같다() {
+        seedFive();
+        ComplexSearchCondition condition = ComplexSearchCondition.builder().dealCategory(DealCategory.SALE).build();
+
+        ComplexMapSearchResponse first = complexService.searchInBounds(SEOUL, condition);
+        ComplexMapSearchResponse second = complexService.searchInBounds(SEOUL, condition);
+
+        assertThat(first.truncated()).isTrue();
+        assertThat(second.items()).isEqualTo(first.items());
     }
 
     @Test
