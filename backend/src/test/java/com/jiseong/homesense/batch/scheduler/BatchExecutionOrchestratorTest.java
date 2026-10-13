@@ -3,9 +3,11 @@ package com.jiseong.homesense.batch.scheduler;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -42,12 +45,14 @@ import com.jiseong.homesense.batch.entity.BatchLog;
 import com.jiseong.homesense.batch.errorhandler.CollectRequest;
 import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
+import com.jiseong.homesense.batch.geocoding.ComplexGeocodingService;
 import com.jiseong.homesense.batch.loader.LoadResult;
 import com.jiseong.homesense.batch.loader.TradeIngestionPipeline;
 import com.jiseong.homesense.batch.notifier.NotificationTriggerContext;
 import com.jiseong.homesense.batch.notifier.WatchConditionEvaluator;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
+import com.jiseong.homesense.common.config.GeocodingProperties;
 import com.jiseong.homesense.common.config.RetryQueueProperties;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
@@ -81,6 +86,9 @@ class BatchExecutionOrchestratorTest {
     @Mock
     private WatchConditionEvaluator watchConditionEvaluator;
 
+    @Mock
+    private ComplexGeocodingService complexGeocodingService;
+
     // 실제 조합(housingType×dealCategory)마다 등록된 데이터셋을 그대로 알고 있어야 하는 테스트(구조적
     // 오류의 대표 데이터셋 귀속)가 있어 목이 아니라 실제 구현을 쓴다 — RealEstateApiCollectorTest와 동일 관례.
     private final DatasetRegistry datasetRegistry = new DatasetRegistry();
@@ -102,7 +110,8 @@ class BatchExecutionOrchestratorTest {
         retryQueueManager = new RetryQueueManager(new RetryQueueProperties(List.of(0L, 0L, 0L), 999_999L));
         orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
                 batchLogRepository, properties, eventPublisher, new ApiCallThrottle(), retryQueueManager,
-                auditLogger, tradeIngestionPipeline, watchConditionEvaluator);
+                auditLogger, tradeIngestionPipeline, watchConditionEvaluator, complexGeocodingService,
+                geocodingProperties(true));
     }
 
     private static ApiResponseXml success(String datasetId) {
@@ -470,5 +479,102 @@ class BatchExecutionOrchestratorTest {
         } finally {
             Thread.interrupted(); // 다음 테스트에 인터럽트가 새지 않게
         }
+    }
+
+    private static GeocodingProperties geocodingProperties(boolean scheduledEnabled) {
+        return new GeocodingProperties(0, 10_000, 0, 0, 5, 30, 100, scheduledEnabled);
+    }
+
+    @Test
+    void 순회가_끝나면_지오코딩을_알림_평가보다_먼저_부른다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        InOrder order = inOrder(complexGeocodingService, watchConditionEvaluator);
+        order.verify(complexGeocodingService).run(Integer.MAX_VALUE);
+        order.verify(watchConditionEvaluator).evaluateAfterLoad(any());
+    }
+
+    @Test
+    void 지오코딩이_예외를_던져도_이번_런에_적재된_거래로_알림_평가를_부른다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")))
+                .thenReturn(new LoadResult(0, 0, 0, 0));
+        when(complexGeocodingService.run(Integer.MAX_VALUE)).thenThrow(new IllegalStateException("Redis 장애"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        ArgumentCaptor<NotificationTriggerContext> ctx = ArgumentCaptor.forClass(NotificationTriggerContext.class);
+        verify(watchConditionEvaluator).evaluateAfterLoad(ctx.capture());
+        assertThat(ctx.getValue().complexIds()).containsExactly(10L);
+        assertThat(ctx.getValue().legalDongCds()).containsExactly("4111110100");
+    }
+
+    @Test
+    void 조기_중단된_런에서_지오코딩이_예외를_던져도_알림_평가를_부른다() {
+        when(collector.collect(any(), any(), any(), any()))
+                .thenReturn(success("15126469"))
+                .thenThrow(new OpenApiResultCodeException("15126469", "30", ErrorCodeJudgment.ABORT_BATCH));
+        when(tradeIngestionPipeline.process(any(), any(), any(), any()))
+                .thenReturn(new LoadResult(1, 0, 1, 0, Set.of(10L), Set.of("4111110100")));
+        when(complexGeocodingService.run(Integer.MAX_VALUE)).thenThrow(new IllegalStateException("Redis 장애"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(complexGeocodingService).run(Integer.MAX_VALUE);
+        verify(watchConditionEvaluator).evaluateAfterLoad(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void 지오코딩이_실패해도_알림_평가와_완료_이벤트는_그대로_진행된다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+        when(complexGeocodingService.run(Integer.MAX_VALUE)).thenThrow(new IllegalStateException("Redis 장애"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(watchConditionEvaluator).evaluateAfterLoad(any());
+        verify(eventPublisher).publishEvent(any(TradeCollectionCompletedEvent.class));
+    }
+
+    @Test
+    void 지오코딩_정기_실행을_끄면_부르지_않는다() {
+        orchestrator = new BatchExecutionOrchestrator(legalDistrictCodeRepository, collector, datasetRegistry,
+                batchLogRepository, new BatchSchedulerProperties(List.of(HousingType.APT)), eventPublisher,
+                new ApiCallThrottle(), retryQueueManager, auditLogger, tradeIngestionPipeline, watchConditionEvaluator,
+                complexGeocodingService, geocodingProperties(false));
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+
+        orchestrator.orchestrate(TARGET_MONTH);
+
+        verify(complexGeocodingService, never()).run(anyInt());
+        verify(watchConditionEvaluator).evaluateAfterLoad(any());
+    }
+
+    @Test
+    void 인터럽트로_끝난_런은_지오코딩을_건너뛴다() {
+        when(collector.collect(any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Thread.currentThread().interrupt();
+                    throw new BatchInterruptedException("스로틀 대기 중 인터럽트됨", new InterruptedException());
+                });
+        try {
+            assertThatThrownBy(() -> orchestrator.orchestrate(TARGET_MONTH))
+                    .isInstanceOf(BatchInterruptedException.class);
+            verify(complexGeocodingService, never()).run(anyInt());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void 백필은_지오코딩을_부르지_않는다() {
+        when(collector.collect(any(), any(), any(), any())).thenReturn(success("15126469"));
+
+        orchestrator.orchestrateBackfill(List.of(SGG_CD), List.of(TARGET_MONTH));
+
+        verify(complexGeocodingService, never()).run(anyInt());
     }
 }

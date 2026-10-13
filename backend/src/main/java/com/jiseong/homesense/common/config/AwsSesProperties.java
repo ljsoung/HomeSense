@@ -15,7 +15,7 @@ import jakarta.validation.constraints.NotBlank;
  *
  * <p>{@code region}/{@code senderAddress}는 값이 없으면 이메일을 아예 보낼 수 없어 {@code @NotBlank}로
  * 기동 시점에 즉시 실패(fail-fast)한다(DataGoKrProperties/JwtProperties와 동일 원칙). {@code accessKey}/
- * {@code secretKey}는 KakaoProperties처럼 검증하지 않는다 — 값이 비어 있으면
+ * {@code secretKey}는 검증하지 않는다 — 값이 비어 있으면
  * {@link com.jiseong.homesense.common.mail.SesMailSender}가 AWS SDK 기본 자격 증명 체인(EC2/ECS
  * 인스턴스 역할 등)으로 폴백하도록 SesClientConfig가 분기하므로, accessKey/secretKey 자체가 필수는
  * 아니다.

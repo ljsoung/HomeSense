@@ -1,0 +1,174 @@
+{
+  "documents": [
+    {
+      "id": "759166999",
+      "place_name": "더비치푸르지오써밋아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.1088904799312",
+      "y": "35.136447440499275",
+      "place_url": "http://place.map.kakao.com/759166999"
+    },
+    {
+      "id": "1699846430",
+      "place_name": "더비치푸르지오써밋아파트 정문",
+      "category_name": "교통,수송 > 입출구",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.107019091917",
+      "y": "35.1377281065092",
+      "place_url": "http://place.map.kakao.com/1699846430"
+    },
+    {
+      "id": "896431701",
+      "place_name": "더비치푸르지오써밋아파트 후문",
+      "category_name": "교통,수송 > 입출구",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.108534205545",
+      "y": "35.1373502920941",
+      "place_url": "http://place.map.kakao.com/896431701"
+    },
+    {
+      "id": "1182681922",
+      "place_name": "더비치푸르지오써밋아파트 상가동",
+      "category_name": "가정,생활 > 상가,아케이드 > 아파트상가",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.107843519459",
+      "y": "35.137707455241",
+      "place_url": "http://place.map.kakao.com/1182681922"
+    },
+    {
+      "id": "695394833",
+      "place_name": "공립더비치푸르지오써밋어린이집",
+      "category_name": "교육,학문 > 유아교육 > 어린이집",
+      "category_group_code": "PS3",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.108178393432",
+      "y": "35.1361020767014",
+      "place_url": "http://place.map.kakao.com/695394833"
+    },
+    {
+      "id": "711622860",
+      "place_name": "더비치푸르지오써밋 경로당",
+      "category_name": "가정,생활 > 친목 > 노인정,노인회",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.107953009531",
+      "y": "35.1362528872782",
+      "place_url": "http://place.map.kakao.com/711622860"
+    },
+    {
+      "id": "1285525578",
+      "place_name": "더써밋골프",
+      "category_name": "스포츠,레저 > 골프 > 골프연습장",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.108128222144",
+      "y": "35.1374745084561",
+      "place_url": "http://place.map.kakao.com/1285525578"
+    },
+    {
+      "id": "584458035",
+      "place_name": "비치써밋공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.107945413269",
+      "y": "35.137617368952",
+      "place_url": "http://place.map.kakao.com/584458035"
+    },
+    {
+      "id": "1912871636",
+      "place_name": "비치써밋박소장공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.110083299165",
+      "y": "35.1358670508545",
+      "place_url": "http://place.map.kakao.com/1912871636"
+    },
+    {
+      "id": "786890753",
+      "place_name": "써밋일번지부동산중개사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.107924365397",
+      "y": "35.1376519790816",
+      "place_url": "http://place.map.kakao.com/786890753"
+    },
+    {
+      "id": "1408151995",
+      "place_name": "써밋까사공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.10747943355614",
+      "y": "35.1378399519539",
+      "place_url": "http://place.map.kakao.com/1408151995"
+    },
+    {
+      "id": "616136267",
+      "place_name": "푸르지오탑부동산중개사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.10797294260757",
+      "y": "35.13762139566285",
+      "place_url": "http://place.map.kakao.com/616136267"
+    },
+    {
+      "id": "735300024",
+      "place_name": "써밋좋은공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.107794872478",
+      "y": "35.1377353364048",
+      "place_url": "http://place.map.kakao.com/735300024"
+    },
+    {
+      "id": "1919586508",
+      "place_name": "써밋사랑부동산공인중개사사무소",
+      "category_name": "부동산 > 부동산서비스 > 부동산중개업",
+      "category_group_code": "AG2",
+      "address_name": "부산 남구 대연동 1946",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.10768021484657",
+      "y": "35.1378409643496",
+      "place_url": "http://place.map.kakao.com/1919586508"
+    },
+    {
+      "id": "511004771",
+      "place_name": "크린에이드 대연더비치써밋점",
+      "category_name": "가정,생활 > 세탁소 > 크린에이드",
+      "category_group_code": "",
+      "address_name": "부산 남구 대연동 1808",
+      "road_address_name": "부산 남구 황령대로 504",
+      "x": "129.107679866464",
+      "y": "35.1378274531276",
+      "place_url": "http://place.map.kakao.com/511004771"
+    }
+  ],
+  "meta": {
+    "total_count": 45,
+    "pageable_count": 37,
+    "is_end": false
+  }
+}

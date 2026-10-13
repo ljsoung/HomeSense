@@ -1,0 +1,174 @@
+{
+  "documents": [
+    {
+      "id": "21303052",
+      "place_name": "텐즈힐1단지아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02794524824769",
+      "y": "37.5688608776878",
+      "place_url": "http://place.map.kakao.com/21303052"
+    },
+    {
+      "id": "2105836425",
+      "place_name": "텐즈힐1단지아파트 보안센터",
+      "category_name": "서비스,산업 > 관리,운영 > 건물관리사무소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.026645415541",
+      "y": "37.5678232312209",
+      "place_url": "http://place.map.kakao.com/2105836425"
+    },
+    {
+      "id": "545461605",
+      "place_name": "카카오 T 왕십리뉴타운 텐즈힐1단지 상가 주차장",
+      "category_name": "교통,수송 > 교통시설 > 주차장",
+      "category_group_code": "PK6",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02623000665206",
+      "y": "37.56784044317087",
+      "place_url": "http://place.map.kakao.com/545461605"
+    },
+    {
+      "id": "807451861",
+      "place_name": "블럭파티플러스 성동텐즈힐점",
+      "category_name": "가정,생활 > 유아 > 놀이시설",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 339-67",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.026115631362",
+      "y": "37.567693606222",
+      "place_url": "http://place.map.kakao.com/807451861"
+    },
+    {
+      "id": "1171262920",
+      "place_name": "브이랩필라테스&스트레치 상왕십리점",
+      "category_name": "스포츠,레저 > 요가,필라테스 > 필라테스",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02627749795548",
+      "y": "37.56769987726898",
+      "place_url": "http://place.map.kakao.com/1171262920"
+    },
+    {
+      "id": "26850129",
+      "place_name": "마이스터손지은헤어",
+      "category_name": "가정,생활 > 미용 > 미용실",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02625936353242",
+      "y": "37.56763230662871",
+      "place_url": "http://place.map.kakao.com/26850129"
+    },
+    {
+      "id": "547023983",
+      "place_name": "휘아로",
+      "category_name": "가정,생활 > 미용 > 피부관리",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02633256180206",
+      "y": "37.569778461819546",
+      "place_url": "http://place.map.kakao.com/547023983"
+    },
+    {
+      "id": "1410880193",
+      "place_name": "텐즈힐1단지아파트 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02634819264848",
+      "y": "37.56916397941806",
+      "place_url": "http://place.map.kakao.com/1410880193"
+    },
+    {
+      "id": "491415492",
+      "place_name": "성동 텐즈힐1단지 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02634819264848",
+      "y": "37.56916397941806",
+      "place_url": "http://place.map.kakao.com/491415492"
+    },
+    {
+      "id": "2092254247",
+      "place_name": "성동 텐즈힐1단지 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.026600765124",
+      "y": "37.5695846876722",
+      "place_url": "http://place.map.kakao.com/2092254247"
+    },
+    {
+      "id": "1495210059",
+      "place_name": "서울성동 텐즈힐1단지4 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.026348192648",
+      "y": "37.5691639794181",
+      "place_url": "http://place.map.kakao.com/1495210059"
+    },
+    {
+      "id": "1542615596",
+      "place_name": "서울성동 텐즈힐1단지2 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02634819264848",
+      "y": "37.56916397941806",
+      "place_url": "http://place.map.kakao.com/1542615596"
+    },
+    {
+      "id": "1540111828",
+      "place_name": "서울성동 텐즈힐1단지3 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.026348192649",
+      "y": "37.5691639794242",
+      "place_url": "http://place.map.kakao.com/1540111828"
+    },
+    {
+      "id": "800399162",
+      "place_name": "서울성동 텐즈힐1단지1 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02634819264848",
+      "y": "37.56916397941806",
+      "place_url": "http://place.map.kakao.com/800399162"
+    },
+    {
+      "id": "1678276210",
+      "place_name": "서울시 성동구 텐즈힐1단지 전기차충전소",
+      "category_name": "교통,수송 > 자동차 > 전기차 충전소",
+      "category_group_code": "",
+      "address_name": "서울 성동구 하왕십리동 1066",
+      "road_address_name": "서울 성동구 무학로 33",
+      "x": "127.02634819264848",
+      "y": "37.56916397941806",
+      "place_url": "http://place.map.kakao.com/1678276210"
+    }
+  ],
+  "meta": {
+    "total_count": 36,
+    "pageable_count": 15,
+    "is_end": true
+  }
+}

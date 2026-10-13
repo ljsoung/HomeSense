@@ -30,12 +30,14 @@ import com.jiseong.homesense.batch.errorhandler.ErrorCodeJudgment;
 import com.jiseong.homesense.batch.errorhandler.RetryFailureDetail;
 import com.jiseong.homesense.batch.errorhandler.RetryOutcome;
 import com.jiseong.homesense.batch.errorhandler.RetryQueueManager;
+import com.jiseong.homesense.batch.geocoding.ComplexGeocodingService;
 import com.jiseong.homesense.batch.loader.LoadResult;
 import com.jiseong.homesense.batch.loader.TradeIngestionPipeline;
 import com.jiseong.homesense.batch.notifier.NotificationTriggerContext;
 import com.jiseong.homesense.batch.notifier.WatchConditionEvaluator;
 import com.jiseong.homesense.batch.repository.BatchLogRepository;
 import com.jiseong.homesense.common.config.BatchSchedulerProperties;
+import com.jiseong.homesense.common.config.GeocodingProperties;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
 import com.jiseong.homesense.trade.entity.DealCategory;
@@ -81,6 +83,8 @@ class BatchExecutionOrchestrator {
     private final AuditLogger auditLogger;
     private final TradeIngestionPipeline tradeIngestionPipeline;
     private final WatchConditionEvaluator watchConditionEvaluator;
+    private final ComplexGeocodingService complexGeocodingService;
+    private final GeocodingProperties geocodingProperties;
 
     private int consecutiveAbortBatchCount = 0;
 
@@ -109,6 +113,8 @@ class BatchExecutionOrchestrator {
             // 순회가 어떤 경로로 끝나든(정상, CriticalBatchException 조기 중단, 그 밖의 예외 — 인터럽트·batch_log
             // 저장 실패 등) 그때까지 커밋된 거래는 평가한다. 이번 런에 평가하지 않으면 다음 런 시작 시각이 더 늦어
             // 그 거래들은 영영 "신규"로 잡히지 않는다(BAT-NTF-01 J1). 평가는 예외를 흡수하므로 원래 예외는 그대로 나간다.
+            // 설계서 6.3절 순서대로 적재 → 지오코딩(BAT-GEO-01) → 조건평가(BAT-NTF-01)다.
+            geocodeMissingCoordinates();
             evaluateWatchConditions(runStartedAt, runDate);
         }
         if (!completed) {
@@ -142,6 +148,25 @@ class BatchExecutionOrchestrator {
      * 세운 채 던진다) 그 상태로는 평가의 DB 접근(커넥션 획득)이 곧바로 실패한다. 평가하는 동안만 인터럽트 상태를 비우고
      * 끝나면 되돌려, 호출자는 여전히 인터럽트를 본다.
      */
+    /**
+     * BAT-GEO-01. 좌표 없는 단지만 처리한다. 단지 마스터는 재적재 때만 늘어나므로 평소엔 거의 0건이고, 남은 기존 단지가
+     * 있으면(백필이 일일 상한에서 멈춘 경우) 이어서 처리한다. 지오코딩 실패가 수집 결과나 BAT-NTF-01 평가를 막지 않게
+     * 예외를 흡수한다. 종료 신호로 인터럽트된 런이면 건너뛴다 — 좌표는 다음 런에 채워도 된다.
+     */
+    private void geocodeMissingCoordinates() {
+        if (!geocodingProperties.scheduledEnabled() || Thread.currentThread().isInterrupted()) {
+            return;
+        }
+        try {
+            complexGeocodingService.run(Integer.MAX_VALUE);
+        } catch (RuntimeException e) {
+            log.atError()
+                    .addKeyValue("programId", "BAT-GEO-01")
+                    .setCause(e)
+                    .log("BAT-GEO-01 지오코딩 실패 — 수집 결과에는 영향 없음");
+        }
+    }
+
     private void evaluateWatchConditions(LocalDateTime runStartedAt, LocalDate runDate) {
         boolean interrupted = Thread.interrupted();
         try {

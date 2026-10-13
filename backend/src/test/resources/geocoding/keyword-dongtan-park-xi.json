@@ -1,0 +1,31 @@
+{
+  "documents": [
+    {
+      "id": "1097404760",
+      "place_name": "동탄역자이아파트",
+      "category_name": "부동산 > 주거시설 > 아파트",
+      "category_group_code": "",
+      "address_name": "경기 화성시 동탄구 영천동 892",
+      "road_address_name": "경기 화성시 동탄구 동탄대로24길 117",
+      "x": "127.1131710505066",
+      "y": "37.212075353077495",
+      "place_url": "http://place.map.kakao.com/1097404760"
+    },
+    {
+      "id": "1836521714",
+      "place_name": "더다름피아노",
+      "category_name": "교육,학문 > 학원 > 음악학원 > 피아노학원",
+      "category_group_code": "AC5",
+      "address_name": "경기 화성시 동탄구 영천동 892",
+      "road_address_name": "경기 화성시 동탄구 동탄대로24길 117",
+      "x": "127.11189119379202",
+      "y": "37.211273733659205",
+      "place_url": "http://place.map.kakao.com/1836521714"
+    }
+  ],
+  "meta": {
+    "total_count": 2,
+    "pageable_count": 2,
+    "is_end": true
+  }
+}

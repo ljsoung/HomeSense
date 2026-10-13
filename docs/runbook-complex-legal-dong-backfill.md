@@ -204,6 +204,10 @@ apply가 자동으로 하므로 6단계는 WARN이 있을 때만 한다.
 재적재로 기존 단지의 **주소가 바뀐** 경우는 러너가 다시 계산하지 않는다(값이 이미 있음). 그 행의
 `legal_dong_cd`를 NULL로 되돌린 뒤 러너를 실행한다.
 
+legal_dong_cd 백필이 끝나면 **이어서 10단계(좌표 지오코딩)를 실행**한다. 순서: 단지 마스터 재적재 → legal_dong_cd
+백필 → 지오코딩 백필. 주소가 바뀐 단지는 좌표도 다시 계산하지 않으므로 `latitude`/`longitude`/`location_precision`도
+NULL로 되돌린 뒤 실행한다.
+
 ## 9. 법정동코드 재적재 (행정구역 개편 등, 비정기)
 
 재적재는 서비스 중인 앱이 아니라 **별도 프로세스**(`reload-legal-district` 프로필)에서 돈다. 서비스 중인 앱의
@@ -235,3 +239,62 @@ apply가 자동으로 하므로 6단계는 WARN이 있을 때만 한다.
 5. **버전 발행에 실패했으면 서비스 중인 앱을 모두 재시작한다.** 재시작하면 prefix 맵을 DB에서 새로 만든다.
    재적재 자체는 이미 커밋됐으므로 다시 돌릴 필요가 없다.
 6. `RegionCoverageChecker` 로그에서 커버리지 공백이 0건인지 확인한다(CLAUDE.md "법정동코드 참조자료 재적재" 절).
+
+## 10. 단지 좌표 지오코딩 (BAT-GEO-01)
+
+`complex.latitude IS NULL`인 단지만 카카오 주소 검색(REST API 키, `KAKAO_API_KEY`)으로 좌표를 채운다. 운영 DB는
+**백엔드 첫 배포 때** 이 단계로 채운다. 단지당 호출 1회라 전체 백필은 약 2.1만 회다.
+
+0. **`location_precision`을 VARCHAR(12)로 넓힌다**(키워드 보완 좌표 'APPROXIMATE'를 저장하려면 필요, 재실행 안전).
+   ```bash
+   mysql -h "$DB_HOST" -P 3307 -u "$DB_USER" -p homesense < backend/src/main/resources/schema/location_precision_varchar12.sql
+   ```
+1. 카카오 개발자 콘솔 [통계] > [쿼터]에서 일일 한도와 오늘 사용량을 확인하고, 그보다 낮게 `GEOCODING_DAILY_LIMIT`을
+   정한다(기본 10000). 이 상한은 러너와 03:00 정기 런이 Redis 카운터 `geo:calls:{yyyyMMdd}` 하나로 같이 센다.
+2. dry-run(카카오 호출 없음) — 정제 가능 건수와 지번 없는 단지 표본을 확인한다.
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding
+   ```
+3. apply — 처음에는 `--limit=20`으로 표본을 확인하고(좌표를 카카오맵 링크로 눈으로 확인), 이상이 없으면 제한 없이 실행한다.
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --limit=20
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply
+   ```
+   일일 상한에 닿으면 종료 사유 `DAILY_LIMIT`, 종료 코드 0으로 끝난다(`--limit`의 `MAX_COMPLEXES`도 0). 종료 로그의
+   "남은 대상 {n}건"으로 얼마나 남았는지 본다 — 0이 아니면 아직 끝나지 않은 것이다. 다음 날 같은 명령을 다시 실행하거나 03:00 정기 런이
+   이어서 처리한다(좌표 NULL인 단지만 고르므로 자연히 이어진다). 종료 코드 1이면 다음 중 하나다.
+   - `RATE_LIMITED`(429): 콘솔 쿼터와 `GEOCODING_DAILY_LIMIT`을 확인하고 다음 날 다시 실행한다.
+   - `CONFIGURATION_ERROR`(401·403): REST API 키와 콘솔의 카카오맵 활성화를 확인한다.
+   - `CONSECUTIVE_TRANSIENT_FAILURES`(5xx·네트워크 오류가 연달아 남): 카카오 장애가 의심된다. 장애가 풀린 뒤 같은 명령을 다시
+     실행한다(남은 단지부터 이어진다). `--recheck-approximate`도 같은 사유로 멈출 수 있다.
+   - `INTERRUPTED`: 종료 신호로 멈췄다. 같은 명령을 다시 실행한다.
+   - 예외: 로그를 확인한다.
+4. 검증
+   ```sql
+   SELECT COUNT(*), COUNT(latitude), SUM(location_precision = 'PRECISE') FROM complex;
+   ```
+   좌표가 끝내 NULL로 남는 단지는 지번이 없는 단지(약 1.0%)와 카카오가 주소를 못 찾은 단지다. 못 찾은 단지는 Redis
+   `geo:fail:{complexId}`가 남아 있는 동안(기본 30일) 다시 호출하지 않는다 — 즉시 다시 시도하려면 그 키를 지운다.
+5. 캐시 — 러너가 좌표를 쓴 단지의 `complexDetailV3` 항목을 청크마다 지운다(evictIfPresent). 별도 작업은 없다.
+6. 주소 검색이 못 찾은 단지는 같은 실행 안에서 단지명 키워드 검색으로 한 번 더 찾고, 찾으면 `location_precision='APPROXIMATE'`로
+   쓴다. 이전 실행에서 못 찾아 `geo:fail` 표시가 남은 단지를 다시 처리하려면 `--retry-failed`를 붙인다(표시를 수동으로 지우지 않는다).
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --retry-failed
+   ```
+7. 키워드 판정 규칙을 바꾼 뒤에는 이미 저장한 APPROXIMATE 좌표를 새 규칙으로 다시 판정한다. 탈락한 단지는 좌표가 NULL로
+   돌아가고 `geo:fail` 표시가 남으므로, 이어서 6단계(`--retry-failed`)를 실행한다.
+   ```bash
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --recheck-approximate
+   java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --retry-failed
+   ```
+
+### APPROXIMATE 단지 재지오코딩 — 단지 마스터를 다시 적재해 K-apt 지번이 갱신됐을 때
+
+키워드 보완 좌표(APPROXIMATE)는 K-apt가 사업 전 지번을 갖고 있어서 생긴 것이다. 재적재로 지번이 갱신되면 주소 검색으로
+다시 찾아 PRECISE로 덮어쓴다. 러너는 좌표가 NULL인 단지만 고르므로 먼저 비운다.
+
+```sql
+UPDATE complex SET latitude = NULL, longitude = NULL, location_precision = NULL WHERE location_precision = 'APPROXIMATE';
+```
+
+그다음 3단계(apply)를 다시 실행한다. 주소 검색이 여전히 못 찾으면 같은 실행 안에서 키워드로 다시 APPROXIMATE가 된다.

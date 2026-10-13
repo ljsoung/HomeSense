@@ -51,7 +51,7 @@ CREATE TABLE trade (
     match_confidence DECIMAL(4, 3),
     latitude DECIMAL(10, 7),
     longitude DECIMAL(10, 7),
-    location_precision VARCHAR(10),
+    location_precision VARCHAR(12),
     dedup_hash VARCHAR(64) NOT NULL UNIQUE,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
