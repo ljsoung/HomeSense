@@ -122,6 +122,17 @@
   };
   KMap.prototype.relayout = function () {
     this._render();
+    window.__fakeRelayoutCount = (window.__fakeRelayoutCount || 0) + 1;
+    // 실제 SDK가 relayout 뒤 idle도 내는 경우를 흉내 낸다(map01-check 12b). 지연을 앱의 조회 디바운스(300ms)보다 길게 줄 수
+    // 있어, 디바운스가 아니라 "같은 조회는 다시 보내지 않음"으로 한 번만 나가는지 확인할 수 있다.
+    const opts = window.__FAKE_KAKAO_OPTIONS || {};
+    if (opts.idleOnRelayout) {
+      setTimeout(() => {
+        this._render();
+        window.__fakeRelayoutIdleCount = (window.__fakeRelayoutIdleCount || 0) + 1;
+        event.trigger(this, 'idle');
+      }, opts.relayoutIdleDelay ?? 30);
+    }
   };
 
   function CustomOverlay(options) {

@@ -507,6 +507,33 @@ const detailOf = (id, lat, lng, extra = {}) => ({
   await context.close();
 }
 
+// 12b) 실제 SDK처럼 relayout 뒤 idle도 내는 경우(디바운스 300ms보다 늦은 700ms) — 같은 bounds·필터라 /map은 한 번만
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await page.addInitScript(() => {
+    window.__FAKE_KAKAO_OPTIONS = { idleOnRelayout: true, relayoutIdleDelay: 700 };
+  });
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  await page.waitForTimeout(1200);
+  const before = state.mapRequests.length;
+  const idlesBefore = await page.evaluate(() => window.__fakeRelayoutIdleCount || 0);
+  await page.getByRole('button', { name: '목록 접기' }).click();
+  await page.waitForTimeout(1500);
+  const relayoutIdles = (await page.evaluate(() => window.__fakeRelayoutIdleCount || 0)) - idlesBefore;
+  const added = state.mapRequests.slice(before);
+  ok(`12b: relayout 뒤 700ms에 idle이 실제로 났음(전제, ${relayoutIdles}회)`, relayoutIdles >= 1);
+  ok(`12b: 범위 알림이 두 번 와도 /map은 한 번(${added.length}건)`, added.length === 1);
+  ok('12b: 그 한 번은 넓어진 bounds', added.length === 1 && (() => {
+    const [, swLng, , neLng] = added[0].get('bounds').split(',').map(Number);
+    const [, bSwLng, , bNeLng] = state.mapRequests[before - 1].get('bounds').split(',').map(Number);
+    return neLng - swLng > (bNeLng - bSwLng) * 1.3;
+  })());
+  await context.close();
+}
+
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);
