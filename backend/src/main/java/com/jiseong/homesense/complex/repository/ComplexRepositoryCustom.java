@@ -6,10 +6,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import com.jiseong.homesense.complex.dto.BoundsCondition;
+import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
-import com.jiseong.homesense.complex.dto.MapFilterCondition;
-import com.jiseong.homesense.complex.entity.Complex;
 
 interface ComplexRepositoryCustom {
 
@@ -19,6 +18,10 @@ interface ComplexRepositoryCustom {
      */
     Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, String regionPrefix, Pageable pageable);
 
-    /** limitPlusOne건까지 조회해 상한 초과 여부(truncated)를 호출부가 판단할 수 있게 한다. */
-    List<Complex> searchInBounds(BoundsCondition bounds, MapFilterCondition filter, int limitPlusOne);
+    /**
+     * 좌표 범위 안에서 condition을 만족하는 거래가 있는 단지를 complex_id 순으로 limitPlusOne건까지 돌려준다 — 한 건 더
+     * 받아 호출부가 상한 초과 여부(truncated)를 판단한다. condition의 regionCode·keyword·sort는 쓰지 않는다.
+     */
+    List<ComplexMapPointResponse> searchInBounds(BoundsCondition bounds, ComplexSearchCondition condition,
+            int limitPlusOne);
 }

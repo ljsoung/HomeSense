@@ -37,6 +37,7 @@ import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.common.security.UserPrincipal;
 import com.jiseong.homesense.common.security.UserStatusResolver;
+import com.jiseong.homesense.complex.dto.BoundsCondition;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
@@ -292,29 +293,90 @@ class ComplexControllerTest {
     }
 
     @Test
-    void 지도_범위_조회에_성공하면_200과_포인트_목록을_반환한다() throws Exception {
+    void 지도_범위_조회에_성공하면_200과_items_truncated_limit을_반환한다() throws Exception {
         ComplexMapSearchResponse response = new ComplexMapSearchResponse(
-                List.of(new ComplexMapPointResponse(1L, "테스트단지", new java.math.BigDecimal("37.5"),
-                        new java.math.BigDecimal("127.0"), "PRECISE")),
-                false);
+                List.of(new ComplexMapPointResponse(1L, "테스트단지", "서울특별시", "강남구", "역삼동", 500, (short) 5,
+                        LocalDate.of(2010, 1, 1), HousingType.APT, DealCategory.RENT, LocalDate.of(2026, 9, 1),
+                        5000L, new java.math.BigDecimal("84.90"), MatchMethod.SIMILAR, (short) 7, RentType.WOLSE, 120L,
+                        new java.math.BigDecimal("37.5000000"), new java.math.BigDecimal("127.0300000"), "APPROXIMATE")),
+                true, 500);
         when(complexService.searchInBounds(any(), any())).thenReturn(response);
 
         mockMvc.perform(get("/api/complexes/map").param("bounds", "37.0,127.0,37.1,127.1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.truncated").value(false))
-                .andExpect(jsonPath("$.data.points[0].complexId").value(1));
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.truncated").value(true))
+                .andExpect(jsonPath("$.data.limit").value(500))
+                .andExpect(jsonPath("$.data.items[0].complexId").value(1))
+                .andExpect(jsonPath("$.data.items[0].dongRi").value("역삼동"))
+                .andExpect(jsonPath("$.data.items[0].latitude").value(37.5))
+                .andExpect(jsonPath("$.data.items[0].longitude").value(127.03))
+                .andExpect(jsonPath("$.data.items[0].locationPrecision").value("APPROXIMATE"))
+                .andExpect(jsonPath("$.data.items[0].matchMethod").value("SIMILAR"))
+                .andExpect(jsonPath("$.data.items[0].representativeAmount").value(5000))
+                .andExpect(jsonPath("$.data.items[0].monthlyRentAmount").value(120))
+                .andExpect(jsonPath("$.data.items[0].rentType").value("WOLSE"))
+                .andExpect(jsonPath("$.data.items[0].representativeArea").value(84.9))
+                .andExpect(jsonPath("$.data.items[0].floor").value(7))
+                .andExpect(jsonPath("$.data.items[0].representativeDealDate").value("2026-09-01"))
+                .andExpect(jsonPath("$.data.pageMeta").doesNotExist());
     }
 
     @Test
-    void bounds_형식이_잘못되면_400을_반환한다() throws Exception {
-        mockMvc.perform(get("/api/complexes/map").param("bounds", "not-valid"))
+    void 지도_범위_조회는_SRCH01과_같은_이름의_필터를_검색_조건으로_넘긴다() throws Exception {
+        when(complexService.searchInBounds(any(), any())).thenReturn(new ComplexMapSearchResponse(List.of(), false, 500));
+
+        mockMvc.perform(get("/api/complexes/map").param("bounds", " 37.0, 126.9 ,37.1,127.1")
+                        .param("housingTypes", "APT").param("housingTypes", "VILLA")
+                        .param("rentType", "JEONSE")
+                        .param("areaMin", "59.5").param("areaMax", "85")
+                        .param("amountMin", "10000").param("amountMax", "50000")
+                        .param("buildYearMin", "2000").param("buildYearMax", "2020")
+                        .param("regionCode", "1168000000").param("keyword", "무시됨"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<BoundsCondition> bounds = ArgumentCaptor.forClass(BoundsCondition.class);
+        ArgumentCaptor<ComplexSearchCondition> condition = ArgumentCaptor.forClass(ComplexSearchCondition.class);
+        verify(complexService).searchInBounds(bounds.capture(), condition.capture());
+        assertThat(bounds.getValue().toString()).isEqualTo("37.0,126.9,37.1,127.1");
+        ComplexSearchCondition c = condition.getValue();
+        assertThat(c.housingTypes()).containsExactly(HousingType.APT, HousingType.VILLA);
+        assertThat(c.rentType()).isEqualTo(RentType.JEONSE);
+        assertThat(c.isRent()).isTrue();
+        assertThat(c.areaMin()).isEqualByComparingTo("59.5");
+        assertThat(c.areaMax()).isEqualByComparingTo("85");
+        assertThat(c.amountMin()).isEqualTo(10000L);
+        assertThat(c.amountMax()).isEqualTo(50000L);
+        assertThat(c.buildYearMin()).isEqualTo((short) 2000);
+        assertThat(c.buildYearMax()).isEqualTo((short) 2020);
+        // 지역은 bounds가 정한다 — regionCode·keyword는 조건에 실리지 않는다.
+        assertThat(c.regionCode()).isNull();
+        assertThat(c.keyword()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "not-valid", "37.0,127.0,37.1", "37.0,127.0,37.1,127.1,", "37.0,127.0,37.1,abc", "37.0,,37.1,127.1",
+            "90.1,127.0,91,127.1", "-91,127.0,37.1,127.1", "37.0,-180.5,37.1,127.1", "37.0,127.0,37.1,181",
+            "37.2,127.0,37.1,127.1", "37.0,127.2,37.1,127.1", "NaN,127.0,37.1,127.1", "1e400,127.0,37.1,127.1", " "})
+    void bounds_형식_오류_범위_밖_남서가_북동보다_크면_400_INVALID_BOUNDS를_반환한다(String bounds) throws Exception {
+        mockMvc.perform(get("/api/complexes/map").param("bounds", bounds))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("INVALID_BOUNDS"));
+        verify(complexService, never()).searchInBounds(any(), any());
     }
 
     @Test
     void bounds_파라미터가_없으면_400을_반환한다() throws Exception {
         mockMvc.perform(get("/api/complexes/map"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void bounds가_남서와_북동이_같은_점이어도_허용한다() throws Exception {
+        when(complexService.searchInBounds(any(), any())).thenReturn(new ComplexMapSearchResponse(List.of(), false, 500));
+
+        mockMvc.perform(get("/api/complexes/map").param("bounds", "37.5,127.0,37.5,127.0"))
+                .andExpect(status().isOk());
     }
 }

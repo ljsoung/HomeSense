@@ -22,9 +22,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jiseong.homesense.complex.dto.BoundsCondition;
+import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
-import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.dto.SortCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.trade.entity.DealCategory;
@@ -350,7 +350,7 @@ class ComplexRepositoryMariaDbIT {
     }
 
     @Test
-    void 지도_범위_조회는_bounds_안에_있고_housingType_필터를_만족하는_단지만_반환한다() {
+    void 지도_범위_조회는_bounds_안에_있는_단지만_반환한다() {
         Complex insideBounds = complexRepository.saveAndFlush(
                 Complex.builder().sourceComplexCd("SRC-IN").complexName("범위안")
                         .complexType("아파트").latitude(new BigDecimal("37.50")).longitude(new BigDecimal("127.05"))
@@ -367,10 +367,11 @@ class ComplexRepositoryMariaDbIT {
         BoundsCondition bounds = new BoundsCondition(
                 new BigDecimal("37.0"), new BigDecimal("126.5"), new BigDecimal("38.0"), new BigDecimal("127.5"));
 
-        List<Complex> results = complexRepository.searchInBounds(bounds, new MapFilterCondition(null), 501);
+        List<ComplexMapPointResponse> results =
+                complexRepository.searchInBounds(bounds, ComplexSearchCondition.builder().build(), 501);
 
-        assertThat(results).extracting(Complex::getComplexId).contains(insideBounds.getComplexId());
-        assertThat(results).extracting(Complex::getComplexId).doesNotContain(outsideBounds.getComplexId());
+        assertThat(results).extracting(ComplexMapPointResponse::complexId).contains(insideBounds.getComplexId());
+        assertThat(results).extracting(ComplexMapPointResponse::complexId).doesNotContain(outsideBounds.getComplexId());
     }
 
     @Test

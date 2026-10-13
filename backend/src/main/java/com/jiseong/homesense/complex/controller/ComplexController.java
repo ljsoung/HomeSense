@@ -80,6 +80,10 @@ public class ComplexController {
         return ApiResponse.success(complexService.getDetail(id, userId, sessionId));
     }
 
+    /**
+     * MAP-01. bounds=swLat,swLng,neLat,neLng(필수) + SRCH-01과 같은 이름의 필터. 페이지네이션 없이 상한까지 complex_id
+     * 순으로 준다. 비로그인 허용(SecurityConfig의 anyRequest().permitAll()).
+     */
     @GetMapping("/map")
     public ApiResponse<ComplexMapSearchResponse> map(@RequestParam String bounds, @ModelAttribute MapFilterRequest filter) {
         return ApiResponse.success(complexService.searchInBounds(BoundsCondition.parse(bounds), filter.toCondition()));

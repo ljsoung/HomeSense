@@ -16,13 +16,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.jiseong.homesense.common.cache.CacheNames;
+import com.jiseong.homesense.common.config.ComplexMapProperties;
 import com.jiseong.homesense.complex.dto.BoundsCondition;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
 import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
-import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.recentview.dto.RecentViewTarget;
@@ -56,14 +56,12 @@ public class ComplexService {
     /** getPopular() "인기" 정의 — 최근 이 기간 내 거래량 기준(지성 확인). */
     private static final int POPULARITY_WINDOW_MONTHS = 3;
 
-    /** searchInBounds() 결과 상한 — 이를 넘으면 상한까지만 반환하고 truncated=true. */
-    private static final int MAX_MAP_RESULTS = 500;
-
     private final ComplexRepository complexRepository;
     private final TradeRepository tradeRepository;
     private final ComplexDetailCache complexDetailCache;
     private final RecentViewService recentViewService;
     private final RegionCodePrefixResolver regionCodePrefixResolver;
+    private final ComplexMapProperties complexMapProperties;
 
     /**
      * 부수효과 없는 순수 조회다 — 인기검색어 기록은 여기서 하지 않고 프론트가 "검색 실행" 순간에
@@ -124,16 +122,20 @@ public class ComplexService {
         return detail;
     }
 
-    public ComplexMapSearchResponse searchInBounds(BoundsCondition bounds, MapFilterCondition filter) {
-        List<Complex> results = complexRepository.searchInBounds(bounds, filter, MAX_MAP_RESULTS + 1);
+    /**
+     * MAP-01 지도 범위 조회. 상한(homesense.complex.map.max-results, 기본 500)보다 한 건 더 받아 넘으면 상한까지만
+     * 돌려주고 truncated=true로 알린다.
+     *
+     * <p>캐시를 걸지 않는다 — 키가 bounds(지도를 움직일 때마다 바뀌는 실수 좌표 4개)와 필터 조합이라 사실상 같은 키가
+     * 다시 오지 않아 적중률이 없고, Redis에 1회용 엔트리만 쌓인다. 거래 적재 뒤 무효화할 범위도 정할 수 없다.
+     */
+    public ComplexMapSearchResponse searchInBounds(BoundsCondition bounds, ComplexSearchCondition condition) {
+        int limit = complexMapProperties.maxResults();
+        List<ComplexMapPointResponse> results = complexRepository.searchInBounds(bounds, condition, limit + 1);
 
-        boolean truncated = results.size() > MAX_MAP_RESULTS;
-        List<ComplexMapPointResponse> points = results.stream()
-                .limit(MAX_MAP_RESULTS)
-                .map(ComplexMapPointResponse::from)
-                .toList();
-
-        return new ComplexMapSearchResponse(points, truncated);
+        boolean truncated = results.size() > limit;
+        List<ComplexMapPointResponse> items = truncated ? results.subList(0, limit) : results;
+        return new ComplexMapSearchResponse(List.copyOf(items), truncated, limit);
     }
 
     /**
