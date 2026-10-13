@@ -17,7 +17,7 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * complexDetailV3::{complexId} 캐시(TTL 24h)만 떼어낸 별도 빈이다. ComplexService.getDetail()이 매
+ * complexDetailV4::{complexId} 캐시(TTL 24h)만 떼어낸 별도 빈이다. ComplexService.getDetail()이 매
  * 호출마다 SVC-RCV-01.record()를 실행해야 하는데(설계서 3.6절), 그 메서드 자체에
  * {@code @Cacheable}을 걸어두면 record() 호출까지 캐시 히트마다 스킵된다. 그렇다고 같은 클래스
  * 안에 캐시 전용 메서드를 따로 둬도 self-invocation(자기 자신 호출은 프록시를 거치지 않는 Spring
@@ -25,7 +25,7 @@ import lombok.RequiredArgsConstructor;
  * 외부 빈 호출로 이 메서드를 부르게 한다(CLAUDE.md SVC-RCV-01 절 참고).
  *
  * <p>캐시 이름은 DTO 필드가 바뀔 때마다 올린다. V2는 housingType 추가(SVC-RCV-01), V3는 matchMethod 추가(DTL-01
- * 정밀/근사 배지)다. Redis가 배포 사이에도 살아남는 환경에서 옛 이름으로 저장된 엔트리를 그대로 읽으면, 새로
+ * 정밀/근사 배지), V4는 precisionBadge 추가(matchMethod와 locationPrecision을 합친 배지, 2026-10-13)다. Redis가 배포 사이에도 살아남는 환경에서 옛 이름으로 저장된 엔트리를 그대로 읽으면, 새로
  * 추가된 필드가 역직렬화 시 조용히 null로 채워진다(Jackson record 역직렬화는 누락 필드를 예외 없이 null로
  * 채운다) — V2 때는 RecentViewService.record()가 housingType null을 보고 기록을 스킵했고(Codex 코드리뷰 지적),
  * V3에서는 모든 단지가 배지 없이 보였을 것이다. 이름을 바꿔 옛 엔트리를 애초에 다시 읽지 않게 한다. 옛 이름의
@@ -34,7 +34,8 @@ import lombok.RequiredArgsConstructor;
  * <p>matchMethod는 대표 거래에서 온다 — 거래가 새로 적재되거나(BAT-LOD-01) 재매칭으로 다른 단지로 옮겨지거나 매칭
  * 방식이 바뀌면(TradeRematchRunner) 대표 거래가 바뀔 수 있는데, 두 경로 모두 커밋 뒤 TradeCacheEvictionEvent로 이
  * 캐시 항목을 evict한다. 그래서 캐시에 함께 담아도 오래된 배지가 남지 않는다. trade의 complex_id·match_method를
- * 바꾸는 경로를 새로 만들면 그 경로도 이 이벤트를 발행해야 한다.
+ * 바꾸는 경로를 새로 만들면 그 경로도 이 이벤트를 발행해야 한다. precisionBadge는 locationPrecision에도
+ * 달려 있는데, 좌표를 쓰는 BAT-GEO-01이 그 단지의 항목을 직접 지운다.
  */
 @Component
 @RequiredArgsConstructor

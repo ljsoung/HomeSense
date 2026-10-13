@@ -17,6 +17,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -27,6 +29,7 @@ import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.jiseong.homesense.common.cache.CacheNames;
 import com.jiseong.homesense.complex.dto.BoundsCondition;
 import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
@@ -88,6 +91,8 @@ class ComplexMapSearchMariaDbIT {
     private TradeRepository tradeRepository;
     @Autowired
     private MockMvc mockMvc;
+    @Autowired
+    private CacheManager cacheManager;
 
     private int hashSeq;
 
@@ -264,6 +269,46 @@ class ComplexMapSearchMariaDbIT {
 
         assertThat(response.items()).hasSize(LIMIT);
         assertThat(response.truncated()).isFalse();
+    }
+
+    @Test
+    void 정확_매칭이어도_좌표가_근사면_검색_지도_상세_세_API가_모두_근사_배지를_준다() throws Exception {
+        Complex approx = complex("PBAPX", "37.50", "127.00", "APPROXIMATE");
+        sale(approx, LocalDate.of(2026, 9, 1), 50000L, MatchMethod.EXACT, (short) 3, false);
+        Complex precise = complex("PBPRE", "37.51", "127.01", "PRECISE");
+        sale(precise, LocalDate.of(2026, 9, 1), 50000L, MatchMethod.EXACT, (short) 3, false);
+        // 상세는 Redis 캐시(complexDetailV4)를 거친다 — 개발 Redis에 같은 id의 옛 항목이 있으면 그 값이 나오므로 지운다.
+        Cache detailCache = cacheManager.getCache(CacheNames.COMPLEX_DETAIL);
+        detailCache.evictIfPresent(approx.getComplexId());
+        detailCache.evictIfPresent(precise.getComplexId());
+        try {
+            String approxPath = "$.data[?(@.complexId == " + approx.getComplexId() + ")]";
+            String precisePath = "$.data[?(@.complexId == " + precise.getComplexId() + ")]";
+            mockMvc.perform(get("/api/complexes/search").param("keyword", "단지PB"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath(approxPath + ".matchMethod").value("EXACT"))
+                    .andExpect(jsonPath(approxPath + ".precisionBadge").value("APPROXIMATE"))
+                    .andExpect(jsonPath(precisePath + ".precisionBadge").value("PRECISE"));
+
+            mockMvc.perform(get("/api/complexes/map").param("bounds", "37.4,126.9,37.6,127.1"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.items[?(@.complexId == " + approx.getComplexId() + ")].precisionBadge")
+                            .value("APPROXIMATE"))
+                    .andExpect(jsonPath("$.data.items[?(@.complexId == " + precise.getComplexId() + ")].precisionBadge")
+                            .value("PRECISE"));
+
+            mockMvc.perform(get("/api/complexes/" + approx.getComplexId()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.matchMethod").value("EXACT"))
+                    .andExpect(jsonPath("$.data.locationPrecision").value("APPROXIMATE"))
+                    .andExpect(jsonPath("$.data.precisionBadge").value("APPROXIMATE"));
+            mockMvc.perform(get("/api/complexes/" + precise.getComplexId()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.precisionBadge").value("PRECISE"));
+        } finally {
+            detailCache.evictIfPresent(approx.getComplexId());
+            detailCache.evictIfPresent(precise.getComplexId());
+        }
     }
 
     @Test

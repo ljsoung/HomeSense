@@ -184,7 +184,7 @@ class ComplexServiceTest {
                 (short) 0, (short) 0, (short) 0, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null);
         return new ComplexDetailResponse(complexId, "테스트단지" + complexId, "아파트", housingType,
-                null, null, null, null, null, null, null, null, false, null, basicInfo, extendedInfo);
+                null, null, null, null, null, null, null, null, false, null, null, basicInfo, extendedInfo);
     }
 
     @Test
@@ -268,7 +268,7 @@ class ComplexServiceTest {
     private static ComplexMapPointResponse point(long id) {
         return new ComplexMapPointResponse(id, "테스트단지" + id, null, null, null, null, null, null,
                 HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 1, 1), 50000L, new BigDecimal("84.90"),
-                null, null, null, null, new BigDecimal("37.5"), new BigDecimal("127.0"), "PRECISE");
+                null, null, null, null, new BigDecimal("37.5"), new BigDecimal("127.0"), "PRECISE", null);
     }
 
     private static final BoundsCondition BOUNDS = new BoundsCondition(

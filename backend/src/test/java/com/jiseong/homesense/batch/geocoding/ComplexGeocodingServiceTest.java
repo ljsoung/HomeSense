@@ -63,6 +63,8 @@ class ComplexGeocodingServiceTest {
     @Mock
     private Cache detailCache;
     @Mock
+    private Cache popularCache;
+    @Mock
     private AuditLogger auditLogger;
 
     private final AtomicLong todayCalls = new AtomicLong();
@@ -75,6 +77,7 @@ class ComplexGeocodingServiceTest {
         lenient().when(transactionTemplate.execute(any())).thenAnswer(
                 invocation -> ((TransactionCallback<?>) invocation.getArgument(0)).doInTransaction(null));
         lenient().when(cacheManager.getCache(CacheNames.COMPLEX_DETAIL)).thenReturn(detailCache);
+        lenient().when(cacheManager.getCache(CacheNames.POPULAR_COMPLEXES)).thenReturn(popularCache);
         lenient().when(complexRepository.fillCoordinatesIfNull(anyLong(), any(), any(), anyString(), any()))
                 .thenReturn(1);
         lenient().when(client.searchKeyword(anyString(), anyInt())).thenReturn(lastPage());
@@ -120,6 +123,8 @@ class ComplexGeocodingServiceTest {
         verify(complexRepository).fillCoordinatesIfNull(1L, SEOUL.latitude(), SEOUL.longitude(), "PRECISE",
                 LocalDateTime.now(CLOCK));
         verify(detailCache).evictIfPresent(1L);
+        // 인기 단지 응답의 precisionBadge가 locationPrecision에 달려 있다.
+        verify(popularCache).invalidate();
         assertThat(result).isEqualTo(
                 new ComplexGeocodingService.RunResult(1, 0, 0, 1, 0, 1, 0, 0, 1, 0, StopReason.COMPLETED));
     }
@@ -329,6 +334,8 @@ class ComplexGeocodingServiceTest {
 
         assertThat(result.written()).isEqualTo(1);
         assertThat(result.stopReason()).isEqualTo(StopReason.COMPLETED);
+        // 상세 캐시 삭제가 실패해도 인기 단지 캐시는 따로 지운다.
+        verify(popularCache).invalidate();
     }
 
     @Test

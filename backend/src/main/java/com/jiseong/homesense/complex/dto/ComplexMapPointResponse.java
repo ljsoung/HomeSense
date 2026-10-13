@@ -20,7 +20,8 @@ import com.jiseong.homesense.trade.entity.Trade;
  * DTL-01 상세 배지의 대표 거래(TradeRepository.findRecentTradesByComplexIds)와도 같다.
  *
  * <p>locationPrecision은 complex 컬럼 그대로다 — 주소 검색으로 찾은 좌표는 PRECISE, 키워드 장소 검색으로 찾은 좌표는
- * APPROXIMATE(BAT-GEO-01). 클러스터링은 카카오맵 JS SDK가 프론트에서 하므로 원시 좌표만 준다.
+ * APPROXIMATE(BAT-GEO-01). 핀 색·범례는 locationPrecision이 아니라 precisionBadge를 쓴다 — 카드·상세 배지와 같은 값이다
+ * ({@link PrecisionBadge}). 클러스터링은 카카오맵 JS SDK가 프론트에서 하므로 원시 좌표만 준다.
  */
 public record ComplexMapPointResponse(
         Long complexId,
@@ -42,7 +43,8 @@ public record ComplexMapPointResponse(
         Long monthlyRentAmount,
         BigDecimal latitude,
         BigDecimal longitude,
-        String locationPrecision) {
+        String locationPrecision,
+        PrecisionBadge precisionBadge) {
 
     public static ComplexMapPointResponse of(Complex complex, Trade representativeTrade) {
         ComplexSummaryResponse s = ComplexSummaryResponse.of(complex, representativeTrade);
@@ -52,6 +54,6 @@ public record ComplexMapPointResponse(
                 s.representativeHousingType(), s.representativeDealCategory(), s.representativeDealDate(),
                 s.representativeAmount(), s.representativeArea(), s.matchMethod(), s.floor(),
                 s.rentType(), s.monthlyRentAmount(),
-                complex.getLatitude(), complex.getLongitude(), complex.getLocationPrecision());
+                complex.getLatitude(), complex.getLongitude(), complex.getLocationPrecision(), s.precisionBadge());
     }
 }

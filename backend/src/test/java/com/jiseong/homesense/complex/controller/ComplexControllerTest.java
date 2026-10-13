@@ -43,6 +43,7 @@ import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
 import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
+import com.jiseong.homesense.complex.dto.PrecisionBadge;
 import com.jiseong.homesense.complex.service.ComplexService;
 import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
@@ -84,7 +85,7 @@ class ComplexControllerTest {
         return new ComplexSummaryResponse(id, "테스트단지", "서울특별시", "강남구", "역삼동", 500, (short) 5,
                 LocalDate.of(2010, 1, 1), HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 1, 10), 120000L,
                 new java.math.BigDecimal("84.99"), com.jiseong.homesense.trade.entity.MatchMethod.EXACT, (short) 12,
-                null, null);
+                null, null, PrecisionBadge.PRECISE);
     }
 
     @Test
@@ -98,6 +99,7 @@ class ComplexControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data[0].complexId").value(1))
                 .andExpect(jsonPath("$.data[0].matchMethod").value("EXACT"))
+                .andExpect(jsonPath("$.data[0].precisionBadge").value("PRECISE"))
                 .andExpect(jsonPath("$.data[0].floor").value(12))
                 .andExpect(jsonPath("$.pageMeta.totalElements").value(1));
     }
@@ -237,7 +239,7 @@ class ComplexControllerTest {
                 "커뮤니티", "편의시설", (short) 20, (short) 2, "서울시 강남구", "02-1234-5678");
         ComplexDetailResponse response = new ComplexDetailResponse(1L, "테스트단지", "아파트", HousingType.APT,
                 "서울특별시", "강남구", "역삼동", "1168010100", "서울특별시 강남구 역삼동 123", new java.math.BigDecimal("37.5"),
-                new java.math.BigDecimal("127.0"), "PRECISE", false, MatchMethod.EXACT, basicInfo, extendedInfo);
+                new java.math.BigDecimal("127.0"), "PRECISE", false, MatchMethod.EXACT, PrecisionBadge.PRECISE, basicInfo, extendedInfo);
         when(complexService.getDetail(eq(1L), any(), any())).thenReturn(response);
 
         mockMvc.perform(get("/api/complexes/1"))
@@ -245,6 +247,7 @@ class ComplexControllerTest {
                 .andExpect(jsonPath("$.data.complexId").value(1))
                 .andExpect(jsonPath("$.data.matchPending").value(false))
                 .andExpect(jsonPath("$.data.matchMethod").value("EXACT"))
+                .andExpect(jsonPath("$.data.precisionBadge").value("PRECISE"))
                 .andExpect(jsonPath("$.data.legalDongCd").value("1168010100"))
                 .andExpect(jsonPath("$.data.basicInfo.householdCount").value(500))
                 .andExpect(jsonPath("$.data.extendedInfo.managementType").value("위탁관리"));
@@ -280,7 +283,7 @@ class ComplexControllerTest {
                 "커뮤니티", "편의시설", (short) 20, (short) 2, "서울시 강남구", "02-1234-5678");
         return new ComplexDetailResponse(1L, "테스트단지", "아파트", HousingType.APT,
                 "서울특별시", "강남구", "역삼동", "1168010100", "서울특별시 강남구 역삼동 123", new java.math.BigDecimal("37.5"),
-                new java.math.BigDecimal("127.0"), "PRECISE", false, MatchMethod.EXACT, basicInfo, extendedInfo);
+                new java.math.BigDecimal("127.0"), "PRECISE", false, MatchMethod.EXACT, PrecisionBadge.PRECISE, basicInfo, extendedInfo);
     }
 
     @Test
@@ -298,7 +301,8 @@ class ComplexControllerTest {
                 List.of(new ComplexMapPointResponse(1L, "테스트단지", "서울특별시", "강남구", "역삼동", 500, (short) 5,
                         LocalDate.of(2010, 1, 1), HousingType.APT, DealCategory.RENT, LocalDate.of(2026, 9, 1),
                         5000L, new java.math.BigDecimal("84.90"), MatchMethod.SIMILAR, (short) 7, RentType.WOLSE, 120L,
-                        new java.math.BigDecimal("37.5000000"), new java.math.BigDecimal("127.0300000"), "APPROXIMATE")),
+                        new java.math.BigDecimal("37.5000000"), new java.math.BigDecimal("127.0300000"), "APPROXIMATE",
+                        PrecisionBadge.APPROXIMATE)),
                 true, 500);
         when(complexService.searchInBounds(any(), any())).thenReturn(response);
 
@@ -313,6 +317,7 @@ class ComplexControllerTest {
                 .andExpect(jsonPath("$.data.items[0].longitude").value(127.03))
                 .andExpect(jsonPath("$.data.items[0].locationPrecision").value("APPROXIMATE"))
                 .andExpect(jsonPath("$.data.items[0].matchMethod").value("SIMILAR"))
+                .andExpect(jsonPath("$.data.items[0].precisionBadge").value("APPROXIMATE"))
                 .andExpect(jsonPath("$.data.items[0].representativeAmount").value(5000))
                 .andExpect(jsonPath("$.data.items[0].monthlyRentAmount").value(120))
                 .andExpect(jsonPath("$.data.items[0].rentType").value("WOLSE"))

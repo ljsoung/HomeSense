@@ -27,6 +27,10 @@ import com.jiseong.homesense.trade.entity.Trade;
  * 0 또는 NULL), 월세면 rentType=WOLSE와 월세금액이다. 검색에 거래유형 필터를 걸면 대표 거래가 그 유형의
  * 최신 거래라 카드도 그 유형을 표시한다. 이 DTO는 popularComplexes 캐시에 담기므로 필드를 추가하면서
  * 캐시 이름을 V3로 올렸다(CLAUDE.md "캐싱" 절 원칙).
+ *
+ * <p>precisionBadge(2026-10-13, V4)는 정밀/근사 배지다 — 대표 거래의 matchMethod와 단지의 locationPrecision으로
+ * {@link PrecisionBadge#of}가 계산한다. matchMethod·floor처럼 따로 조합하지 말고 이 값을 쓴다. locationPrecision에
+ * 달려 있으므로 좌표를 바꾸는 경로(BAT-GEO-01)도 인기 단지 캐시를 비운다.
  */
 public record ComplexSummaryResponse(
         Long complexId,
@@ -45,7 +49,8 @@ public record ComplexSummaryResponse(
         MatchMethod matchMethod,
         Short floor,
         RentType rentType,
-        Long monthlyRentAmount) {
+        Long monthlyRentAmount,
+        PrecisionBadge precisionBadge) {
 
     public static ComplexSummaryResponse of(Complex complex, Trade representativeTrade) {
         Long amount = representativeTrade.getDealCategory() == DealCategory.SALE
@@ -69,6 +74,7 @@ public record ComplexSummaryResponse(
                 representativeTrade.getMatchMethod(),
                 representativeTrade.getFloor(),
                 representativeTrade.getRentType(),
-                representativeTrade.getMonthlyRentAmount());
+                representativeTrade.getMonthlyRentAmount(),
+                PrecisionBadge.of(representativeTrade.getMatchMethod(), complex.getLocationPrecision()));
     }
 }

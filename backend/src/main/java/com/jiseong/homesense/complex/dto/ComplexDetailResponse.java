@@ -16,16 +16,16 @@ import com.jiseong.homesense.trade.entity.MatchMethod;
  * 기본정보 카드 대신 안내 문구로 대체한다(UI정의서 7.3절).
  *
  * <p>housingType은 {@link Complex#inferHousingType()}로 environment complex_type 텍스트에서 환산한
- * 값이다 — SVC-CPX-01 캐시(complexDetailV3::{complexId})가 감싸는 이 응답 안에서만 값을 얻을 수 있어,
+ * 값이다 — SVC-CPX-01 캐시(complexDetailV4::{complexId})가 감싸는 이 응답 안에서만 값을 얻을 수 있어,
  * ComplexController가 SVC-RCV-01.record()를 호출할 때 별도 조회 없이 이 필드를 그대로 쓴다
  * (getDetail()이 @Cacheable이라 서비스 내부에서 record()를 부르면 캐시 히트 시 기록이 스킵되므로
  * Controller에서 두 서비스를 나란히 호출한다, CLAUDE.md SVC-RCV-01 절 참고).
  *
- * <p>Redis 캐시(complexDetailV3::{complexId})에 직렬화되므로 record라도 {@link Serializable}을
+ * <p>Redis 캐시(complexDetailV4::{complexId})에 직렬화되므로 record라도 {@link Serializable}을
  * 구현할 필요는 없다 — CacheConfig가 GenericJacksonJsonRedisSerializer(JSON)를 쓰지 Java 직렬화를
- * 쓰지 않는다. 캐시 이름이 {@code complexDetail}이 아니라 {@code complexDetailV3}인 이유는
+ * 쓰지 않는다. 캐시 이름이 {@code complexDetail}이 아니라 {@code complexDetailV4}인 이유는
  * {@link com.jiseong.homesense.complex.service.ComplexDetailCache}의 클래스 주석 참고 — 이 레코드에
- * housingType(V2, Codex 코드리뷰 지적)과 matchMethod(V3) 필드를 추가하며 캐시 이름을 버전업했다.
+ * housingType(V2, Codex 코드리뷰 지적), matchMethod(V3), precisionBadge(V4) 필드를 추가하며 캐시 이름을 버전업했다.
  */
 public record ComplexDetailResponse(
         Long complexId,
@@ -42,6 +42,7 @@ public record ComplexDetailResponse(
         String locationPrecision,
         boolean matchPending,
         MatchMethod matchMethod,
+        PrecisionBadge precisionBadge,
         BasicInfo basicInfo,
         ExtendedInfo extendedInfo) {
 
@@ -117,6 +118,7 @@ public record ComplexDetailResponse(
         return new ComplexDetailResponse(
                 c.getComplexId(), c.getComplexName(), c.getComplexType(), c.inferHousingType(), c.getSido(),
                 c.getSigungu(), c.getDongRi(), legalDongCd, c.getLegalDongAddress(), c.getLatitude(), c.getLongitude(),
-                c.getLocationPrecision(), matchPending, matchMethod, basicInfo, extendedInfo);
+                c.getLocationPrecision(), matchPending, matchMethod, PrecisionBadge.of(matchMethod, c.getLocationPrecision()),
+                basicInfo, extendedInfo);
     }
 }

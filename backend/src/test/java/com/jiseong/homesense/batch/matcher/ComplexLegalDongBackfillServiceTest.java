@@ -33,7 +33,7 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
 
 /**
  * 해석 규칙은 {@link ComplexLegalDongResolverTest}가 검증한다 — 이 클래스는 apply가 끝난 뒤 캐시를 비우는지만 본다.
- * complexDetailV3는 legalDongCd와 matchPending(legal_dong_cd로 계산)을 담아, 백필 후 비우지 않으면 TTL(24h)
+ * complexDetailV4는 legalDongCd와 matchPending(legal_dong_cd로 계산)을 담아, 백필 후 비우지 않으면 TTL(24h)
  * 동안 옛 값이 나간다.
  */
 @ExtendWith(MockitoExtension.class)

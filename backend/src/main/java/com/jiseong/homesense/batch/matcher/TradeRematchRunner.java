@@ -39,8 +39,8 @@ import lombok.extern.slf4j.Slf4j;
  * 커밋으로 쪼개 이 문제를 해결했다.
  *
  * <p><b>배치가 커밋될 때마다 {@link TradeCacheEvictionEvent}를 발행한다.</b> 재매칭은 거래를 다른 단지로 옮기거나
- * 매칭 방식을 바꿔 단지의 대표 거래를 바꿀 수 있는데, 단지 상세(complexDetailV3)는 대표 거래의 matchMethod를,
- * 인기 단지(popularComplexesV3)는 대표 거래 금액·배지를 함께 캐시한다. 이벤트 없이 끝나면 TTL(24h) 동안 옛 배지가
+ * 매칭 방식을 바꿔 단지의 대표 거래를 바꿀 수 있는데, 단지 상세(complexDetailV4)는 대표 거래의 matchMethod를,
+ * 인기 단지(popularComplexesV4)는 대표 거래 금액·배지를 함께 캐시한다. 이벤트 없이 끝나면 TTL(24h) 동안 옛 배지가
  * 남는다(Codex 코드리뷰 P2). 적재(BAT-LOD-01)와 같은 이벤트라 {@code CacheEvictionListener}가 그대로 처리한다.
  * 전체 실행이 끝난 뒤 한 번이 아니라 배치마다 발행하는 이유: 배치마다 커밋되므로, 중간에 실패해도 이미 커밋된
  * 배치의 캐시는 비워져 있어야 한다. 이 클래스는 트랜잭션이 없어 리스너는 발행 즉시 실행된다(fallbackExecution).

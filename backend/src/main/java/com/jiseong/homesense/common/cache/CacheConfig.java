@@ -30,14 +30,14 @@ import tools.jackson.databind.type.TypeFactory;
 /**
  * COM-CACHE-01. {@code @Cacheable}/{@code @CacheEvict}만으로 서비스 계층이 캐시를 적용할 수 있도록
  * RedisCacheManager를 구성한다(FR-7.3). 캐시 키는 RedisCache의 기본 규칙(cacheName + "::" + 생성된 키)을
- * 그대로 따르므로 CLAUDE.md가 정의한 "도메인::파라미터" 형식(complexDetailV3::{complexId} 등)이 별도
+ * 그대로 따르므로 CLAUDE.md가 정의한 "도메인::파라미터" 형식(complexDetailV4::{complexId} 등)이 별도
  * 커스터마이징 없이 성립한다.
  *
  * <p>값 직렬화는 캐시마다 값 타입을 명시한 Jackson 3 {@link JacksonJsonRedisSerializer}를 쓴다(2026-09-27
  * hotfix). 이전에는 모든 캐시가 {@code GenericJacksonJsonRedisSerializer.enableUnsafeDefaultTyping()} 하나를
  * 공유했는데, 이 타이핑은 final 타입에 타입 정보를 붙이지 않는다 — {@code Stream.toList()}가 돌려주는
  * {@code ImmutableCollections.ListN}(final)은 최상위 배열이 타입 정보 없이 저장되고, 읽을 때는 타입 정보를
- * 기대해 {@code SerializationException}이 났다. 리스트를 캐싱하는 세 캐시(popularComplexesV3/
+ * 기대해 {@code SerializationException}이 났다. 리스트를 캐싱하는 세 캐시(popularComplexesV4/
  * regionAutocomplete/popularKeywords)가 캐시 히트마다 500이었다. 반환값을 {@code ArrayList}로 감싸도 되지만
  * 리스트 캐시가 생길 때마다 그 규칙을 기억해야 하므로, 타입을 설정에서 명시하는 쪽을 택했다. 역직렬화가
  * 저장된 {@code @class}가 아니라 설정의 타입을 따르므로 임의 타입 역직렬화 경로(unsafe default typing)도
@@ -56,8 +56,8 @@ import tools.jackson.databind.type.TypeFactory;
  * 아니라 "null을 캐시에 저장하려는 시도 자체를 IllegalArgumentException으로 거부한다"로 동작한다
  * (AbstractValueAdaptingCache.toStoreValue()). 즉 캐시 설정에서 막아버리면, {@code unless} 조건 없이
  * null을 정상 반환하는 {@code @Cacheable} 메서드가 생기는 순간 그 호출이 예외로 깨진다 — "없음"을
- * TTL 동안 캐싱하지 않으려는 의도보다 훨씬 위험한 부작용이다. 이 세 캐시(complexDetailV3/
- * popularComplexesV3/regionAutocomplete)의 실제 조회 서비스는 "없음"을 null이 아니라 예외(404)나 빈
+ * TTL 동안 캐싱하지 않으려는 의도보다 훨씬 위험한 부작용이다. 이 세 캐시(complexDetailV4/
+ * popularComplexesV4/regionAutocomplete)의 실제 조회 서비스는 "없음"을 null이 아니라 예외(404)나 빈
  * 컬렉션으로 표현할 가능성이 높아 null 캐싱 자체가 사실상 일어나지 않을 것으로 보이지만, 혹시라도
  * null을 정말 반환해야 하는 캐시 메서드가 생기면 이 설정을 건드리지 말고 그 {@code @Cacheable}
  * 애노테이션에 {@code unless = "#result == null"}을 붙여 해당 호출 지점에서만 캐싱을 건너뛰게 하라.
