@@ -8,10 +8,11 @@ interface LocationCardProps {
 }
 
 /**
- * DTL-01 구성요소 8 — 위치(Figma 4:3478). 지오코딩(BAT-GEO-01)과 지도 화면(MAP-01)이 없어 좌표가 없으므로(로컬 DB
- * 좌표 0건) Figma의 지도 그림 자리에 "준비 중" 자리표시를 두고 "지도에서 크게 보기"는 비활성으로 둔다. Figma 그림은
- * 특정 위치에 핀이 꽂힌 가짜 지도라 좌표 없이 쓰면 실제 위치처럼 읽혀 쓰지 않는다. 카카오 SDK는 불러오지 않는다(결정 2).
- * 근사 좌표 문구는 UI정의서 7.2절 — MVP 데이터에선 나오지 않지만 조건부로 넣어 둔다.
+ * DTL-01 구성요소 8 — 위치(Figma 4:3478). 좌표는 BAT-GEO-01이 채웠지만 지도 화면(MAP-01)과 카카오 SDK 연동이 아직 없어,
+ * Figma의 지도 그림 자리에 "준비 중" 자리표시를 두고 "지도에서 크게 보기"는 비활성으로 둔다 — 이 카드는 좌표를 쓰지 않는다.
+ * Figma 그림은 특정 위치에 핀이 꽂힌 가짜 지도라 실제 위치처럼 읽혀 쓰지 않는다(결정 2). 근사 좌표 문구는 UI정의서 7.2절 — BAT-GEO-01 키워드 보완으로 찾은 단지
+ * (locationPrecision = APPROXIMATE)에서 나온다. 헤더 배지(precisionBadge)와 달리 위치에 관한 문구라 locationPrecision만 본다 —
+ * 좌표가 없으면(NULL) 근사라고 하지 않는다.
  */
 export function LocationCard({ address, locationPrecision, loading }: LocationCardProps) {
   const approximate = Boolean(locationPrecision) && locationPrecision !== 'PRECISE';

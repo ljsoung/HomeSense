@@ -39,6 +39,8 @@ function detail(overrides = {}) {
     legalDongAddress: '경기도 수원장안구 조원동 881 모킹테스트아파트',
     matchPending: false,
     matchMethod: 'EXACT',
+    locationPrecision: 'PRECISE',
+    precisionBadge: 'PRECISE',
     basicInfo: { householdCount: 1000, buildingCount: 10, approvalDate: '2001-05-01', totalParkingCount: 1200, highestFloor: 25 },
     extendedInfo: {
       managementType: '위탁관리',
@@ -378,7 +380,7 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
 // 7) SIMILAR / matchMethod null / matchPending / ?deal= 잘못된 값 / 추이 부족
 {
   const { context, page } = await newPage(360, 780);
-  await mock(page, { detailOverrides: { matchMethod: 'SIMILAR' } });
+  await mock(page, { detailOverrides: { matchMethod: 'SIMILAR', precisionBadge: 'APPROXIMATE' } });
   await page.goto(`${BASE}/complexes/${MOCK_ID}?deal=xx`);
   await page.locator('h1#complex-name').waitFor();
   ok('SIMILAR: 근사 배지·유사 매칭 결과 안내', (await page.getByText('근사', { exact: true }).isVisible()) && (await page.getByText('유사 매칭 결과').isVisible()));
@@ -388,11 +390,24 @@ async function newPage(width = 1280, height = 900, contextOptions = {}) {
 }
 {
   const { context, page } = await newPage();
-  await mock(page, { detailOverrides: { matchMethod: undefined } });
+  await mock(page, { detailOverrides: { matchMethod: undefined, precisionBadge: undefined } });
   await page.goto(`${BASE}/complexes/${MOCK_ID}`);
   await page.locator('h1#complex-name').waitFor();
-  ok('matchMethod 없음: 정밀·근사 배지 없음', (await page.getByText('정밀', { exact: true }).count()) === 0 && (await page.getByText('근사', { exact: true }).count()) === 0);
+  ok('precisionBadge 없음: 정밀·근사 배지 없음', (await page.getByText('정밀', { exact: true }).count()) === 0 && (await page.getByText('근사', { exact: true }).count()) === 0);
   ok('matchMethod 없음: 유사 안내 없음', (await page.getByTestId('similar-match-notice').count()) === 0);
+  await context.close();
+}
+{
+  // 정확 매칭이지만 좌표가 근사(BAT-GEO-01 키워드 보완) — 배지는 서버 precisionBadge대로 근사, 유사 매칭 안내는 없고 위치 카드에 근사 문구.
+  const { context, page } = await newPage();
+  await mock(page, {
+    detailOverrides: { matchMethod: 'EXACT', locationPrecision: 'APPROXIMATE', precisionBadge: 'APPROXIMATE', latitude: 37.3, longitude: 127.0 },
+  });
+  await page.goto(`${BASE}/complexes/${MOCK_ID}`);
+  await page.locator('h1#complex-name').waitFor();
+  ok('EXACT+근사 좌표: 근사 배지', (await page.getByText('근사', { exact: true }).isVisible()) && (await page.getByText('정밀', { exact: true }).count()) === 0);
+  ok('EXACT+근사 좌표: 유사 매칭 안내 없음', (await page.getByTestId('similar-match-notice').count()) === 0);
+  ok('EXACT+근사 좌표: 위치 카드 "근사 위치입니다"', await page.getByText('근사 위치입니다').isVisible());
   await context.close();
 }
 {

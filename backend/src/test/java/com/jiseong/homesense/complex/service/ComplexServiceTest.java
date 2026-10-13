@@ -27,13 +27,14 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import com.jiseong.homesense.common.config.ComplexMapProperties;
 import com.jiseong.homesense.common.exception.ComplexNotFoundException;
 import com.jiseong.homesense.complex.dto.BoundsCondition;
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
+import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexMapSearchResponse;
 import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
-import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
 import com.jiseong.homesense.recentview.service.RecentViewService;
@@ -60,10 +61,13 @@ class ComplexServiceTest {
 
     private ComplexService complexService;
 
+    private static final int MAP_LIMIT = 500;
+
     @BeforeEach
     void setUp() {
         complexService = new ComplexService(
-                complexRepository, tradeRepository, complexDetailCache, recentViewService, regionCodePrefixResolver);
+                complexRepository, tradeRepository, complexDetailCache, recentViewService, regionCodePrefixResolver,
+                new ComplexMapProperties(MAP_LIMIT));
     }
 
     private static Complex complex(Long id) {
@@ -180,7 +184,7 @@ class ComplexServiceTest {
                 (short) 0, (short) 0, (short) 0, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null);
         return new ComplexDetailResponse(complexId, "테스트단지" + complexId, "아파트", housingType,
-                null, null, null, null, null, null, null, null, false, null, basicInfo, extendedInfo);
+                null, null, null, null, null, null, null, null, false, null, null, basicInfo, extendedInfo);
     }
 
     @Test
@@ -261,32 +265,60 @@ class ComplexServiceTest {
         assertThat(result).extracting(ComplexSummaryResponse::complexId).containsExactly(1L);
     }
 
+    private static ComplexMapPointResponse point(long id) {
+        return new ComplexMapPointResponse(id, "테스트단지" + id, null, null, null, null, null, null,
+                HousingType.APT, DealCategory.SALE, LocalDate.of(2026, 1, 1), 50000L, new BigDecimal("84.90"),
+                null, null, null, null, new BigDecimal("37.5"), new BigDecimal("127.0"), "PRECISE", null);
+    }
+
+    private static final BoundsCondition BOUNDS = new BoundsCondition(
+            new BigDecimal("37.0"), new BigDecimal("127.0"), new BigDecimal("37.1"), new BigDecimal("127.1"));
+
+    @Test
+    void searchInBounds_상한보다_한_건_더_조회한다() {
+        ComplexSearchCondition condition = ComplexSearchCondition.builder().build();
+        when(complexRepository.searchInBounds(any(), any(), anyInt())).thenReturn(List.of());
+
+        complexService.searchInBounds(BOUNDS, condition);
+
+        verify(complexRepository).searchInBounds(BOUNDS, condition, MAP_LIMIT + 1);
+    }
+
     @Test
     void searchInBounds_상한_이하면_truncated가_false다() {
-        MapFilterCondition filter = new MapFilterCondition(null);
-        BoundsCondition bounds = new BoundsCondition(
-                new BigDecimal("37.0"), new BigDecimal("127.0"), new BigDecimal("37.1"), new BigDecimal("127.1"));
-        when(complexRepository.searchInBounds(any(), any(), anyInt())).thenReturn(List.of(complex(1L), complex(2L)));
+        when(complexRepository.searchInBounds(any(), any(), anyInt())).thenReturn(List.of(point(1L), point(2L)));
 
-        ComplexMapSearchResponse response = complexService.searchInBounds(bounds, filter);
+        ComplexMapSearchResponse response = complexService.searchInBounds(BOUNDS, ComplexSearchCondition.builder().build());
 
         assertThat(response.truncated()).isFalse();
-        assertThat(response.points()).hasSize(2);
+        assertThat(response.items()).extracting(ComplexMapPointResponse::complexId).containsExactly(1L, 2L);
+        assertThat(response.limit()).isEqualTo(MAP_LIMIT);
     }
 
     @Test
     void searchInBounds_상한을_넘으면_상한까지만_반환하고_truncated가_true다() {
-        MapFilterCondition filter = new MapFilterCondition(null);
-        BoundsCondition bounds = new BoundsCondition(
-                new BigDecimal("37.0"), new BigDecimal("127.0"), new BigDecimal("37.1"), new BigDecimal("127.1"));
-        List<Complex> overLimit = java.util.stream.LongStream.rangeClosed(1, 501)
-                .mapToObj(ComplexServiceTest::complex)
+        List<ComplexMapPointResponse> overLimit = java.util.stream.LongStream.rangeClosed(1, MAP_LIMIT + 1)
+                .mapToObj(ComplexServiceTest::point)
                 .toList();
         when(complexRepository.searchInBounds(any(), any(), anyInt())).thenReturn(overLimit);
 
-        ComplexMapSearchResponse response = complexService.searchInBounds(bounds, filter);
+        ComplexMapSearchResponse response = complexService.searchInBounds(BOUNDS, ComplexSearchCondition.builder().build());
 
         assertThat(response.truncated()).isTrue();
-        assertThat(response.points()).hasSize(500);
+        assertThat(response.items()).hasSize(MAP_LIMIT);
+        assertThat(response.items().get(MAP_LIMIT - 1).complexId()).isEqualTo((long) MAP_LIMIT);
+    }
+
+    @Test
+    void searchInBounds_정확히_상한이면_truncated가_false다() {
+        List<ComplexMapPointResponse> exactlyLimit = java.util.stream.LongStream.rangeClosed(1, MAP_LIMIT)
+                .mapToObj(ComplexServiceTest::point)
+                .toList();
+        when(complexRepository.searchInBounds(any(), any(), anyInt())).thenReturn(exactlyLimit);
+
+        ComplexMapSearchResponse response = complexService.searchInBounds(BOUNDS, ComplexSearchCondition.builder().build());
+
+        assertThat(response.truncated()).isFalse();
+        assertThat(response.items()).hasSize(MAP_LIMIT);
     }
 }

@@ -51,3 +51,35 @@ describe('ComplexCard(UIC-05) — 서버가 뺀 필드', () => {
     expect(text).toContain('건축 2001년');
   });
 });
+
+describe('ComplexCard(UIC-05) — 정밀/근사 배지는 서버 precisionBadge', () => {
+  for (const variant of ['grid', 'list'] as const) {
+    it(`${variant}: 정확 매칭이어도 precisionBadge가 APPROXIMATE면 근사 배지`, () => {
+      const text = textOf(variant, { ...OMITTED, matchMethod: 'EXACT', precisionBadge: 'APPROXIMATE' });
+      expect(text).toContain('근사');
+      expect(text).not.toContain('정밀');
+    });
+
+    it(`${variant}: precisionBadge가 없으면 matchMethod가 있어도 배지를 그리지 않는다`, () => {
+      const text = textOf(variant, { ...OMITTED, matchMethod: 'EXACT' });
+      expect(text).not.toContain('정밀');
+      expect(text).not.toContain('근사');
+    });
+  }
+
+  it('list: 근사 이유가 근사 좌표면 위치 안내, 유사 매칭이면 매칭 안내', () => {
+    const location = textOf('list', { ...OMITTED, matchMethod: 'EXACT', precisionBadge: 'APPROXIMATE' });
+    expect(location).toContain('지도 위치는 근사 위치입니다.');
+    expect(location).not.toContain('유사도 기준');
+    cleanup();
+    const similar = textOf('list', { ...OMITTED, matchMethod: 'SIMILAR', precisionBadge: 'APPROXIMATE' });
+    expect(similar).toContain('유사도 기준으로 추정 매칭된 결과입니다.');
+    expect(similar).not.toContain('지도 위치는 근사 위치입니다.');
+  });
+
+  it('list: 정밀이면 안내 문구가 없다', () => {
+    const text = textOf('list', { ...OMITTED, matchMethod: 'EXACT', precisionBadge: 'PRECISE' });
+    expect(text).toContain('정밀');
+    expect(text).not.toContain('근사');
+  });
+});

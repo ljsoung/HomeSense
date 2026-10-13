@@ -536,9 +536,10 @@ public class ComplexGeocodingService {
     }
 
     /**
-     * 좌표를 청크로 커밋한 뒤 그 단지들의 상세 캐시를 지운다 — ComplexDetailResponse가 latitude/longitude/locationPrecision을
-     * 담는다(complexDetailV3). 인기 단지 응답(ComplexSummaryResponse)에는 좌표가 없어 지우지 않는다. 일회성 러너는 곧바로
-     * System.exit하므로 비동기인 evict() 대신 즉시 실행되는 evictIfPresent()를 쓴다(CLAUDE.md 캐싱 절).
+     * 좌표를 청크로 커밋한 뒤 그 단지들의 캐시를 지운다 — ComplexDetailResponse가 latitude/longitude/locationPrecision을
+     * 담고(complexDetailV4), 인기 단지 응답(ComplexSummaryResponse)의 precisionBadge가 locationPrecision에 달려 있다
+     * (popularComplexesV4, 어느 limit 항목에 그 단지가 있는지 알 수 없어 전체를 비운다). 일회성 러너는 곧바로
+     * System.exit하므로 비동기인 evict()/clear() 대신 즉시 실행되는 evictIfPresent()/invalidate()를 쓴다(CLAUDE.md 캐싱 절).
      */
     private int flush(List<Coordinate> pending) {
         if (pending.isEmpty()) {
@@ -555,18 +556,31 @@ public class ComplexGeocodingService {
         return written == null ? 0 : written;
     }
 
-    /** 캐시 삭제 실패는 이미 커밋된 좌표를 무효로 만들 이유가 없어 흡수한다 — 최악의 경우 TTL(24h) 동안 좌표 없는 상세가 보인다. */
+    /**
+     * 캐시 삭제 실패는 이미 커밋된 좌표를 무효로 만들 이유가 없어 흡수한다 — 최악의 경우 TTL(24h) 동안 좌표 없는 상세나 옛
+     * 배지가 보인다. 상세가 실패해도 인기 단지는 따로 시도한다.
+     */
     private void evictDetailCache(List<Coordinate> chunk) {
+        if (chunk.isEmpty()) {
+            return;
+        }
         try {
             Cache cache = cacheManager.getCache(CacheNames.COMPLEX_DETAIL);
-            if (cache == null) {
-                return;
-            }
-            for (Coordinate c : chunk) {
-                cache.evictIfPresent(c.complexId());
+            if (cache != null) {
+                for (Coordinate c : chunk) {
+                    cache.evictIfPresent(c.complexId());
+                }
             }
         } catch (RuntimeException e) {
             log.warn("[BAT-GEO-01] 단지 상세 캐시 삭제 실패 — 좌표는 커밋됨, 캐시는 TTL로 만료된다", e);
+        }
+        try {
+            Cache popular = cacheManager.getCache(CacheNames.POPULAR_COMPLEXES);
+            if (popular != null) {
+                popular.invalidate();
+            }
+        } catch (RuntimeException e) {
+            log.warn("[BAT-GEO-01] 인기 단지 캐시 삭제 실패 — 좌표는 커밋됨, 캐시는 TTL로 만료된다", e);
         }
     }
 

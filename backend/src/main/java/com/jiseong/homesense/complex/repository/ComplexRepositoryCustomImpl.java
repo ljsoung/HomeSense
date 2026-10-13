@@ -8,11 +8,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import com.jiseong.homesense.complex.dto.BoundsCondition;
+import com.jiseong.homesense.complex.dto.ComplexMapPointResponse;
 import com.jiseong.homesense.complex.dto.ComplexSearchCondition;
 import com.jiseong.homesense.complex.dto.ComplexSummaryResponse;
-import com.jiseong.homesense.complex.dto.MapFilterCondition;
 import com.jiseong.homesense.complex.dto.SortCondition;
-import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.entity.QComplex;
 import com.jiseong.homesense.region.entity.QLegalDistrictCode;
 import com.jiseong.homesense.trade.entity.QTrade;
@@ -38,39 +37,18 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
     private static final QTrade trade = QTrade.trade;
     private static final QLegalDistrictCode legalDistrictCode = QLegalDistrictCode.legalDistrictCode;
     private static final char LIKE_ESCAPE = '!';
+    /** Knuth 곱셈 해시 상수(2^32 / 황금비). */
+    static final long MAP_SAMPLE_MULTIPLIER = 2_654_435_761L;
+    /** 2^31 - 1(소수). */
+    static final long MAP_SAMPLE_MODULUS = 2_147_483_647L;
 
     private final JPAQueryFactory queryFactory;
 
     @Override
     public Page<ComplexSummaryResponse> search(ComplexSearchCondition condition, String regionPrefix,
             Pageable pageable) {
-        QTrade subTrade = new QTrade("subTrade");
-        QTrade tieBreakTrade = new QTrade("tieBreakTrade");
         BooleanBuilder complexFilters = complexFilters(condition, regionPrefix);
-        BooleanBuilder tradeFilters = tradeFilters(condition, trade);
-        BooleanBuilder subTradeFilters = tradeFilters(condition, subTrade);
-        BooleanBuilder tieBreakTradeFilters = tradeFilters(condition, tieBreakTrade);
-
-        // 검색조건을 만족하는 거래 중 "가장 최근 거래" 하나만 각 단지의 대표 거래로 남긴다.
-        // dealDate는 일 단위라 같은 날짜에 여러 건이 동률로 걸리는 게 드물지 않다 — MAX(dealDate)만
-        // 걸면 그 동률 거래 전부가 살아남아 같은 complex_id가 결과에 여러 행(=매물 카드 여러 장)으로
-        // 중복 노출된다. ComplexSummaryResponse가 "단지 1건 = 카드 1장"을 전제하므로, dealDate가
-        // 같을 때는 MAX(trade_id)로 한 번 더 좁혀 항상 정확히 한 건만 남긴다(코드리뷰에서 지적됨 —
-        // 처음엔 이 동률 중복을 "드문 엣지케이스"로 문서화하고 넘어갔으나, 대표거래 개념 자체와
-        // 충돌한다는 지적을 받아 근본 수정함).
-        var maxDealDateSubquery = JPAExpressions
-                .select(subTrade.dealDate.max())
-                .from(subTrade)
-                .where(subTrade.complex.eq(complex).and(subTradeFilters));
-
-        var representativeTradeIdSubquery = JPAExpressions
-                .select(tieBreakTrade.tradeId.max())
-                .from(tieBreakTrade)
-                .where(tieBreakTrade.complex.eq(complex)
-                        .and(tieBreakTradeFilters)
-                        .and(tieBreakTrade.dealDate.eq(maxDealDateSubquery)));
-
-        BooleanBuilder where = complexFilters.and(tradeFilters).and(trade.tradeId.eq(representativeTradeIdSubquery));
+        BooleanBuilder where = complexFilters.and(representativeTradeCondition(condition));
 
         List<Tuple> rows = queryFactory
                 .select(complex, trade)
@@ -109,26 +87,77 @@ class ComplexRepositoryCustomImpl implements ComplexRepositoryCustom {
         return new PageImpl<>(content, pageable, total != null ? total : 0);
     }
 
+    /**
+     * MAP-01. 조건 코드는 search()와 같다(complexFilters + 대표거래 조건) — 지역 조건이 regionCode 대신 좌표 범위인 것만
+     * 다르다. 필터에 맞는 거래가 없는 단지는 search()처럼 빠진다(inner join). legal_dong_cd는 regionCode가 없으므로 보지
+     * 않는다 — search()도 regionCode 없이 keyword만 줄 때 legal_dong_cd NULL 단지를 막지 않는다.
+     *
+     * <p>BETWEEN은 latitude/longitude가 NULL인 행을 참으로 평가하지 않으므로 좌표 없는 단지(지오코딩 전·못 찾음)는 따로
+     * 조건을 걸지 않아도 빠진다. 범위는 양 끝을 포함한다.
+     *
+     * <p>정렬은 {@link #mapSampleOrder()}(complex_id의 결정적 해시, 같으면 complex_id)라 같은 범위·필터면 항상 같은 결과다.
+     * complex_id 순으로 자르면 단지 마스터가 시도 순으로 적재돼 넓은 범위에서 한 시도(서울)에만 몰렸다 — 해시 순으로 자르면
+     * 화면 전체에서 고르게 뽑힌다(2026-10-13 실측: 전국 500건이 16개 시도에 좌표 단지 수 비례로 나뉨). MariaDB는 complex
+     * 행만 해시로 정렬한 뒤 그 순서로 대표거래를 붙여 limit에서 멈추므로, 맞는 단지가 많은 넓은 범위도 수백 행만 읽는다.
+     * 맞는 단지가 적은 필터(전국·매매 30억 이상)는 범위 안 단지를 모두 읽는다 — CLAUDE.md "MAP-01 백엔드 보강" 절의 측정값.
+     */
     @Override
-    public List<Complex> searchInBounds(BoundsCondition bounds, MapFilterCondition filter, int limitPlusOne) {
-        BooleanBuilder where = new BooleanBuilder()
+    public List<ComplexMapPointResponse> searchInBounds(BoundsCondition bounds, ComplexSearchCondition condition,
+            int limitPlusOne) {
+        BooleanBuilder where = complexFilters(condition, null)
                 .and(complex.latitude.between(bounds.swLat(), bounds.neLat()))
-                .and(complex.longitude.between(bounds.swLng(), bounds.neLng()));
-
-        if (filter.housingTypes() != null && !filter.housingTypes().isEmpty()) {
-            where.and(JPAExpressions.selectOne()
-                    .from(trade)
-                    .where(trade.complex.eq(complex)
-                            .and(trade.housingType.in(filter.housingTypes()))
-                            .and(trade.cancelYn.isFalse()))
-                    .exists());
-        }
+                .and(complex.longitude.between(bounds.swLng(), bounds.neLng()))
+                .and(representativeTradeCondition(condition));
 
         return queryFactory
-                .selectFrom(complex)
+                .select(complex, trade)
+                .from(complex)
+                .join(trade).on(trade.complex.eq(complex))
                 .where(where)
+                .orderBy(mapSampleOrder(), complex.complexId.asc())
                 .limit(limitPlusOne)
-                .fetch();
+                .fetch()
+                .stream()
+                .map(row -> ComplexMapPointResponse.of(row.get(complex), row.get(trade)))
+                .toList();
+    }
+
+    /**
+     * 지도 상한 정렬 키 — (complex_id × {@value #MAP_SAMPLE_MULTIPLIER}) mod {@value #MAP_SAMPLE_MODULUS}. 모듈러가 소수이고
+     * 곱수가 그 배수가 아니라 complex_id가 모듈러보다 작은 동안 서로 다른 단지는 서로 다른 값을 갖는다(같은 값이 나오면
+     * complex_id가 2차 키). 곱은 complex_id가 약 34억을 넘기 전까지 BIGINT 범위 안이다. 무작위 함수가 아니라 단지 id로만
+     * 정해지므로 같은 요청은 같은 결과를 낸다.
+     */
+    private static OrderSpecifier<Long> mapSampleOrder() {
+        return complex.complexId.multiply(MAP_SAMPLE_MULTIPLIER).mod(MAP_SAMPLE_MODULUS).asc();
+    }
+
+    /**
+     * {@code trade}(바깥 쿼리의 거래)가 그 단지의 대표 거래라는 조건 — 검색조건을 만족하는 취소되지 않은 거래 중
+     * "가장 최근 거래" 하나. dealDate는 일 단위라 같은 날짜에 여러 건이 동률로 걸리는 게 드물지 않다 — MAX(dealDate)만
+     * 걸면 그 동률 거래 전부가 살아남아 같은 complex_id가 결과에 여러 행(=매물 카드 여러 장)으로 중복 노출된다.
+     * ComplexSummaryResponse가 "단지 1건 = 카드 1장"을 전제하므로, dealDate가 같을 때는 MAX(trade_id)로 한 번 더 좁혀
+     * 항상 정확히 한 건만 남긴다(코드리뷰에서 지적됨 — 처음엔 이 동률 중복을 "드문 엣지케이스"로 문서화하고 넘어갔으나,
+     * 대표거래 개념 자체와 충돌한다는 지적을 받아 근본 수정함). search()와 searchInBounds()가 같은 규칙을 쓰므로 같은
+     * 단지·같은 필터에서 SRCH-01 카드와 MAP-01 마커의 대표 거래(금액·matchMethod)가 같다.
+     */
+    private BooleanBuilder representativeTradeCondition(ComplexSearchCondition condition) {
+        QTrade subTrade = new QTrade("subTrade");
+        QTrade tieBreakTrade = new QTrade("tieBreakTrade");
+
+        var maxDealDateSubquery = JPAExpressions
+                .select(subTrade.dealDate.max())
+                .from(subTrade)
+                .where(subTrade.complex.eq(complex).and(tradeFilters(condition, subTrade)));
+
+        var representativeTradeIdSubquery = JPAExpressions
+                .select(tieBreakTrade.tradeId.max())
+                .from(tieBreakTrade)
+                .where(tieBreakTrade.complex.eq(complex)
+                        .and(tradeFilters(condition, tieBreakTrade))
+                        .and(tieBreakTrade.dealDate.eq(maxDealDateSubquery)));
+
+        return tradeFilters(condition, trade).and(trade.tradeId.eq(representativeTradeIdSubquery));
     }
 
     private BooleanBuilder complexFilters(ComplexSearchCondition condition, String regionPrefix) {
