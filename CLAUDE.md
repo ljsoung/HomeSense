@@ -753,9 +753,9 @@ AUTH-03 절 참고)과 같은 원자적 read-then-write 패턴이다. `requestPa
 | `getPopular()`의 "인기" 정의 | 명시 없음(카운터 컬럼도 스키마에 없음) | **최근 3개월 취소되지 않은 거래량 기준**(`TradeRepository.findTopComplexIdsByRecentTradeVolume`), 이 기준만으로 limit을 못 채우면 UI정의서 5.1절 HOME-01의 "최신 등록 단지" 대체 노출 문구대로 `complex_id DESC`(서로게이트 PK, AUTO_INCREMENT)로 나머지 자리만 패딩(`ComplexRepository.findAllByOrderByComplexIdDesc`, 이미 거래량 기준에 뽑힌 단지는 제외) | RCV/FAV 모두 서비스 계층이 없어 조회수·찜수 기반은 지금 구현 불가능하다(지성 확인). trade 테이블은 이미 데이터가 있어 자기완결적으로 구현 가능. 윈도우(3개월)는 지성 확인. **fallback 기준은 처음엔 `data_updated_at`으로 구현했다가 되돌렸다** — 그 컬럼은 "언제 갱신됐는가"가 아니라 원본 xlsx 스냅샷 기준일이고, 단지 기본정보가 파일 1건을 통째로 적재한 지금은 사실상 전체 row가 같은 값이라 정렬 기준으로 무의미했다(코드리뷰에서 지적됨, 최초 IT 테스트가 fixture마다 이 값을 인위적으로 다르게 넣어 이 동점 문제를 가리고 있었다는 것도 함께 지적됨). complex_id는 등록 순서를 보장하는 유일한 컬럼이라 이걸로 교체했고(지성 확인), IT 테스트도 두 fixture가 같은 data_updated_at을 갖도록 고쳐 실제 운영 데이터 상황을 재현하게 했다. |
 | `search()` 정렬(최신순/금액순/면적순)의 대표 거래 | 명시 없음(세 기준이 서로 다른 거래를 가리킬 수 있음을 시사) | **세 기준 모두 "검색조건을 만족하는 거래 중 가장 최근 거래" 하나로 통일**(`ComplexRepositoryCustomImpl`의 2단 상관 서브쿼리: MAX(deal_date) → 그 날짜 안에서 MAX(trade_id)) | 지성 확인. 기준마다 다른 대표 거래를 고르면 서브쿼리 3벌이 필요해 복잡도가 크게 늘어난다. **동률(같은 날짜 여러 건) 시 단지가 검색 결과에 여러 행(카드 여러 장)으로 중복 노출되는 문제는 처음엔 "드문 엣지케이스"로 문서화하고 넘어갔으나, `ComplexSummaryResponse`가 전제하는 "단지 1건 = 카드 1장" 자체와 충돌한다는 코드리뷰 지적을 받아 근본 수정했다** — MAX(trade_id)로 한 번 더 좁혀 대표거래가 항상 정확히 하나만 나오게 했다(검증: `ComplexRepositoryMariaDbIT.대표거래_후보가_같은_날짜로_동률이어도_단지당_정확히_한_행만_나온다`). 이 2단 tie-break 위에, 서로 다른 단지끼리 정렬값(금액·면적)이 동률일 때를 위한 `complex.complexId.asc()` 페이지 tie-break가 별도로 얹혀 있다(코드리뷰에서 지적된 페이지 경계 안정성 이슈 — 검증: `ComplexRepositoryMariaDbIT.정렬_기준이_동률이어도_페이지_경계에서_단지가_중복되거나_누락되지_않는다`). |
 | "거래금액" 필터/정렬 대상 컬럼 | "거래금액 범위"라고만 언급, SALE/RENT 구분 없음 | dealCategory가 RENT면 `depositAmount`(보증금), 그 외(SALE·미지정)면 `dealAmount` | 매매와 전월세는 금액 구조 자체가 달라(매매금액 vs 보증금+월세) 하나의 "금액"으로 합산할 기준이 없다. monthlyRentAmount는 별도 필터로 다루지 않는다. |
-| `MapFilterRequest` 필드 구성 | 필드 구성 명시 없음 | `housingTypes`(다중, 선택)만 지원 | 지도 조회는 팬/줌마다 자주 나가는 가벼운 쿼리라 search()의 면적/금액/건축년도 범위까지 그대로 옮기면 무거워진다. 필요해지면 추가하라. |
+| `MapFilterRequest` 필드 구성 | 필드 구성 명시 없음 | **[2026-10-13 변경] SRCH-01과 같은 필터 전부**(housingTypes·dealCategory·rentType·area·amount·buildYear)를 같은 이름으로 받아 `ComplexSearchCondition`으로 바꾼다 — "MAP-01 백엔드 보강" 절. 처음엔 housingTypes만 지원했다 | 처음 판단(지도 조회를 가볍게)은 대표거래 서브쿼리를 공유해도 대부분 200ms 이하, 최악(전국·좁은 필터) 0.65s 이하로 실측돼 뒤집었다 |
 | `GET /popular`의 limit 상한 | Controller 표엔 "기본 8건"만 명시, 상한 없음 | **1~50**(`ComplexController.MIN/MAX_POPULAR_LIMIT`), 벗어나면 `InvalidLimitException`(400) | Codex 코드리뷰(P1) 대응 — limit을 검증 없이 그대로 받으면 `getPopular()`가 값마다 최대 2건씩 추가 쿼리를 내는 N+1 경로라(아래 기술부채 항목 참고) 인증 없는 이 엔드포인트가 자원 고갈 벡터가 됐다. 50은 `map()`의 500건 상한과 같은 성격의 임의 기본값이라, 실제 트래픽을 보고 나중에 조정될 수 있다. |
-| `GET /search`/`GET /map` 응답 타입 | Controller 표는 각각 `PageResponse<T>`/`List<T>` | `ApiResponse<List<ComplexSummaryResponse>>`(기존 `ApiResponse.success(Page<T>)` 관례 재사용) / `ApiResponse<ComplexMapSearchResponse>`(points+truncated 래퍼 신설) | `PageResponse<T>`라는 클래스는 프로젝트 어디에도 없다 — COM-RES-01이 이미 정의한 `data`+`pageMeta` 관례로 충분해 새로 만들지 않았다. `map()`은 처리 로직이 명시한 truncated 플래그를 실을 자리가 순수 `List` 반환 타입엔 없어(ApiResponse도 pageMeta 외 별도 슬롯이 없다) `ComplexMapSearchResponse`로 감쌌다. |
+| `GET /search`/`GET /map` 응답 타입 | Controller 표는 각각 `PageResponse<T>`/`List<T>` | `ApiResponse<List<ComplexSummaryResponse>>`(기존 `ApiResponse.success(Page<T>)` 관례 재사용) / `ApiResponse<ComplexMapSearchResponse>`(items+truncated+limit 래퍼 — 2026-10-13 points에서 이름을 바꿨다) | `PageResponse<T>`라는 클래스는 프로젝트 어디에도 없다 — COM-RES-01이 이미 정의한 `data`+`pageMeta` 관례로 충분해 새로 만들지 않았다. `map()`은 처리 로직이 명시한 truncated 플래그를 실을 자리가 순수 `List` 반환 타입엔 없어(ApiResponse도 pageMeta 외 별도 슬롯이 없다) `ComplexMapSearchResponse`로 감쌌다. |
 
 이 도메인은 프로젝트에서 QueryDSL을 실제로 쓰는 첫 지점이다(`common/config/QuerydslConfig`가 `JPAQueryFactory` 빈을 처음 등록). `ComplexRepositoryCustomImpl`의 동적 쿼리(특히 대표 거래를 고르는 상관 서브쿼리)는 Mockito로 검증할 수 없는 종류의 로직이라 `ComplexRepositoryMariaDbIT`(Testcontainers)로 별도 검증한다 — 위 "UNIQUE 제약 동시성 회귀 테스트 원칙"과 같은 이유로, Repository를 목킹한 `ComplexServiceTest`는 "Service가 Repository를 올바르게 호출하는지"만 증명하고 "그 쿼리가 실제로 맞는 결과를 내는지"는 증명하지 못한다.
 
@@ -1183,6 +1183,32 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 - 4.1절 BAT-SCH-01·6.3/6.4절 흐름: 조합 순회(조기 중단 포함) 직후 BAT-NTF-01 직접 호출, 백필 미호출(2026-10-06).
 - 3.8절 SVC-NTF-01 `updateSettings()`: 요청이 대상 목록(`settings`, 1~200건)이고 한 트랜잭션, 임계치 0~20 정수·세 값 필수·같은 대상 중복 400(`DUPLICATE_NOTIFICATION_TARGET`)·남의 대상 403·없는 대상 404(2026-10-07, "MY-03 백엔드 보강" 절).
 - **테이블정의서 3.5절 `price_change_threshold_pct`: 허용 범위 0~20 정수(API 검증, 컬럼은 DECIMAL(4,1) 그대로)(2026-10-07).**
+- 3.3절 SVC-CPX-01 `searchInBounds()`·API-CPX-01 `GET /map`: 필터가 `/search`와 같은 이름·같은 조건 코드, 응답 `{items, truncated, limit}`, 항목 필드는 `ComplexSummaryResponse`와 같은 이름 + latitude·longitude·locationPrecision, 정렬 complex_id 순, 상한 설정값(기본 500), bounds 범위 검증(위도 ±90·경도 ±180·남서 ≤ 북동)(2026-10-13, "MAP-01 백엔드 보강" 절).
+- **UI정의서 MAP-01 "카카오맵 REST API(좌표·클러스터링)": 클러스터링은 REST가 아니라 JS SDK clusterer가 한다(2026-10-13).**
+
+### MAP-01 백엔드 보강 — 지도 범위 조회 (2026-10-13, `feature/backend/complex-map-support`)
+
+MAP-01 프론트 착수 전 선행 작업이다(지오코딩 BAT-GEO-01 다음 단계). 이미 있던 `GET /api/complexes/map`은 주택유형 필터만 받고 좌표만 돌려줬다. 확인 문서: `docs/specs/`가 없어 작업 지시에 옮긴 프로그램설계서 v2.1 3.3절·UI정의서 v2.1 4.4절 원문.
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| 필터 = SRCH-01 조건 코드 그대로 | `MapFilterRequest`가 `/search`와 같은 이름(housingTypes·dealCategory·rentType·areaMin/Max·amountMin/Max·buildYearMin/Max)을 받아 `ComplexSearchCondition`으로 바꾸고, 리포지토리는 `complexFilters`·`tradeFilters`·대표거래 조건(`representativeTradeCondition`, search()에서 뽑아 둘이 공유)을 그대로 쓴다. 지역은 bounds가 대신해 regionCode·keyword는 받지 않는다(보내도 무시). 검색의 "조건 하나는 필수" 규칙도 없다. 작업 지시 예시의 `priceMin/priceMax`가 아니라 `/search`의 `amountMin/amountMax`다(같은 이름을 쓰라는 지시를 따름) | UI정의서 4.4절 "SRCH-01 ↔ MAP-01 필터 유지" — 두 화면의 필터 뜻이 갈라지지 않게 같은 코드를 탄다. 검증: IT "같은 필터면 마커의 대표거래가 SRCH-01 카드와 같다"(필터 없음·매매·전세 세 조건에서 matchMethod·금액·계약일·층·rentType 일치) | — |
+| 응답 필드 = 검색 카드와 같은 이름 | `{items, truncated, limit}`. 항목(`ComplexMapPointResponse`)은 `ComplexSummaryResponse` 필드를 **같은 이름 그대로**(representativeHousingType·representativeAmount·representativeArea·representativeDealDate·matchMethod·floor·rentType·monthlyRentAmount·sido·sigungu·dongRi 등) 갖고 latitude·longitude·locationPrecision을 더했다. 값은 `ComplexSummaryResponse.of()`를 거쳐 만든다. 작업 지시의 필드 이름(housingType, "최근 거래 요약")은 이 이름들로 대응한다 | 프론트가 지도 팝업·목록 패널에 SRCH-01 카드 컴포넌트를 그대로 쓰게 하려면 이름이 같아야 한다. 금액 규칙(매매 거래금액·전월세 보증금, 월세는 monthlyRentAmount 따로)을 두 벌로 두지 않는다 | 카드 DTO 필드가 바뀌면 이 DTO도 같이 바뀐다(of()가 위임하므로 컴파일 에러로 드러난다) |
+| matchMethod 규칙 | SRCH-01과 같다 — 필터를 만족하는 취소되지 않은 거래 중 최신 계약일, 같으면 큰 trade_id. 필터가 없으면 DTL-01 상세 배지(`findRecentTradesByComplexIds`)와도 같다 | 같은 단지·같은 필터에서 마커 색과 카드 배지가 어긋나지 않는다. DTL-01은 필터 없는 대표거래라 필터를 건 지도와는 다를 수 있다(SRCH-01 카드와 같은 관계, "DTL-01 백엔드 보강" 절) | — |
+| 포함/제외 | 필터에 맞는 거래가 없는 단지(거래 없음·취소만 있음 포함)는 빠진다(inner join, SRCH-01과 같음). 좌표 NULL은 BETWEEN이 거른다. legal_dong_cd는 보지 않는다(regionCode가 없으므로 — SRCH-01도 keyword만 줄 때 같다). 범위는 양 끝 포함 | 작업 지시 "SRCH-01과 같은 기준" | — |
+| locationPrecision | complex 컬럼 그대로 — PRECISE 또는 APPROXIMATE(BAT-GEO-01 키워드 장소 검색 결과, 로컬 실측 1,006건). 설계서의 "MVP는 항상 PRECISE"와 다르다 | 키워드 보완 결정 이후 실제 값이 두 가지다. MAP-01은 근사 핀 색·범례를 이 값으로 그린다 | — |
+| bounds 검증 | `swLat,swLng,neLat,neLng` 숫자 4개, 위도 -90~90·경도 -180~180, 남서 ≤ 북동. 어기면 400 `INVALID_BOUNDS`. 같은 점(넓이 0)은 허용. 끝에 빈 조각("…,")도 거절(split limit -1). 날짜변경선을 넘는 범위는 지원하지 않는다 | 작업 지시. 국내 서비스 | — |
+| 상한·truncated | `homesense.complex.map.max-results`(환경변수 `COMPLEX_MAP_MAX_RESULTS`, 기본 500, 1~5000, `ComplexMapProperties`). 한 건 더 조회해 넘으면 상한까지만 주고 truncated=true. 응답에 limit을 함께 싣는다 | 프로그램설계서 3.3절 | — |
+| 정렬 complex_id 순 — **알려진 한계** | 같은 범위·필터면 같은 결과다. 대신 잘릴 때(truncated) 화면 전체에 고르게 퍼진 500개가 아니라 complex_id가 작은 500개다 — 단지 마스터가 시도 순으로 적재돼 넓은 범위에서는 한쪽 지역에 몰린다. 프론트는 truncated면 "지도를 확대하세요"를 안내한다 | 작업 지시(결과 안정성). 공간 고르게 뽑기(격자 샘플링 등)는 쿼리가 무거워진다 | 줌아웃 화면에서 쏠림이 문제가 되면 서버 격자 집계(시군구 단위 개수 등)를 검토한다 |
+| 캐시 없음 | `@Cacheable`을 걸지 않는다(서비스 메서드 주석) | 키가 bounds(지도를 움직일 때마다 바뀌는 실수 4개)라 적중률이 없고, 적재 뒤 무효화 범위도 정할 수 없다 | — |
+| 비로그인 허용 | SecurityConfig `anyRequest().permitAll()`에 걸린다(별도 규칙 없음). IT가 실제 필터 체인으로 토큰 없이 200을 확인 | 비로그인 조회 전면 허용 원칙 | — |
+| 인덱스·DDL 위치 | `idx_complex_location(latitude, longitude)`은 이미 있다(`schema_all.sql`, 기존 DB용 `schema/indexes_v2_1.sql`) — 새 DDL 없음. **DDL 위치 규칙(이번에 기록):** 새 DB는 `schema_all.sql` 원문을 고치고, 이미 만든 DB용으로 `backend/src/main/resources/schema/{설명}.sql`(재실행 안전)을 함께 둔다(`indexes_v2_1.sql`·`notification_sent_at_nullable.sql`·`location_precision_varchar12.sql`과 같은 방식) | 자동 마이그레이션 도구가 없다 | Flyway 등 도입 시 |
+
+**실행계획·응답 시간(2026-10-13).** 로컬 DB(3307)는 2026-09-23 상태라 좌표가 하나도 없었다(BAT-GEO-01 결과가 이 DB에 없음 — `location_precision`도 VARCHAR(10) 그대로). 그래서 로컬 DB를 덤프해 일회용 MariaDB 10.11 컨테이너에 올리고, 단지 21,680건에 시도별 중심 ± 흔들기로 가짜 좌표를 넣었다(좌표 21,247건 — 실제 백필과 같은 수, 서울 박스 4,488건). 이 브랜치 jar를 그 DB에 붙여 측정했다(측정 후 컨테이너·덤프 삭제).
+- 실행계획: 넓은 범위는 complex를 PK 순(`index`)으로 읽다가 501행을 채우면 멈춘다(전국 필터 없음 r_rows 652). 좁은 범위(강남 일부)는 `idx_complex_location` range + filesort(172행). 대표거래는 단지마다 `idx_trade_complex_deal_date`로 max(deal_date) → max(trade_id)를 구한 뒤 trade를 PK로 읽는다(`eq_ref`).
+- 최악: 넓은 범위 + 맞는 단지가 적은 필터(전국·매매 30억 이상, 68건)는 단지 21,680건을 다 읽는다 — 0.33~0.65s. 그 밖의 16개 조합(강남 일부·서울·수도권·전국 × 필터 없음·매매·월세·매매 3억 이하)은 중앙값 59~171ms.
+
+검증: `ComplexControllerTest`(응답 형태·필터 바인딩·bounds 오류 14종·같은 점 허용), `ComplexServiceTest`(limit+1 조회·상한 이하/정확히 상한/초과), **`ComplexMapSearchMariaDbIT`**(신규, 상한 2 — 범위 양 끝 포함과 1e-7 밖 제외, 좌표 NULL 제외, 필터 적용·대표거래, SRCH-01과 같은 대표거래, 상한 초과 truncated·정확히 상한, 비로그인 HTTP), `ComplexRepositoryMariaDbIT`·`ComplexSearchRegionKeywordMariaDbIT`(공유 조건 리팩터링 회귀). 변형 검증: 지도 쿼리에서 대표거래 조건을 빼면 IT 2건이 실패한다.
 
 **완결 필요(DTL-01) — 중개사 소재지 `agent_sgg_nm` 미수집(BAT-PRS-01 매핑 확인 필요).** UI정의서 5.3절 거래상세 모달은 "거래유형 + 중개사 소재지(`estateAgentSggNm`, 시군구 단위)"를 요구하지만 `trade`에 대응 컬럼이 없고 파서(`TradeFieldMapper`)도 매핑하지 않는다. 모달에서는 그 행을 숨긴다. 표시하려면 원천 필드명 확인 → 컬럼 추가(DDL 3곳) → 파서 매핑 → `TradeDetailResponse` 순으로 한다.
 
@@ -1301,7 +1327,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 
 **완결 필요(운영 배포 전) — `invalidate()`가 Redis `KEYS` 명령을 쓴다.** `CacheConfig`는 `RedisCacheManager.builder(connectionFactory)`로 만들어 기본 `RedisCacheWriter.nonLockingRedisCacheWriter(cf)`를 쓰고, 이 기본값의 배치 전략은 `BatchStrategies.keys()`다(spring-data-redis 4.1.1 jar 바이트코드로 확인, 2026-09-30). 그래서 `invalidate()`(`CacheEvictionListener`의 인기 단지·자동완성 전체 비움, 백필 러너)가 `KEYS {cacheName}::*`를 보낸다. `KEYS`는 키 전체를 훑는 동안 Redis를 막는다. 로컬에서는 키가 적어 문제없지만, **운영 배포 시 `RedisCacheWriter`에 `BatchStrategies.scan(1000)`을 지정한다**(`RedisCacheManager.builder(RedisCacheWriter.nonLockingRedisCacheWriter(cf, BatchStrategies.scan(1000)))`). 지금은 코드 변경 없음.
 
-거래 검색/이력 조회는 배치 직후 변경 가능성이 있어 **캐시를 적용하지 않습니다.**
+거래 검색/이력 조회는 배치 직후 변경 가능성이 있어 **캐시를 적용하지 않습니다.** 지도 범위 조회(`/api/complexes/map`)도 캐시하지 않는다 — 키가 bounds(실수 좌표 4개)라 같은 키가 다시 오지 않는다(2026-10-13).
 
 **캐시 이름에 담긴 DTO에 필드를 추가/변경할 때는 캐시 이름 자체를 버전업하세요(`complexDetail` → `complexDetailV2`처럼).** Redis가 배포 사이에도 살아남는 환경에서는 옛 필드 구성으로 직렬화된 엔트리가 새 배포 후에도 남아있고, 새로 추가된 필드는 역직렬화 시 예외 없이 조용히 null로 채워집니다. 그 null이 소비 로직에서 정상적인 분기를 타 버릴 수 있습니다 — 실제로 SVC-RCV-01에서 `ComplexDetailResponse`에 `housingType`을 추가했을 때, 배포 전 캐시된 옛 엔트리가 `housingType=null`로 역직렬화되면 `RecentViewService.record()`가 이를 "housingType 미확정"과 구분하지 못해 조용히 기록을 스킵하는 문제가 있었습니다(Codex 코드리뷰 지적, 검증: `ComplexDetailCache.java`). 캐시 이름을 올리면 옛 엔트리를 애초에 다시 읽지 않게 되고, 그 옛 엔트리는 각자의 TTL로 자연 만료됩니다 — 배포 시점에 수동으로 Redis를 flush할 필요가 없습니다.
 
@@ -1385,7 +1411,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | --- | --- | --- |
 | 인증 | `/api/auth` | `POST /login`, `/signup`, `/refresh`, `/logout`, `GET /check-email` |
 | 회원 | `/api/users` | `GET·PUT /me`, `DELETE /me` |
-| 단지 | `/api/complexes` | `GET /search`(`regionCode`·`keyword` 중 하나 필수, `dealCategory`/`rentType`·범위 필터·`sort`·`page`/`size`), `/popular`, `/{id}`, `/map` |
+| 단지 | `/api/complexes` | `GET /search`(`regionCode`·`keyword` 중 하나 필수, `dealCategory`/`rentType`·범위 필터·`sort`·`page`/`size`), `/popular`, `/{id}`, `/map`(`bounds` 필수 + `/search`와 같은 이름의 필터, 상한 500·complex_id 순) |
 | 실거래 | `/api/trades` | `GET /search`, `?complexId=`, `/{tradeId}` |
 | 지역 | `/api/regions` | `GET ?query=`, `/interest-summary` |
 | 최근조회 | `/api/recent-views` | `GET` |
