@@ -73,6 +73,12 @@ async function setup(page, state) {
     if (path === '/api/complexes/map') {
       state.mapRequests.push(url.searchParams);
       if (state.mapStatus === 500) return json(500, errBody('INTERNAL_SERVER_ERROR', '지도 조회 중 서버 오류가 발생했습니다'));
+      // 단지 하나 주변의 좁은 범위(선택 단지 조회, features/map/selection.ts) — 위도 폭 0.01 미만이면 nearbyItems를 준다.
+      const [swLat, , neLat] = (url.searchParams.get('bounds') ?? '').split(',').map(Number);
+      if (state.nearbyItems && neLat - swLat < 0.01) {
+        state.nearbyRequests = (state.nearbyRequests ?? 0) + 1;
+        return json(200, okBody({ items: state.nearbyItems, truncated: false, limit: 500 }));
+      }
       return json(200, okBody({ items: state.items ?? ITEMS, truncated: !!state.truncated, limit: 500 }));
     }
     if (path === '/api/auth/login') {
@@ -93,6 +99,7 @@ async function setup(page, state) {
       return json(200, okBody([ITEMS[0]], { page: 0, size: 20, totalElements: 1, totalPages: 1 }));
     }
     const detailMatch = path.match(/^\/api\/complexes\/(\d+)$/);
+    if (detailMatch) state.detailRequests = [...(state.detailRequests ?? []), detailMatch[1]];
     if (detailMatch && state.details?.[detailMatch[1]]) return json(200, okBody(state.details[detailMatch[1]]));
     if (detailMatch) return json(404, errBody('COMPLEX_NOT_FOUND', '존재하지 않는 단지입니다'));
     if (path.startsWith('/api/trades')) return json(200, okBody([]));
@@ -132,6 +139,11 @@ const browser = await chromium.launch();
   ok('1: URL에 lat·lng·level(replace)', /lat=.*lng=.*level=6/.test(page.url()));
   ok('1: 데이터 출처 문구(푸터 대신 목록 아래)', await page.getByText('데이터 출처: 국토교통부 실거래가 공개시스템 (data.go.kr) · 갱신주기: 일 1회').isVisible());
   ok('1: 공통 푸터 없음', (await page.locator('footer').count()) === 0);
+  ok('1: 목록·범례·지도 컨트롤은 한 벌', (await page.locator('ul[aria-label="지도 단지 목록"]').count()) === 1 && (await page.locator('[aria-label="핀 색상 범례"]').count()) === 1 && (await page.locator('button[aria-label="지도 확대"]').count()) === 1);
+  ok('1: 건수 aria-live는 하나', (await page.locator('[aria-live]').filter({ hasText: /건/ }).count()) === 1);
+  const bubbleColor = (id) => pin(page, id).locator('span').evaluate((el) => getComputedStyle(el).color);
+  ok('1: 근사 핀 글자색 #bb4d00(흰 바탕 5.03:1)', (await bubbleColor(6)) === 'rgb(187, 77, 0)');
+  ok('1: 범례 근사 견본도 #bb4d00', (await page.locator('[aria-label="핀 색상 범례"] span span').nth(1).evaluate((el) => getComputedStyle(el).backgroundColor)) === 'rgb(187, 77, 0)');
 
   // 목록은 최신순 정렬이라 첫 행이 지도단지6이다 — 이름으로 찾는다.
   await page.getByRole('button', { name: '지도단지3', exact: true }).click();
@@ -239,6 +251,8 @@ const browser = await chromium.launch();
   await popup(page).waitFor();
   ok('6: 목록 항목 → 팝업, 시트는 접힘', (await sheet.getAttribute('data-snap')) === 'collapsed');
   ok('6: 하단 탭 "지도" 활성', (await page.getByRole('link', { name: '지도', exact: true }).getAttribute('class')).includes('text-brand'));
+  ok('6: 목록·범례·지도 컨트롤은 한 벌', (await page.locator('ul[aria-label="지도 단지 목록"]').count()) === 1 && (await page.locator('[aria-label="핀 색상 범례"]').count()) === 1 && (await page.locator('button[aria-label="지도 확대"]').count()) === 1);
+  ok('6: 건수 aria-live는 하나(시트 제목)', (await page.locator('[aria-live]').filter({ hasText: /건/ }).count()) === 1);
   ok('6: 데스크톱 막대 없음(칩만)', (await page.getByTestId('map-filter-chips').isVisible()) && (await page.locator('aside[aria-label="지도 단지 목록"]').count()) === 0);
   await popup(page).getByRole('button', { name: '팝업 닫기' }).click();
   await page.getByTestId('map-filter-chips').getByRole('button', { name: /거래유형/ }).click();
@@ -350,6 +364,82 @@ const browser = await chromium.launch();
     (await page.getByRole('button', { name: '지도에서 크게 보기' }).isDisabled()) &&
       (await page.getByText('위치 정보가 없어 지도에서 볼 수 없습니다').isVisible()),
   );
+  await context.close();
+}
+
+// 10) 선택한 단지가 새 응답에 없을 때(truncated로 빠짐) — 마지막으로 알던 값으로 핀과 팝업 유지
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  await page.getByRole('button', { name: '지도단지3', exact: true }).click();
+  await popup(page).waitFor();
+  const before = state.mapRequests.length;
+  state.items = ITEMS.filter((i) => i.complexId !== 3);
+  state.truncated = true;
+  await page.getByRole('button', { name: '지도 축소' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('ul[aria-label="지도 단지 목록"] > li').length === 5);
+  await page.waitForTimeout(200);
+  ok('10: 새 응답 요청이 나감', state.mapRequests.length > before);
+  ok('10: 목록에서는 빠짐(5행, "5+건")', (await rows(page).count()) === 5 && (await page.locator('aside [aria-live="polite"]').innerText()).includes('5+건'));
+  ok('10: 팝업 유지(지도단지3, 가격)', (await popup(page).count()) === 1 && (await popup(page).innerText()).includes('지도단지3') && (await popup(page).innerText()).includes('억'));
+  ok('10: 선택 핀 유지(aria-pressed)', (await pin(page, 3).count()) === 1 && (await pin(page, 3).getAttribute('aria-pressed')) === 'true');
+  ok('10: URL complexId 유지', page.url().includes('complexId=3'));
+  ok('10: 응답에 있던 단지라 상세 API를 다시 부르지 않음', !(state.detailRequests ?? []).includes('3'));
+  await popup(page).getByRole('button', { name: '팝업 닫기' }).click();
+  await popup(page).waitFor({ state: 'detached' });
+  await page.waitForTimeout(100);
+  ok('10: 닫으면 응답에 없는 핀은 사라짐', (await pin(page, 3).count()) === 0);
+  await context.close();
+}
+
+// 11) DTL-01 딥링크로 넓은 레벨에서 진입 — 응답(잘림)에 그 단지가 없으면 상세 API + 좁은 범위 조회로 받아 핀·팝업
+const detailOf = (id, lat, lng, extra = {}) => ({
+  complexId: id,
+  complexName: `지도단지${id}`,
+  housingType: 'APT',
+  sido: '서울특별시',
+  sigungu: '중구',
+  dongRi: '태평로1가',
+  legalDongCd: '1114010300',
+  matchPending: false,
+  matchMethod: 'EXACT',
+  precisionBadge: 'PRECISE',
+  latitude: lat,
+  longitude: lng,
+  locationPrecision: 'PRECISE',
+  basicInfo: {},
+  extendedInfo: {},
+  ...extra,
+});
+{
+  const far = item(9, { latitude: CENTER.lat + 0.08, longitude: CENTER.lng + 0.1, representativeAmount: 123000 });
+  const state = { mapStatus: 200, truncated: true, nearbyItems: [far], details: { 9: detailOf(9, far.latitude, far.longitude) } };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map?lat=${far.latitude}&lng=${far.longitude}&level=10&complexId=9`);
+  await popup(page).waitFor({ timeout: 8000 });
+  ok('11: 넓은 레벨 딥링크 → 그 단지 팝업', (await popup(page).innerText()).includes('지도단지9'));
+  ok('11: 좁은 범위 조회의 대표 거래 가격(12.3억)', (await popup(page).innerText()).includes('12억 3,000만원'));
+  ok('11: 상세 API 호출', (state.detailRequests ?? []).includes('9'));
+  ok('11: 핀 강조(aria-pressed)', (await pin(page, 9).getAttribute('aria-pressed')) === 'true');
+  ok('11: 목록에는 없음(범위 조회 응답 6건)', (await rows(page).count()) === 6);
+  ok('11: 레벨 10 유지', page.url().includes('level=10'));
+  await context.close();
+}
+{
+  // 지금 필터에 맞는 거래가 없는 단지(좁은 범위 조회도 비어 있음) — 상세만으로 핀(단지명)·팝업("거래 없음")
+  const state = { mapStatus: 200, truncated: true, nearbyItems: [], details: { 9: detailOf(9, CENTER.lat + 0.08, CENTER.lng + 0.1, { precisionBadge: 'APPROXIMATE', locationPrecision: 'APPROXIMATE' }) } };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map?complexId=9`);
+  await popup(page).waitFor({ timeout: 8000 });
+  ok('11b: 좌표 없는 complexId 링크도 팝업', (await popup(page).innerText()).includes('지도단지9'));
+  ok('11b: 거래 없으면 안내 문구', (await popup(page).innerText()).includes('선택한 조건의 최근 거래가 없습니다'));
+  ok('11b: 근사 좌표 문구', (await popup(page).innerText()).includes('근사 위치입니다'));
+  ok('11b: 핀 글자는 단지명, aria-label에 거래 정보 없음', (await pin(page, 9).innerText()).includes('지도단지9') && (await pin(page, 9).getAttribute('aria-label')).includes('거래 정보 없음'));
   await context.close();
 }
 

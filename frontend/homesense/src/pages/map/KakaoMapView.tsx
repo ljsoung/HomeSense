@@ -1,7 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangleIcon } from '../../components/icons/AlertTriangleIcon';
-import type { ComplexMapPointResponse } from '../../features/complex/types';
 import { loadKakaoMaps } from '../../features/map/kakaoLoader';
 import type { KakaoCluster, KakaoCustomOverlay, KakaoMap, KakaoMapsNamespace, KakaoMarkerClusterer } from '../../features/map/kakaoTypes';
 import {
@@ -13,6 +12,7 @@ import {
   type MapBounds,
   type MapViewport,
 } from '../../features/map/mapParams';
+import { hasRepresentativeTrade, type MapPinItem } from '../../features/map/selection';
 import { describeDealAmount } from '../../lib/format';
 
 /** 시작 위치 — MapPage가 complexId 조회까지 끝낸 결과. 지역 라벨은 SDK Geocoder가 필요해 여기서 처리한다. */
@@ -33,7 +33,8 @@ export interface KakaoMapHandle {
 interface KakaoMapViewProps {
   ref?: Ref<KakaoMapHandle>;
   startView: StartView;
-  items: ComplexMapPointResponse[];
+  /** 응답 항목 + 응답에 없는 선택 단지(MapPage가 마지막으로 알던 값으로 더한다). */
+  items: MapPinItem[];
   selectedId: number | null;
   /** 지도가 멈출 때(idle). SDK를 못 불러오면 화면 크기로 근사한 bounds로 한 번 부른다 — 목록 패널은 계속 동작한다. */
   onIdle: (viewport: MapViewport, bounds: MapBounds) => void;
@@ -57,10 +58,12 @@ const PIN_BUTTON_CLASS =
   'group flex min-h-11 min-w-11 cursor-pointer items-end justify-center bg-transparent p-0 focus-visible:outline-none';
 const BUBBLE_BASE_CLASS =
   'flex h-[26px] items-center whitespace-nowrap rounded-[13px] border-2 px-2.5 text-[12px] font-bold leading-[18px] group-focus-visible:ring-2 group-focus-visible:ring-offset-2 group-focus-visible:ring-[#101828]';
-// Figma 6:4595(정밀) / 6:4619(근사) / 6:4690(선택). 근사 색 #d97706은 Figma 핀·범례 값이다(카드 배지 amber와 다른 토큰).
+// Figma 6:4595(정밀) / 6:4619(근사) / 6:4690(선택). 근사 색은 Figma의 #d97706 대신 #bb4d00을 쓴다 — 12px 굵은 글자라
+// 4.5:1이 필요한데 #d97706은 흰 바탕 대비 3.19:1이다. #bb4d00은 5.03:1(선택 시 흰 글자도 같다)이고 이 프로젝트의 기존
+// 근사·주의 문구 색(DTL-01 근사 안내, "등기 전" 배지)과 같다. 정밀(#0f5c54)은 7.84:1. 범례 견본도 같은 값(MapPage).
 const BUBBLE_TONE = {
   precise: { idle: 'border-brand bg-white text-brand', selected: 'border-brand bg-brand text-white' },
-  approximate: { idle: 'border-[#d97706] bg-white text-[#d97706]', selected: 'border-[#d97706] bg-[#d97706] text-white' },
+  approximate: { idle: 'border-[#bb4d00] bg-white text-[#bb4d00]', selected: 'border-[#bb4d00] bg-[#bb4d00] text-white' },
 } as const;
 const BUBBLE_SHADOW = { idle: 'shadow-[0_2px_3px_rgba(0,0,0,0.16)]', selected: 'shadow-[0_4px_7px_rgba(0,0,0,0.28)]' } as const;
 
@@ -84,6 +87,8 @@ interface PinEntry {
   bubble: HTMLSpanElement;
   signature: string;
   approximate: boolean;
+  /** 클러스터러에 들어 있는지. 선택한 핀은 클러스터에 묶이지 않게 지도에 직접 붙인다. */
+  clustered: boolean;
 }
 
 /** 주소 검색(Geocoder) → 실패하면 장소 키워드 검색(Places)으로 한 번 더 찾는다. */
@@ -101,9 +106,19 @@ function geocode(maps: KakaoMapsNamespace, query: string): Promise<{ lat: number
   });
 }
 
-function pinLabel(item: ComplexMapPointResponse): string {
-  const price = describeDealAmount(item.representativeDealCategory, item.rentType, item.representativeAmount, item.monthlyRentAmount);
+function pinLabel(item: MapPinItem): string {
+  const price = hasRepresentativeTrade(item)
+    ? describeDealAmount(item.representativeDealCategory, item.rentType, item.representativeAmount, item.monthlyRentAmount)
+    : '거래 정보 없음';
   return `${item.complexName}, ${price}${item.precisionBadge === 'APPROXIMATE' ? ', 근사' : ''}`;
+}
+
+/** 핀 말풍선 글자 — 대표 거래가 없으면(지금 필터에 맞는 거래 없는 선택 단지) 짧게 줄인 단지명. */
+function pinText(item: MapPinItem): string {
+  if (hasRepresentativeTrade(item)) {
+    return formatPinPrice(item.representativeDealCategory, item.rentType, item.representativeAmount, item.monthlyRentAmount);
+  }
+  return item.complexName.length > 8 ? `${item.complexName.slice(0, 8)}…` : item.complexName;
 }
 
 function applyPinState(entry: PinEntry, selected: boolean) {
@@ -292,7 +307,8 @@ export function KakaoMapView({
       const item = next.get(id);
       const signature = item ? `${item.latitude},${item.longitude},${pinLabel(item)}` : '';
       if (!item || signature !== entry.signature) {
-        removed.push(entry.overlay);
+        if (entry.clustered) removed.push(entry.overlay);
+        else entry.overlay.setMap(null);
         pins.delete(id);
       }
     });
@@ -307,7 +323,7 @@ export function KakaoMapView({
       button.setAttribute('aria-label', pinLabel(item));
       button.dataset.complexId = String(id);
       const bubble = document.createElement('span');
-      bubble.textContent = formatPinPrice(item.representativeDealCategory, item.rentType, item.representativeAmount, item.monthlyRentAmount);
+      bubble.textContent = pinText(item);
       button.appendChild(bubble);
       button.addEventListener('click', () => callbacks.current.onSelectPin(id));
       const overlay = new maps.CustomOverlay({
@@ -323,10 +339,12 @@ export function KakaoMapView({
         bubble,
         signature: `${item.latitude},${item.longitude},${pinLabel(item)}`,
         approximate: item.precisionBadge === 'APPROXIMATE',
+        clustered: selectedIdRef.current !== id,
       };
       applyPinState(entry, selectedIdRef.current === id);
       pins.set(id, entry);
-      added.push(overlay);
+      if (entry.clustered) added.push(overlay);
+      else overlay.setMap(mapRef.current);
     });
     if (added.length) clusterer.addMarkers(added, true);
     if (removed.length || added.length) clusterer.redraw();
@@ -337,11 +355,35 @@ export function KakaoMapView({
   const hasPopup = popup != null;
   useEffect(() => {
     if (status !== 'ready') return;
-    pinsRef.current.forEach((entry, id) => applyPinState(entry, id === selectedId));
     const maps = mapsRef.current;
     const map = mapRef.current;
+    const clusterer = clustererRef.current;
     const overlay = popupOverlayRef.current;
-    if (!maps || !map || !overlay) return;
+    if (!maps || !map || !clusterer || !overlay) return;
+    // 선택한 핀은 클러스터러에서 빼 지도에 직접 붙인다 — 넓은 레벨에서도 클러스터에 묶여 사라지지 않는다. 선택이 풀리면 되돌린다.
+    let moved = false;
+    let refocus: HTMLButtonElement | null = null;
+    pinsRef.current.forEach((entry, id) => {
+      const selected = id === selectedId;
+      if (entry.clustered === selected) {
+        // 옮기는 동안 핀 DOM이 잠깐 문서에서 빠진다 — 그 핀에 포커스가 있었으면(팝업을 닫고 핀으로 돌린 직후) 되돌린다.
+        const hadFocus = entry.button.contains(document.activeElement);
+        if (selected) {
+          clusterer.removeMarkers([entry.overlay], true);
+          entry.overlay.setMap(map);
+        } else {
+          entry.overlay.setMap(null);
+          clusterer.addMarkers([entry.overlay], true);
+        }
+        entry.clustered = !selected;
+        moved = true;
+        if (hadFocus) refocus = entry.button;
+      }
+      applyPinState(entry, selected);
+    });
+    if (moved) clusterer.redraw();
+    const focusTarget = refocus as HTMLButtonElement | null;
+    if (focusTarget?.isConnected) focusTarget.focus();
     // 이미 지도에 붙어 있으면 위치만 바꾼다 — setMap을 다시 부르면 오버레이 DOM이 빠졌다 붙으며 팝업 안의 포커스를 잃는다.
     if (selectedItem && hasPopup) {
       overlay.setPosition(new maps.LatLng(selectedItem.latitude, selectedItem.longitude));

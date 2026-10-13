@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangleIcon } from '../../components/icons/AlertTriangleIcon';
 import { ChevronLeftIcon } from '../../components/icons/ChevronLeftIcon';
@@ -25,6 +25,7 @@ import {
   type PointView,
   type RegionView,
 } from '../../features/map/mapParams';
+import { fetchSelectedComplex, type MapPinItem } from '../../features/map/selection';
 import { useMapPoints } from '../../features/map/useMapPoints';
 import type { RegionAutocompleteResponse } from '../../features/region/types';
 import { defaultFilters, hasSearchCondition, type SearchFilters, type SortUi } from '../../features/search/searchParams';
@@ -221,7 +222,32 @@ export function MapPage() {
 
   const [listCollapsed, setListCollapsed] = useState(false);
 
-  const selectedItem = selectedId === null ? undefined : points.items.find((item) => item.complexId === selectedId);
+  // 선택한 단지 — 최신 응답에 있으면 그 항목을 쓰고 마지막으로 알던 값으로 기억한다. 응답에 없으면(상한을 넘어 잘림, 지도를
+  // 옮겨 범위 밖, 필터 변경) 마지막으로 알던 값으로 핀과 팝업을 유지한다. 처음부터 없으면(DTL-01 딥링크로 넓은 레벨 진입)
+  // 상세 API로 받는다(features/map/selection.ts).
+  const responseSelected = selectedId === null ? undefined : points.items.find((item) => item.complexId === selectedId);
+  const [knownSelected, setKnownSelected] = useState<MapPinItem | null>(null);
+  if (responseSelected && knownSelected !== responseSelected) setKnownSelected(responseSelected);
+  const selectedItem: MapPinItem | undefined =
+    responseSelected ?? (knownSelected !== null && knownSelected.complexId === selectedId ? knownSelected : undefined);
+  const needsSelectedLookup = selectedId !== null && !points.initialLoading && selectedItem === undefined;
+  const lookupSelected = useEffectEvent((complexId: number, signal: AbortSignal) =>
+    fetchSelectedComplex(complexId, filters, signal).then((found) => {
+      if (!signal.aborted && found) setKnownSelected(found);
+    }),
+  );
+  useEffect(() => {
+    if (!needsSelectedLookup || selectedId === null) return;
+    const controller = new AbortController();
+    // 실패(상세 404·네트워크)하면 팝업 없이 둔다 — 지도와 목록은 그대로 쓸 수 있다.
+    lookupSelected(selectedId, controller.signal).catch(() => {});
+    return () => controller.abort();
+  }, [needsSelectedLookup, selectedId]);
+  // 지도에 그리는 핀 — 응답 항목 + 응답에 없는 선택 단지.
+  const mapItems = useMemo<MapPinItem[]>(
+    () => (selectedItem && !responseSelected ? [...points.items, selectedItem] : points.items),
+    [points.items, selectedItem, responseSelected],
+  );
   const areaLabel = filters.regionLabel ?? filters.keyword ?? '지도 영역';
   const countText = points.initialLoading ? '…' : formatMapCount(points.items.length, points.truncated);
   const searchHref = hasSearchCondition(filters) ? buildSearchHref(filters) : undefined;
@@ -250,12 +276,12 @@ export function MapPage() {
     <KakaoMapView
       ref={mapRef}
       startView={startView}
-      items={points.items}
+      items={mapItems}
       selectedId={selectedId}
       onIdle={handleIdle}
       onSelectPin={(id) => {
         // 핀을 지도 가운데로 옮긴다 — 가장자리 핀의 팝업이 필터 막대·시트 아래로 잘리지 않게 한다(목록 선택과 같다).
-        const target = points.items.find((item) => item.complexId === id);
+        const target = mapItems.find((item) => item.complexId === id);
         if (target) mapRef.current?.panTo(target.latitude, target.longitude);
         select(id, 'map');
       }}
@@ -309,7 +335,7 @@ export function MapPage() {
         </span>
         <span className="h-3 w-px bg-[#e5e7eb]" aria-hidden="true" />
         <span className="flex items-center gap-1.5 text-[11px] font-medium text-[#4a5565]">
-          <span className="size-2.5 rounded-full bg-[#d97706]" aria-hidden="true" />
+          <span className="size-2.5 rounded-full bg-[#bb4d00]" aria-hidden="true" />
           근사
         </span>
       </div>

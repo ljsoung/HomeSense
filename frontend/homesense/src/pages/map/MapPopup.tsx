@@ -2,11 +2,12 @@ import { useEffect, useEffectEvent, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { XIcon } from '../../components/icons/XIcon';
 import { DataTrustBadge } from '../../components/ui/DataTrustBadge';
-import type { ComplexMapPointResponse } from '../../features/complex/types';
+import { hasRepresentativeTrade, type MapPinItem } from '../../features/map/selection';
 import { describeDealAmount, formatArea } from '../../lib/format';
 
 interface MapPopupProps {
-  item: ComplexMapPointResponse;
+  /** 대표 거래가 없을 수 있다 — 응답에 없는 선택 단지를 상세 API로 채웠고 지금 필터에 맞는 거래가 없을 때. */
+  item: MapPinItem;
   /** 사용자가 핀·목록을 눌러 연 팝업이면 true — 열리면 팝업으로 포커스를 옮긴다(뒤로 와서 복원된 팝업은 옮기지 않는다). */
   autoFocus: boolean;
   onClose: () => void;
@@ -25,7 +26,8 @@ export function MapPopup({ item, autoFocus, onClose }: MapPopupProps) {
   const titleId = `map-popup-title-${item.complexId}`;
   const approximateLocation = item.locationPrecision === 'APPROXIMATE';
   const similarMatch = item.matchMethod === 'SIMILAR';
-  const meta = [formatArea(item.representativeArea), item.floor != null ? `${item.floor}층` : null].filter(Boolean).join(' · ');
+  const trade = hasRepresentativeTrade(item) ? item : null;
+  const meta = trade ? [formatArea(trade.representativeArea), trade.floor != null ? `${trade.floor}층` : null].filter(Boolean).join(' · ') : '';
 
   // 팝업은 지도 오버레이 컨테이너에 포털로 그려지는데, 그 컨테이너는 부모(KakaoMapView)의 effect가 지도에 붙인다 —
   // 자식 effect가 먼저 돌아 그 시점엔 아직 문서 밖이라, 다음 프레임에 포커스를 옮긴다.
@@ -57,9 +59,13 @@ export function MapPopup({ item, autoFocus, onClose }: MapPopupProps) {
           {item.complexName}
         </p>
         {meta && <p className="pt-0.5 text-[11px] leading-[16.5px] text-[#99a1af]">{meta}</p>}
-        <p className="pt-2 text-[20px] font-extrabold leading-[30px] tracking-[-0.4px] text-[#1c1c1e]">
-          {describeDealAmount(item.representativeDealCategory, item.rentType, item.representativeAmount, item.monthlyRentAmount)}
-        </p>
+        {trade ? (
+          <p className="pt-2 text-[20px] font-extrabold leading-[30px] tracking-[-0.4px] text-[#1c1c1e]">
+            {describeDealAmount(trade.representativeDealCategory, trade.rentType, trade.representativeAmount, trade.monthlyRentAmount)}
+          </p>
+        ) : (
+          <p className="pt-2 text-[12.5px] leading-[19px] text-[#6a7282]">선택한 조건의 최근 거래가 없습니다</p>
+        )}
         {(approximateLocation || similarMatch) && (
           <div className="pt-1 text-[11px] leading-[16.5px] text-[#bb4d00]">
             {approximateLocation && <p>근사 위치입니다</p>}
