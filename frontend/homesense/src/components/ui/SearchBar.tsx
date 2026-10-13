@@ -13,9 +13,12 @@ interface SearchBarProps {
   placeholder?: string;
   /**
    * 'hero' = HOME-01 히어로(Figma 4:1302 — 2px 테두리 입력창 안 오른쪽에 "검색" 버튼),
-   * 'inline' = SRCH-01 재검색 바(입력창 옆에 별도 "재검색" 버튼).
+   * 'inline' = SRCH-01 재검색 바(입력창 옆에 별도 "재검색" 버튼),
+   * 'compact' = MAP-01 필터 바의 지역 검색(Figma 6:4347 — 회색 바탕·테두리 없음·13px, 버튼 없이 Enter로 제출).
    */
-  variant?: 'hero' | 'inline';
+  variant?: 'hero' | 'inline' | 'compact';
+  /** 입력창의 접근 가능한 이름(placeholder만으로는 부족한 화면에서). */
+  ariaLabel?: string;
   autoFocus?: boolean;
 }
 
@@ -33,6 +36,7 @@ export function SearchBar({
   placeholder = '지역명·단지명(건물명)으로 검색',
   variant = 'hero',
   autoFocus,
+  ariaLabel,
 }: SearchBarProps) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,8 +91,8 @@ export function SearchBar({
 
   const renderInputBox = (boxClassName: string, trailing?: ReactNode) => (
     <div className="relative flex-1">
-      <div className={`flex items-center gap-3 rounded-[14px] border-[#e5e7eb] px-3.5 focus-within:border-brand ${boxClassName}`}>
-        <SearchIcon className="size-[18px] shrink-0 text-[#99a1af]" />
+      <div className={`flex items-center rounded-[14px] border-[#e5e7eb] px-3.5 focus-within:border-brand ${boxClassName}`}>
+        <SearchIcon className={`shrink-0 text-[#99a1af] ${variant === 'compact' ? 'size-4' : 'size-[18px]'}`} />
         <input
           ref={inputRef}
           type="text"
@@ -97,6 +101,7 @@ export function SearchBar({
           aria-controls={listboxId}
           aria-activedescendant={highlighted >= 0 ? `${listboxId}-option-${highlighted}` : undefined}
           aria-autocomplete="list"
+          aria-label={ariaLabel}
           autoFocus={autoFocus}
           value={value}
           maxLength={KEYWORD_MAX_LENGTH}
@@ -112,7 +117,9 @@ export function SearchBar({
             setTimeout(autocomplete.close, 120);
           }}
           placeholder={placeholder}
-          className="w-full min-w-0 text-[14px] text-[#101828] placeholder:text-[#99a1af] focus:outline-none"
+          className={`w-full min-w-0 text-[#101828] placeholder:text-[#99a1af] focus:outline-none ${
+            variant === 'compact' ? 'bg-transparent text-[13px] font-medium' : 'text-[14px]'
+          }`}
         />
         {value && (
           <button
@@ -155,6 +162,21 @@ export function SearchBar({
     </div>
   );
 
+  if (variant === 'compact') {
+    return (
+      <form
+        role="search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+        className="w-full"
+      >
+        {renderInputBox('gap-2 border border-transparent bg-[#f3f4f6] py-2 focus-within:bg-white')}
+      </form>
+    );
+  }
+
   if (variant === 'inline') {
     return (
       <form
@@ -165,7 +187,7 @@ export function SearchBar({
         }}
         className="flex items-center gap-2"
       >
-        {renderInputBox('border py-2.5')}
+        {renderInputBox('gap-3 border py-2.5')}
         {/* Figma 재검색 바(4:1704/24:9405/24:10388)는 입력창 옆에 "재검색" 버튼을 별도로 둔다 —
             Enter 제출만 지원하던 이전 구현은 이 버튼이 없어 마우스만 쓰는 사용자에게 제출 수단이
             안 보였다. */}
@@ -190,7 +212,7 @@ export function SearchBar({
       className="px-4 py-3"
     >
       {renderInputBox(
-        'border-2 py-2.5',
+        'gap-3 border-2 py-2.5',
         <button
           type="submit"
           className="flex shrink-0 items-center gap-1.5 rounded-[10px] bg-brand px-5 py-2 text-[13.5px] font-semibold whitespace-nowrap text-white hover:bg-[#0d4f48]"
