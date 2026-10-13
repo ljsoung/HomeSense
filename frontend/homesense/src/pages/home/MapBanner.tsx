@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRightIcon } from '../../components/icons/ArrowRightIcon';
 import { MapFoldIcon } from '../../components/icons/MapFoldIcon';
 
-/** HOME-01 구성요소 3 — 지도 진입 배너. MAP-01은 자리표시 화면이라 링크만 연결한다. */
+/** HOME-01 구성요소 3 — 지도 진입 배너. 쿼리 없이 MAP-01로 간다 — 지도는 마지막으로 본 위치, 없으면 기본 위치(서울시청 부근)에서 연다. */
 export function MapBanner() {
   return (
     <Link

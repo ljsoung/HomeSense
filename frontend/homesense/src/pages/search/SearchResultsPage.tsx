@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { BottomSheet } from '../../components/ui/BottomSheet';
 import { ComplexCard } from '../../components/ui/ComplexCard';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -29,6 +29,7 @@ import {
   type SearchFilters,
 } from '../../features/search/searchParams';
 import { useExecuteSearch } from '../../features/search/useExecuteSearch';
+import { buildMapHref } from '../../features/map/mapParams';
 import type { PageMeta } from '../../types/api';
 import { getErrorMessage } from '../../lib/apiError';
 import { useFavoriteToggle } from '../home/useFavoriteToggle';
@@ -309,17 +310,13 @@ export function SearchResultsPage() {
                 </span>
               )}
             </button>
-            <a
-              href={`/map?${(() => {
-                const p = serializeSearchParams(filters);
-                p.delete('page');
-                return p.toString();
-              })()}`}
+            <Link
+              to={buildMapHref(filters)}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-[12px] border border-[#e5e7eb] bg-white py-2.5 text-[13.5px] font-semibold text-[#364153]"
             >
               <MapFoldIcon className="size-4" />
               지도
-            </a>
+            </Link>
           </div>
 
           {noCondition ? (
@@ -396,17 +393,13 @@ export function SearchResultsPage() {
                       </button>
                     ))}
                   </div>
-                  <a
-                    href={`/map?${(() => {
-                      const p = serializeSearchParams(filters);
-                      p.delete('page');
-                      return p.toString();
-                    })()}`}
+                  <Link
+                    to={buildMapHref(filters)}
                     className="hidden items-center gap-1 rounded-full border border-[#e5e7eb] px-3 py-1.5 text-[12.5px] font-medium text-[#364153] hover:bg-[#f7f8fa] md:flex"
                   >
                     <MapFoldIcon className="size-3.5" />
                     지도로 보기
-                  </a>
+                  </Link>
                 </div>
               </div>
 
