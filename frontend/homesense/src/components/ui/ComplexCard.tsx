@@ -24,6 +24,8 @@ interface ComplexCardProps {
  * 마스터 매칭 신뢰도"의 문제다) 정정한 문구를 쓴다.
  */
 const SIMILAR_CAPTION = '지번 등 일부 정보가 정확히 일치하지 않아 유사도 기준으로 추정 매칭된 결과입니다.';
+/** 정확 매칭이지만 좌표가 단지명으로 찾은 근사 위치일 때(BAT-GEO-01 키워드 보완). UI정의서 7.2절 "근사 위치입니다". */
+const APPROXIMATE_LOCATION_CAPTION = '지도 위치는 근사 위치입니다.';
 
 /**
  * UIC-05. 백엔드에 단지 이미지 URL 필드가 아예 없어(Complex 엔티티 확인 완료) 실제 사진 대신
@@ -36,7 +38,9 @@ const SIMILAR_CAPTION = '지번 등 일부 정보가 정확히 일치하지 않�
  * "· undefined층"이 됐다.
  */
 export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePending = false, className = '', variant = 'grid' }: ComplexCardProps) {
-  const isSimilar = complex.matchMethod === 'SIMILAR';
+  // 배지·주황 표시는 서버가 계산한 precisionBadge로 정한다. 안내 문구만 근사의 이유(유사 매칭/근사 좌표)에 따라 고른다.
+  const isApproximate = complex.precisionBadge === 'APPROXIMATE';
+  const approximateCaption = complex.matchMethod === 'SIMILAR' ? SIMILAR_CAPTION : APPROXIMATE_LOCATION_CAPTION;
   const favoriteButton = (
     <button
       type="button"
@@ -81,13 +85,13 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePe
       <Link
         to={`/complexes/${complex.complexId}`}
         className={`flex flex-col gap-2 rounded-[16px] border bg-white p-3 shadow-[0_1px_3px_rgba(0,0,0,0.1),0_1px_2px_-1px_rgba(0,0,0,0.1)] transition-colors hover:border-brand/40 ${
-          isSimilar ? 'border-[#fee685]' : 'border-[#f3f4f6]'
+          isApproximate ? 'border-[#fee685]' : 'border-[#f3f4f6]'
         } ${className}`}
       >
         <div className="flex gap-3">
           <div
             className={`relative size-[92px] shrink-0 overflow-hidden rounded-[12px] bg-gradient-to-br from-[#e8f5f2] to-[#d1eae6] ${
-              isSimilar ? 'after:absolute after:inset-0 after:bg-[rgba(255,185,0,0.1)]' : ''
+              isApproximate ? 'after:absolute after:inset-0 after:bg-[rgba(255,185,0,0.1)]' : ''
             }`}
           >
             <div className="flex h-full w-full items-center justify-center">
@@ -97,7 +101,7 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePe
 
           <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
             <div className="min-w-0">
-              <DataTrustBadge housingType={complex.representativeHousingType} matchMethod={complex.matchMethod} />
+              <DataTrustBadge housingType={complex.representativeHousingType} precisionBadge={complex.precisionBadge} />
               <p className="mt-1 truncate text-[14px] font-bold text-[#101828]">{complex.complexName}</p>
               <p className="truncate text-[11.5px] text-[#99a1af]">{formatAddress(complex.sigungu, complex.dongRi)}</p>
               <p className="mt-1 text-[11px] text-[#99a1af]">
@@ -121,7 +125,7 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePe
           </div>
         </div>
 
-        {isSimilar && <p className="rounded-[8px] bg-[#fef9c2] px-2.5 py-1.5 text-[11px] leading-[1.5] text-[#973c00]">{SIMILAR_CAPTION}</p>}
+        {isApproximate && <p className="rounded-[8px] bg-[#fef9c2] px-2.5 py-1.5 text-[11px] leading-[1.5] text-[#973c00]">{approximateCaption}</p>}
       </Link>
     );
   }
@@ -134,7 +138,7 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePe
         </div>
         <div className="absolute top-2.5 right-2.5">{favoriteButton}</div>
         <div className="absolute bottom-2.5 left-2.5">
-          <DataTrustBadge housingType={complex.representativeHousingType} matchMethod={complex.matchMethod} />
+          <DataTrustBadge housingType={complex.representativeHousingType} precisionBadge={complex.precisionBadge} />
         </div>
       </div>
       <div className="flex flex-col p-4">

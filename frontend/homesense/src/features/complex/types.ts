@@ -2,6 +2,12 @@ export type HousingType = 'APT' | 'VILLA';
 export type DealCategory = 'SALE' | 'RENT';
 export type RentType = 'JEONSE' | 'WOLSE';
 export type MatchMethod = 'EXACT' | 'SIMILAR';
+/**
+ * UIC-09 정밀/근사 배지 — 서버(PrecisionBadge.java)가 matchMethod와 locationPrecision으로 한 번 계산해 검색·인기·지도·상세
+ * 응답에 같은 값을 내린다. 근사는 유사 매칭(SIMILAR)이거나 근사 좌표(APPROXIMATE)일 때다. 배지는 이 값만 보고 그린다 —
+ * 화면에서 matchMethod로 다시 조합하지 않는다. 판단 근거가 없으면(대표 거래 없음) 키가 빠진다.
+ */
+export type PrecisionBadge = 'PRECISE' | 'APPROXIMATE';
 
 /**
  * ComplexSummaryResponse.java 실제 필드 그대로. 대표 거래 금액은 dealCategory가 SALE이면
@@ -37,6 +43,7 @@ export interface ComplexSummaryResponse {
   representativeAmount: number;
   representativeArea: number;
   matchMethod?: MatchMethod | null;
+  precisionBadge?: PrecisionBadge | null;
   floor?: number | null;
   rentType?: RentType | null;
   monthlyRentAmount?: number | null;
@@ -63,6 +70,7 @@ export interface ComplexDetailResponse {
   locationPrecision?: string | null;
   matchPending: boolean;
   matchMethod?: MatchMethod | null;
+  precisionBadge?: PrecisionBadge | null;
   basicInfo: ComplexBasicInfo;
   extendedInfo: ComplexExtendedInfo;
 }

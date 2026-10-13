@@ -106,7 +106,7 @@ interface ComplexHeaderProps {
 
 /**
  * DTL-01 구성요소 2 — 단지 헤더(Figma 4:3045, 근사 6:3612). 근사 매칭이면 카드 맨 위에 주황 안내 상자, 그 아래
- * 유형 배지와 정밀/근사 배지(matchMethod가 null이면 그리지 않는다, 결정 5), 단지명(h1)·주소, 관심·공유 버튼.
+ * 유형 배지와 정밀/근사 배지(서버의 precisionBadge — 유사 매칭이거나 근사 좌표면 근사, 없으면 그리지 않는다), 단지명(h1)·주소, 관심·공유 버튼.
  * 버튼은 태블릿·데스크톱에서 아이콘+글자, 모바일에서 아이콘만 보인다(이름은 aria-label로 준다).
  */
 export function ComplexHeader({ detail, favorited, favoritePending, favoriteProcessing, onToggleFavorite }: ComplexHeaderProps) {
@@ -156,8 +156,8 @@ export function ComplexHeader({ detail, favorited, favoritePending, favoriteProc
 
       <div className={`flex items-start gap-4 ${similar ? 'pt-4' : ''}`}>
         <div className="min-w-0 flex-1">
-          {(detail.housingType || detail.matchMethod) && (
-            <DataTrustBadge housingType={detail.housingType} matchMethod={detail.matchMethod} size="md" />
+          {(detail.housingType || detail.precisionBadge) && (
+            <DataTrustBadge housingType={detail.housingType} precisionBadge={detail.precisionBadge} size="md" />
           )}
           <h1
             id="complex-name"
