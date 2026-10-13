@@ -31,7 +31,7 @@ class ComplexGeocodingCommandLineRunnerTest {
     private ComplexGeocodingCommandLineRunner runner;
 
     private static RunResult result(StopReason reason) {
-        return new RunResult(0, 0, 0, 0, 0, 0, 0, 0, 0, reason);
+        return new RunResult(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, reason);
     }
 
     @Test
@@ -88,7 +88,7 @@ class ComplexGeocodingCommandLineRunnerTest {
     @Test
     void 재판정이_일시_실패_연속으로_멈추면_종료_코드_1이다() {
         when(geocodingService.recheckApproximate(Integer.MAX_VALUE))
-                .thenReturn(new RecheckResult(0, 0, 0, 0, 0, 0, StopReason.CONSECUTIVE_TRANSIENT_FAILURES));
+                .thenReturn(new RecheckResult(0, 0, 0, 0, 0, 0, 0, StopReason.CONSECUTIVE_TRANSIENT_FAILURES));
 
         assertThat(runner.execute(List.of("--apply", "--recheck-approximate"))).isEqualTo(1);
     }

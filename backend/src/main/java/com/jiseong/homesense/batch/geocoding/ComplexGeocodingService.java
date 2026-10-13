@@ -79,18 +79,22 @@ public class ComplexGeocodingService {
      * @param notFound  카카오가 주소를 못 찾은 단지 수
      * @param transientFailed 재시도까지 실패한 단지 수
      * @param calls     이번 실행에서 보낸 카카오 호출 수(재시도 포함)
+     * @param remaining 중단으로 이번 실행이 도달하지 못한 대상 중 지번이 있는 단지 수(끝까지 처리했으면 0). 기본 실행에서는
+     *                  "못 찾음" 표시로 다음 실행도 건너뛸 단지가 섞일 수 있다 — Redis를 다시 읽지 않으려고 세지 않았다. 정확한
+     *                  수는 dry-run으로 본다. 일시 실패한 단지는 {@code transientFailed}에 따로 센다
      */
     public record RunResult(int targets, int noJibun, int skipped, int found, int foundByKeyword, int written,
-            int notFound, int transientFailed, int calls, StopReason stopReason) {
+            int notFound, int transientFailed, int calls, int remaining, StopReason stopReason) {
     }
 
     /**
      * @param kept    다시 채택돼 좌표가 그대로인 단지 수
      * @param moved   다시 채택됐지만 다른 장소가 골라져 좌표를 바꾼 단지 수
      * @param dropped 탈락해 좌표를 NULL로 되돌리고 "못 찾음" 표시를 남긴 단지 수
+     * @param remaining 중단으로 이번 실행이 판정하지 못한 APPROXIMATE 단지 수(일시 실패한 단지는 제외)
      */
     public record RecheckResult(int targets, int kept, int moved, int dropped, int transientFailed, int calls,
-            StopReason stopReason) {
+            int remaining, StopReason stopReason) {
     }
 
     /** @param refinable 지번을 뽑아 호출할 수 있는 단지 수, @param markedNotFound 그중 "못 찾음" 표시로 건너뛸 단지 수 */
@@ -196,8 +200,11 @@ public class ComplexGeocodingService {
         StopReason stopReason = StopReason.COMPLETED;
         TransientFailureStreak transientStreak = new TransientFailureStreak(properties.maxConsecutiveTransientFailures());
         int attempted = 0;
+        // 이번 실행이 끝내지 못한 첫 대상의 위치. 예외로 멈추면 지금 대상에 머물러 그 단지도 남은 대상으로 센다.
+        int position = 0;
         try {
-            for (Target t : targets) {
+            for (; position < targets.size(); position++) {
+                Target t = targets.get(position);
                 Optional<GeocodingAddressRefiner.RefinedAddress> refined = GeocodingAddressRefiner.refine(t.address(), t.dongRi());
                 if (refined.isEmpty()) {
                     counter.noJibun++;
@@ -242,6 +249,7 @@ public class ComplexGeocodingService {
                     auditLogger.logGeocodingFailure(t.complexId(), refined.get().query(), e.getMessage(), true);
                     if (transientStreak.failed()) {
                         stopReason = StopReason.CONSECUTIVE_TRANSIENT_FAILURES;
+                        position++; // 이 단지는 transientFailed로 셌다
                         break;
                     }
                     continue;
@@ -280,9 +288,12 @@ public class ComplexGeocodingService {
             counter.written += flush(pending);
         }
 
+        int remaining = (int) targets.subList(position, targets.size()).stream()
+                .filter(t -> GeocodingAddressRefiner.refine(t.address(), t.dongRi()).isPresent())
+                .count();
         RunResult runResult = new RunResult(targets.size(), counter.noJibun, counter.skipped, counter.found,
                 counter.foundByKeyword, counter.written, counter.notFound, counter.transientFailed, counter.calls,
-                stopReason);
+                remaining, stopReason);
         log.atInfo()
                 .addKeyValue("programId", "BAT-GEO-01")
                 .addKeyValue("retryFailed", retryFailed)
@@ -295,11 +306,13 @@ public class ComplexGeocodingService {
                 .addKeyValue("skipped", runResult.skipped())
                 .addKeyValue("transientFailed", runResult.transientFailed())
                 .addKeyValue("calls", runResult.calls())
+                .addKeyValue("remaining", runResult.remaining())
                 .addKeyValue("stopReason", runResult.stopReason())
                 .log("BAT-GEO-01 지오코딩 종료: 대상 {}건, 좌표 {}건(그중 키워드 {}건, 기록 {}건), 못 찾음 {}건, 지번 없음 {}건, "
-                        + "건너뜀 {}건, 일시 실패 {}건, 호출 {}건, 종료 사유 {}", runResult.targets(), runResult.found(),
-                        runResult.foundByKeyword(), runResult.written(), runResult.notFound(), runResult.noJibun(),
-                        runResult.skipped(), runResult.transientFailed(), runResult.calls(), runResult.stopReason());
+                        + "건너뜀 {}건, 일시 실패 {}건, 호출 {}건, 남은 대상 {}건, 종료 사유 {}", runResult.targets(),
+                        runResult.found(), runResult.foundByKeyword(), runResult.written(), runResult.notFound(),
+                        runResult.noJibun(), runResult.skipped(), runResult.transientFailed(), runResult.calls(),
+                        runResult.remaining(), runResult.stopReason());
         return runResult;
     }
 
@@ -379,8 +392,10 @@ public class ComplexGeocodingService {
         int checked = 0;
         TransientFailureStreak transientStreak = new TransientFailureStreak(properties.maxConsecutiveTransientFailures());
         StopReason stopReason = StopReason.COMPLETED;
+        int position = 0; // run()과 같다 — 끝내지 못한 첫 대상의 위치
         try {
-            for (ApproximateTarget a : targets) {
+            for (; position < targets.size(); position++) {
+                ApproximateTarget a = targets.get(position);
                 if (checked >= maxComplexes) {
                     stopReason = StopReason.MAX_COMPLEXES;
                     break;
@@ -399,6 +414,7 @@ public class ComplexGeocodingService {
                     checked++;
                     if (transientStreak.failed()) {
                         stopReason = StopReason.CONSECUTIVE_TRANSIENT_FAILURES;
+                        position++; // 이 단지는 transientFailed로 셌다
                         break;
                     }
                     continue;
@@ -437,7 +453,7 @@ public class ComplexGeocodingService {
             Thread.currentThread().interrupt();
         }
         RecheckResult result = new RecheckResult(targets.size(), kept, moved, dropped, counter.transientFailed,
-                counter.calls, stopReason);
+                counter.calls, targets.size() - position, stopReason);
         log.atInfo()
                 .addKeyValue("programId", "BAT-GEO-01")
                 .addKeyValue("recheckApproximate", true)
@@ -447,10 +463,11 @@ public class ComplexGeocodingService {
                 .addKeyValue("dropped", result.dropped())
                 .addKeyValue("transientFailed", result.transientFailed())
                 .addKeyValue("calls", result.calls())
+                .addKeyValue("remaining", result.remaining())
                 .addKeyValue("stopReason", result.stopReason())
                 .log("BAT-GEO-01 APPROXIMATE 재판정 종료: 대상 {}건, 유지 {}건, 좌표 변경 {}건, 탈락 {}건, 일시 실패 {}건, 호출 {}건, "
-                        + "종료 사유 {}", result.targets(), result.kept(), result.moved(), result.dropped(),
-                        result.transientFailed(), result.calls(), result.stopReason());
+                        + "남은 대상 {}건, 종료 사유 {}", result.targets(), result.kept(), result.moved(), result.dropped(),
+                        result.transientFailed(), result.calls(), result.remaining(), result.stopReason());
         return result;
     }
 

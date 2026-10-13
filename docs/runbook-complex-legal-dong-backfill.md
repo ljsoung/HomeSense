@@ -260,7 +260,8 @@ NULL로 되돌린 뒤 실행한다.
    java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply --limit=20
    java -jar homesense.jar --spring.profiles.active=prod,backfill-geocoding --apply
    ```
-   일일 상한에 닿으면 종료 사유 `DAILY_LIMIT`, 종료 코드 0으로 끝난다. 다음 날 같은 명령을 다시 실행하거나 03:00 정기 런이
+   일일 상한에 닿으면 종료 사유 `DAILY_LIMIT`, 종료 코드 0으로 끝난다(`--limit`의 `MAX_COMPLEXES`도 0). 종료 로그의
+   "남은 대상 {n}건"으로 얼마나 남았는지 본다 — 0이 아니면 아직 끝나지 않은 것이다. 다음 날 같은 명령을 다시 실행하거나 03:00 정기 런이
    이어서 처리한다(좌표 NULL인 단지만 고르므로 자연히 이어진다). 종료 코드 1이면 다음 중 하나다.
    - `RATE_LIMITED`(429): 콘솔 쿼터와 `GEOCODING_DAILY_LIMIT`을 확인하고 다음 날 다시 실행한다.
    - `CONFIGURATION_ERROR`(401·403): REST API 키와 콘솔의 카카오맵 활성화를 확인한다.

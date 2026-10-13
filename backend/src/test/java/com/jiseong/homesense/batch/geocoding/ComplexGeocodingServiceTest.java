@@ -117,7 +117,7 @@ class ComplexGeocodingServiceTest {
                 LocalDateTime.now(CLOCK));
         verify(detailCache).evictIfPresent(1L);
         assertThat(result).isEqualTo(
-                new ComplexGeocodingService.RunResult(1, 0, 0, 1, 0, 1, 0, 0, 1, StopReason.COMPLETED));
+                new ComplexGeocodingService.RunResult(1, 0, 0, 1, 0, 1, 0, 0, 1, 0, StopReason.COMPLETED));
     }
 
     @Test
@@ -183,6 +183,7 @@ class ComplexGeocodingServiceTest {
 
         verify(client, times(3)).geocode(anyString(), anyBoolean());
         assertThat(result.stopReason()).isEqualTo(StopReason.CONSECUTIVE_TRANSIENT_FAILURES);
+        assertThat(result.remaining()).isEqualTo(2); // 실패한 3건은 transientFailed로 따로 센다
     }
 
     @Test
@@ -266,6 +267,7 @@ class ComplexGeocodingServiceTest {
         verify(complexRepository).fillCoordinatesIfNull(eq(1L), any(), any(), eq("PRECISE"), any());
         assertThat(result.stopReason()).isEqualTo(StopReason.DAILY_LIMIT);
         assertThat(result.written()).isEqualTo(1);
+        assertThat(result.remaining()).isEqualTo(1); // 보내지 못한 73
     }
 
     @Test
@@ -282,6 +284,7 @@ class ComplexGeocodingServiceTest {
         verify(auditLogger).logBatchFailure(eq("BAT-GEO-01"), any(GeocodingConfigurationException.class));
         assertThat(result.stopReason()).isEqualTo(StopReason.CONFIGURATION_ERROR);
         assertThat(result.written()).isEqualTo(1);
+        assertThat(result.remaining()).isEqualTo(2); // 401을 받은 73과 보내지 않은 74
     }
 
     @Test
@@ -296,6 +299,7 @@ class ComplexGeocodingServiceTest {
         verify(client, times(1)).geocode(anyString(), anyBoolean());
         assertThat(result.stopReason()).isEqualTo(StopReason.MAX_COMPLEXES);
         assertThat(result.noJibun()).isEqualTo(1);
+        assertThat(result.remaining()).isEqualTo(1); // 지번 있는 3만 센다
     }
 
     @Test
@@ -676,6 +680,7 @@ class ComplexGeocodingServiceTest {
         assertThat(result.transientFailed()).isEqualTo(3);
         assertThat(result.calls()).isEqualTo(3);
         assertThat(result.stopReason()).isEqualTo(StopReason.CONSECUTIVE_TRANSIENT_FAILURES);
+        assertThat(result.remaining()).isEqualTo(2);
     }
 
     @Test
