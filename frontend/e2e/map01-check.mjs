@@ -77,6 +77,7 @@ async function setup(page, state) {
       const [swLat, , neLat] = (url.searchParams.get('bounds') ?? '').split(',').map(Number);
       if (state.nearbyItems && neLat - swLat < 0.01) {
         state.nearbyRequests = (state.nearbyRequests ?? 0) + 1;
+        state.events = [...(state.events ?? []), 'nearby'];
         return json(200, okBody({ items: state.nearbyItems, truncated: false, limit: 500 }));
       }
       return json(200, okBody({ items: state.items ?? ITEMS, truncated: !!state.truncated, limit: 500 }));
@@ -99,7 +100,10 @@ async function setup(page, state) {
       return json(200, okBody([ITEMS[0]], { page: 0, size: 20, totalElements: 1, totalPages: 1 }));
     }
     const detailMatch = path.match(/^\/api\/complexes\/(\d+)$/);
-    if (detailMatch) state.detailRequests = [...(state.detailRequests ?? []), detailMatch[1]];
+    if (detailMatch) {
+      state.detailRequests = [...(state.detailRequests ?? []), detailMatch[1]];
+      state.events = [...(state.events ?? []), `detail:${detailMatch[1]}`];
+    }
     if (detailMatch && state.details?.[detailMatch[1]]) return json(200, okBody(state.details[detailMatch[1]]));
     if (detailMatch) return json(404, errBody('COMPLEX_NOT_FOUND', '존재하지 않는 단지입니다'));
     if (path.startsWith('/api/trades')) return json(200, okBody([]));
@@ -395,7 +399,8 @@ const browser = await chromium.launch();
   await context.close();
 }
 
-// 11) DTL-01 딥링크로 넓은 레벨에서 진입 — 응답(잘림)에 그 단지가 없으면 상세 API + 좁은 범위 조회로 받아 핀·팝업
+// 11) DTL-01 딥링크로 넓은 레벨에서 진입 — 응답(잘림)에 그 단지가 없으면 URL 좌표 주변 좁은 범위 조회로 complexId를 골라
+//     핀·팝업. 거기 없을 때만 상세 API(최근 조회를 기록한다)를 부른다.
 const detailOf = (id, lat, lng, extra = {}) => ({
   complexId: id,
   complexName: `지도단지${id}`,
@@ -416,17 +421,35 @@ const detailOf = (id, lat, lng, extra = {}) => ({
 });
 {
   const far = item(9, { latitude: CENTER.lat + 0.08, longitude: CENTER.lng + 0.1, representativeAmount: 123000 });
-  const state = { mapStatus: 200, truncated: true, nearbyItems: [far], details: { 9: detailOf(9, far.latitude, far.longitude) } };
+  // 좁은 범위 응답에 다른 단지(8)가 먼저 섞여 있다 — complexId로만 골라야 한다.
+  const other = item(8, { latitude: far.latitude + 0.0001, longitude: far.longitude, representativeAmount: 45000 });
+  const state = { mapStatus: 200, truncated: true, nearbyItems: [other, far], details: { 9: detailOf(9, far.latitude, far.longitude) } };
   const { context, page } = await newPage(browser, 1280, 800);
   await setup(page, state);
   await page.goto(`${BASE}/map?lat=${far.latitude}&lng=${far.longitude}&level=10&complexId=9`);
   await popup(page).waitFor({ timeout: 8000 });
   ok('11: 넓은 레벨 딥링크 → 그 단지 팝업', (await popup(page).innerText()).includes('지도단지9'));
   ok('11: 좁은 범위 조회의 대표 거래 가격(12.3억)', (await popup(page).innerText()).includes('12억 3,000만원'));
-  ok('11: 상세 API 호출', (state.detailRequests ?? []).includes('9'));
+  ok('11: 섞인 다른 단지(4.5억)가 아니라 complexId=9', !(await popup(page).innerText()).includes('지도단지8') && !(await popup(page).innerText()).includes('4억 5,000만원'));
+  ok('11: 좁은 범위 조회를 먼저 함', (state.nearbyRequests ?? 0) >= 1);
+  ok('11: 좁은 범위에서 찾았으니 상세 API(최근 조회 기록)를 부르지 않음', (state.detailRequests ?? []).length === 0);
+  ok('11: 섞인 다른 단지는 핀으로 더하지 않음', (await pin(page, 8).count()) === 0);
   ok('11: 핀 강조(aria-pressed)', (await pin(page, 9).getAttribute('aria-pressed')) === 'true');
   ok('11: 목록에는 없음(범위 조회 응답 6건)', (await rows(page).count()) === 6);
   ok('11: 레벨 10 유지', page.url().includes('level=10'));
+  await context.close();
+}
+{
+  // 좌표 있는 딥링크인데 좁은 범위에 다른 단지만 있음(필터에 맞는 거래 없음) — 그때만 상세 API, 상세만으로 핀·팝업
+  const lat = CENTER.lat + 0.08;
+  const lng = CENTER.lng + 0.1;
+  const state = { mapStatus: 200, truncated: true, nearbyItems: [item(8, { latitude: lat, longitude: lng })], details: { 9: detailOf(9, lat, lng) } };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map?lat=${lat}&lng=${lng}&level=10&complexId=9`);
+  await popup(page).waitFor({ timeout: 8000 });
+  ok('11c: 좁은 범위에 없으면 상세 API를 한 번 부름', (state.detailRequests ?? []).filter((id) => id === '9').length === 1);
+  ok('11c: 다른 단지를 고르지 않고 거래 없음 안내', (await popup(page).innerText()).includes('지도단지9') && (await popup(page).innerText()).includes('선택한 조건의 최근 거래가 없습니다'));
   await context.close();
 }
 {
@@ -437,6 +460,10 @@ const detailOf = (id, lat, lng, extra = {}) => ({
   await page.goto(`${BASE}/map?complexId=9`);
   await popup(page).waitFor({ timeout: 8000 });
   ok('11b: 좌표 없는 complexId 링크도 팝업', (await popup(page).innerText()).includes('지도단지9'));
+  // 진입 때 좌표를 얻으려고 상세를 받는다(dev StrictMode는 이 진입 effect를 두 번 돌려 요청이 2건일 수 있다).
+  // 선택 단지 조회는 그 상세를 다시 쓰므로 좁은 범위 조회 뒤에는 상세 요청이 없어야 한다.
+  const events = state.events ?? [];
+  ok('11b: 좁은 범위 조회 뒤에는 상세를 다시 부르지 않음', events.includes('nearby') && !events.slice(events.indexOf('nearby')).some((e) => e.startsWith('detail')));
   ok('11b: 거래 없으면 안내 문구', (await popup(page).innerText()).includes('선택한 조건의 최근 거래가 없습니다'));
   ok('11b: 근사 좌표 문구', (await popup(page).innerText()).includes('근사 위치입니다'));
   ok('11b: 핀 글자는 단지명, aria-label에 거래 정보 없음', (await pin(page, 9).innerText()).includes('지도단지9') && (await pin(page, 9).getAttribute('aria-label')).includes('거래 정보 없음'));

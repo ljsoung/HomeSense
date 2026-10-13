@@ -9,7 +9,7 @@ import { MainLayout } from '../../components/layout/MainLayout';
 import { Spinner } from '../../components/ui/Spinner';
 import { useToast } from '../../components/ui/useToast';
 import { getComplexDetail } from '../../features/complex/api';
-import type { ComplexMapPointResponse } from '../../features/complex/types';
+import type { ComplexDetailResponse, ComplexMapPointResponse } from '../../features/complex/types';
 import { readLastViewport, writeLastViewport } from '../../features/map/lastViewport';
 import {
   buildMapApiQuery,
@@ -74,7 +74,9 @@ export function MapPage() {
     initialView.kind === 'complex' ? null : toStartView(initialView),
   );
 
-  // complexId만 있고 좌표가 없는 링크 — 단지 좌표를 조회해 그 위치에서 시작한다. 실패하면 다음 순위.
+  // complexId만 있고 좌표가 없는 링크 — 단지 좌표를 조회해 그 위치에서 시작한다. 실패하면 다음 순위. 받은 상세는 선택 단지
+  // 조회(fetchSelectedComplex)가 다시 부르지 않게 기억한다.
+  const entryDetailRef = useRef<ComplexDetailResponse | undefined>(undefined);
   useEffect(() => {
     if (initialView.kind !== 'complex') return;
     let cancelled = false;
@@ -82,6 +84,7 @@ export function MapPage() {
     getComplexDetail(initialView.complexId)
       .then((detail) => {
         if (cancelled) return;
+        entryDetailRef.current = detail;
         if (detail.latitude != null && detail.longitude != null) {
           setStartView({ kind: 'point', viewport: { lat: detail.latitude, lng: detail.longitude, level: COMPLEX_LEVEL } });
         } else {
@@ -224,7 +227,7 @@ export function MapPage() {
 
   // 선택한 단지 — 최신 응답에 있으면 그 항목을 쓰고 마지막으로 알던 값으로 기억한다. 응답에 없으면(상한을 넘어 잘림, 지도를
   // 옮겨 범위 밖, 필터 변경) 마지막으로 알던 값으로 핀과 팝업을 유지한다. 처음부터 없으면(DTL-01 딥링크로 넓은 레벨 진입)
-  // 상세 API로 받는다(features/map/selection.ts).
+  // 지금 지도 중심(딥링크면 단지 좌표) 주변의 좁은 범위 조회로 먼저 찾고, 없을 때만 상세 API로 받는다(features/map/selection.ts).
   const responseSelected = selectedId === null ? undefined : points.items.find((item) => item.complexId === selectedId);
   const [knownSelected, setKnownSelected] = useState<MapPinItem | null>(null);
   if (responseSelected && knownSelected !== responseSelected) setKnownSelected(responseSelected);
@@ -232,7 +235,15 @@ export function MapPage() {
     responseSelected ?? (knownSelected !== null && knownSelected.complexId === selectedId ? knownSelected : undefined);
   const needsSelectedLookup = selectedId !== null && !points.initialLoading && selectedItem === undefined;
   const lookupSelected = useEffectEvent((complexId: number, signal: AbortSignal) =>
-    fetchSelectedComplex(complexId, filters, signal).then((found) => {
+    fetchSelectedComplex(
+      complexId,
+      filters,
+      {
+        near: urlState.viewport ? { lat: urlState.viewport.lat, lng: urlState.viewport.lng } : undefined,
+        knownDetail: entryDetailRef.current?.complexId === complexId ? entryDetailRef.current : undefined,
+      },
+      signal,
+    ).then((found) => {
       if (!signal.aborted && found) setKnownSelected(found);
     }),
   );
