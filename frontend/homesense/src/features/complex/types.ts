@@ -50,6 +50,24 @@ export interface ComplexSummaryResponse {
 }
 
 /**
+ * GET /api/complexes/map 항목 — ComplexMapPointResponse.java. 카드 필드(ComplexSummaryResponse)를 같은 이름 그대로 갖고
+ * 좌표 세 개를 더했다. 범위 조회라 좌표가 없는 단지는 오지 않는다(백엔드 BETWEEN이 거른다). locationPrecision은
+ * PRECISE 또는 APPROXIMATE(BAT-GEO-01 키워드 보완)이고, 핀·배지 색은 이 값이 아니라 precisionBadge로 정한다.
+ */
+export interface ComplexMapPointResponse extends ComplexSummaryResponse {
+  latitude: number;
+  longitude: number;
+  locationPrecision?: string | null;
+}
+
+/** GET /api/complexes/map 응답 — 범위 안 결과가 limit을 넘으면 limit까지만 주고 truncated=true(해시 순 표본). */
+export interface ComplexMapSearchResponse {
+  items: ComplexMapPointResponse[];
+  truncated: boolean;
+  limit: number;
+}
+
+/**
  * GET /api/complexes/{id} — ComplexDetailResponse.java 실제 필드 그대로(2026-09-30 DTL-01 백엔드 보강 반영).
  * `non_null` 직렬화라 null 필드는 키 자체가 빠질 수 있어 nullable 필드는 모두 선택 프로퍼티로 둔다.
  * matchMethod는 대표 거래(취소되지 않은 가장 최근 거래) 기준이고 거래가 없으면 없다. legalDongCd는 매칭 대기
