@@ -423,6 +423,9 @@ public class ComplexGeocodingService {
                 checked++;
                 Long complexId = a.target().complexId();
                 LocalDateTime now = LocalDateTime.now(clock);
+                // 캐시는 좌표 커밋 바로 뒤에 지운다 — 뒤의 Redis 표시 쓰기가 예외로 실행을 멈춰도 DB(NULL)와 상세 캐시(옛 좌표)가
+                // TTL(24h) 동안 어긋나지 않게 한다.
+                List<Coordinate> changed = List.of(new Coordinate(complexId, null, null, null));
                 if (result instanceof KeywordPlaceMatcher.Matched matched) {
                     KakaoGeocodingClient.KeywordPlace place = matched.place();
                     if (place.latitude().compareTo(a.latitude()) == 0 && place.longitude().compareTo(a.longitude()) == 0) {
@@ -431,16 +434,18 @@ public class ComplexGeocodingService {
                     }
                     transactionTemplate.execute(status -> complexRepository.updateApproximateCoordinates(
                             complexId, place.latitude(), place.longitude(), now));
+                    evictDetailCache(changed);
                     moved++;
                     logKeywordMatch(a.target(), place);
                 } else {
                     String reason = "RECHECK/" + ((KeywordPlaceMatcher.NoMatch) result).reason();
                     transactionTemplate.execute(status -> complexRepository.clearApproximateCoordinates(complexId, now));
+                    evictDetailCache(changed);
+                    dropped++;
+                    // Redis 장애면 여기서 예외로 멈춘다. 좌표는 이미 NULL이라 표시 없이 남은 단지는 다음 기본 실행이 다시 찾는다.
                     redisState.markNotFound(complexId, reason);
                     auditLogger.logGeocodingFailure(complexId, a.target().address(), reason, false);
-                    dropped++;
                 }
-                evictDetailCache(List.of(new Coordinate(complexId, null, null, null)));
             }
         } catch (GeocodingConfigurationException e) {
             stopReason = StopReason.CONFIGURATION_ERROR;

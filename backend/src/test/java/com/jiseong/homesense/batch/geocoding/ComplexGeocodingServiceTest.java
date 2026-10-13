@@ -1,6 +1,7 @@
 package com.jiseong.homesense.batch.geocoding;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -8,6 +9,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -26,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.cache.Cache;
@@ -662,6 +666,24 @@ class ComplexGeocodingServiceTest {
         verify(redisState).markNotFound(1L, "RECHECK/KEYWORD_NAME_MISMATCH");
         verify(detailCache).evictIfPresent(1L);
         assertThat(result.dropped()).isEqualTo(1);
+    }
+
+    @Test
+    void 재판정_탈락에서_Redis_표시_쓰기가_실패해도_좌표를_되돌린_단지의_캐시는_지운다() {
+        approximate(1L, "화성동탄구", "영천동", "동탄파크자이아파트", "37.2", "127.1");
+        when(complexRepository.findApproximateTargets()).thenReturn(approximate);
+        when(client.searchKeyword(anyString(), anyInt())).thenReturn(lastPage(
+                new KakaoGeocodingClient.KeywordPlace("동탄역자이아파트",
+                "부동산 > 주거시설 > 아파트", "서울 화성동탄구 영천동 892", new BigDecimal("37.2"), new BigDecimal("127.1"))));
+        doThrow(new IllegalStateException("Redis 장애")).when(redisState).markNotFound(anyLong(), anyString());
+
+        assertThatThrownBy(() -> service().recheckApproximate(Integer.MAX_VALUE))
+                .isInstanceOf(IllegalStateException.class);
+
+        InOrder order = inOrder(complexRepository, detailCache, redisState);
+        order.verify(complexRepository).clearApproximateCoordinates(1L, LocalDateTime.now(CLOCK));
+        order.verify(detailCache).evictIfPresent(1L);
+        order.verify(redisState).markNotFound(1L, "RECHECK/KEYWORD_NAME_MISMATCH");
     }
 
     @Test
