@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationContext;
 
+import com.jiseong.homesense.batch.geocoding.ComplexGeocodingService.RecheckResult;
 import com.jiseong.homesense.batch.geocoding.ComplexGeocodingService.RunResult;
 import com.jiseong.homesense.batch.geocoding.ComplexGeocodingService.StopReason;
 
@@ -74,6 +75,22 @@ class ComplexGeocodingCommandLineRunnerTest {
         when(geocodingService.run(Integer.MAX_VALUE, false)).thenReturn(result(StopReason.RATE_LIMITED));
 
         assertThat(runner.execute(List.of("--apply"))).isEqualTo(1);
+    }
+
+    @Test
+    void 일시_실패가_연달아_나와_멈추면_종료_코드_1이다() {
+        when(geocodingService.run(Integer.MAX_VALUE, false))
+                .thenReturn(result(StopReason.CONSECUTIVE_TRANSIENT_FAILURES));
+
+        assertThat(runner.execute(List.of("--apply"))).isEqualTo(1);
+    }
+
+    @Test
+    void 재판정이_일시_실패_연속으로_멈추면_종료_코드_1이다() {
+        when(geocodingService.recheckApproximate(Integer.MAX_VALUE))
+                .thenReturn(new RecheckResult(0, 0, 0, 0, 0, 0, StopReason.CONSECUTIVE_TRANSIENT_FAILURES));
+
+        assertThat(runner.execute(List.of("--apply", "--recheck-approximate"))).isEqualTo(1);
     }
 
     @Test
