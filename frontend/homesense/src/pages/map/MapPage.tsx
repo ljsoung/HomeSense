@@ -280,7 +280,8 @@ export function MapPage() {
     }),
   );
   // 조회 중에 다른 단지를 고르거나 팝업을 닫거나 화면을 떠나면 끊고 결과를 버린다. 필터를 바꿔도 끊고 새 필터로 다시
-  // 찾는다(옛 필터의 대표 거래를 팝업에 넣지 않게). 정렬·페이지는 범위 조회에 쓰이지 않아 제외한다.
+  // 찾는다(옛 필터의 대표 거래를 팝업에 넣지 않게). 정렬·페이지는 범위 조회에 쓰이지 않아 제외한다. 동작 번호(intentRef)는
+  // 보지 않는다 — 확대·축소·지도 터치는 선택을 바꾸지 않으니 팝업 가격 조회를 끊지 않는다.
   const lookupFilterKey = useMemo(() => JSON.stringify({ ...filters, sort: undefined, page: undefined }), [filters]);
   useEffect(() => {
     if (!needsSelectedLookup || selectedId === null) return;

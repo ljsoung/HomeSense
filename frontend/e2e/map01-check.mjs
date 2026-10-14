@@ -748,6 +748,27 @@ const mapHelpers = (page) => ({
   await context.close();
 }
 
+// 18) 선택 단지 조회는 확대·축소·지도 터치로 끊기지 않는다 — 선택이 그대로라 팝업 가격이 채워져야 한다(지도 이동·현재 위치용
+//     동작 번호와 분리. 다른 단지 선택·팝업 닫기·필터 변경·언마운트에만 끊는다).
+{
+  const far = item(9, { latitude: CENTER.lat + 0.08, longitude: CENTER.lng + 0.1, representativeAmount: 123000 });
+  const state = { mapStatus: 200, truncated: true, nearbyDelayMs: 1200, nearbyItems: [far] };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map?lat=${far.latitude}&lng=${far.longitude}&level=10&complexId=9`);
+  for (let i = 0; i < 100 && !(state.nearbyRequests >= 1); i++) await page.waitForTimeout(50);
+  ok('18: 전제 — 선택 단지 조회가 진행 중', state.nearbyRequests === 1);
+  await page.getByRole('button', { name: '지도 확대' }).click();
+  const canvas = page.getByTestId('map-canvas');
+  await canvas.dispatchEvent('pointerdown');
+  await canvas.dispatchEvent('wheel');
+  await popup(page).waitFor({ timeout: 5000 }).catch(() => {});
+  ok('18: 조회 중 확대·지도 터치 뒤에도 팝업이 뜸', (await popup(page).count()) === 1);
+  ok('18: 팝업 가격이 채워짐(12.3억)', (await popup(page).count()) === 1 && (await popup(page).innerText()).includes('12억 3,000만원'));
+  ok('18: 선택 조회를 다시 보내지 않음(1건)', state.nearbyRequests === 1);
+  await context.close();
+}
+
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);
