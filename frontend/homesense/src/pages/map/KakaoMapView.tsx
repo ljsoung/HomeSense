@@ -26,9 +26,15 @@ export interface KakaoMapHandle {
   moveTo(lat: number, lng: number): void;
   /** 핀이 화면에 있으면(클러스터에 묶이지 않았으면) 포커스하고 true. */
   focusPin(complexId: number): boolean;
-  /** 지역명·주소를 SDK로 찾아 그 중심으로 옮긴다. 못 찾거나 지도가 없으면 false. */
-  moveToQuery(query: string, level: number): Promise<boolean>;
+  /**
+   * 지역명·주소를 SDK로 찾아 그 중심으로 옮긴다. 찾는 동안 `isCurrent()`가 거짓이 됐거나(더 새로운 이동·선택) 지도가
+   * 사라졌으면(언마운트·재시도) 옮기지 않고 'stale'. 지도가 아직 만들어지는 중이면 이 검색어를 새 시작 위치로 넘기고
+   * 'deferred'. 못 찾거나 지도를 쓸 수 없으면 'not-found'.
+   */
+  moveToQuery(query: string, level: number, isCurrent: () => boolean): Promise<MoveToQueryResult>;
 }
+
+export type MoveToQueryResult = 'moved' | 'not-found' | 'stale' | 'deferred';
 
 interface KakaoMapViewProps {
   ref?: Ref<KakaoMapHandle>;
@@ -42,6 +48,8 @@ interface KakaoMapViewProps {
   onMapClick: () => void;
   /** SDK 상태가 바뀌면 알린다 — 지도가 없으면 목록 항목 선택이 팝업 대신 상세로 간다. */
   onStatusChange?: (status: MapStatus) => void;
+  /** 사용자가 지도를 직접 만졌다(누르기·끌기·휠). 진행 중인 위치 이동(검색·현재 위치)의 결과를 버리는 데 쓴다. 팝업 안은 제외. */
+  onUserGesture?: () => void;
   /** 선택된 단지의 팝업 내용. 핀 바로 위에 띄운다. */
   popup: ReactNode;
   /** 지도 위에 겹쳐 그릴 요소(컨트롤·범례·안내). SDK 오류 상태에서도 그린다. */
@@ -89,6 +97,11 @@ interface PinEntry {
   approximate: boolean;
   /** 클러스터러에 들어 있는지. 선택한 핀은 클러스터에 묶이지 않게 지도에 직접 붙인다. */
   clustered: boolean;
+}
+
+/** 시작 위치를 찾지 못할 때 쓰는 위치. */
+function startFallback(view: StartView): MapViewport {
+  return view.kind === 'point' ? view.viewport : view.fallback;
 }
 
 /** 주소 검색(Geocoder) → 실패하면 장소 키워드 검색(Places)으로 한 번 더 찾는다. */
@@ -142,6 +155,7 @@ export function KakaoMapView({
   onSelectPin,
   onMapClick,
   onStatusChange,
+  onUserGesture,
   popup,
   children,
 }: KakaoMapViewProps) {
@@ -174,12 +188,17 @@ export function KakaoMapView({
     callbacks.current = { onIdle, onSelectPin, onMapClick };
   });
   const onStatusChangeRef = useRef(onStatusChange);
+  const onUserGestureRef = useRef(onUserGesture);
   useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
+    onUserGestureRef.current = onUserGesture;
   });
+  const statusRef = useRef(status);
   useEffect(() => {
+    statusRef.current = status;
     onStatusChangeRef.current?.(status);
   }, [status]);
+  /** 시작 위치. 지도가 만들어지기 전에 지역을 검색하면 그것으로 바뀐다(moveToQuery). */
   const startViewRef = useRef(startView);
   const selectedIdRef = useRef(selectedId);
   useEffect(() => {
@@ -203,11 +222,15 @@ export function KakaoMapView({
       callbacks.current.onIdle(viewport, approximateBounds(viewport, viewport.level, rect.width || 800, rect.height || 600));
     };
 
+    // 찾는 사이 시작 위치가 바뀌었으면(지도가 뜨기 전에 다른 지역을 검색) 앞 결과는 버리고 새 시작
+    // 위치로 다시 정한다 — 늦게 끝난 첫 지오코딩이 지도를 처음 지역에서 열지 않게 한다.
     const resolveStart = async (maps: KakaoMapsNamespace): Promise<MapViewport> => {
-      const view = startViewRef.current;
-      if (view.kind === 'point') return view.viewport;
-      const found = await geocode(maps, view.query);
-      return found ? { ...found, level: view.level } : view.fallback;
+      for (;;) {
+        const view = startViewRef.current;
+        if (view.kind === 'point') return view.viewport;
+        const found = await geocode(maps, view.query);
+        if (cancelled || startViewRef.current === view) return found ? { ...found, level: view.level } : view.fallback;
+      }
     };
 
     loadKakaoMaps()
@@ -311,6 +334,23 @@ export function KakaoMapView({
       observer.disconnect();
     };
   }, []);
+
+  // 사용자가 지도를 직접 만지면(누르기·끌기·휠) 알린다. SDK가 이벤트를 먼저 가로채지 않게 캡처 단계에서 받고, 팝업 안의
+  // 조작은 지도 이동이 아니라 제외한다.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handle = (event: Event) => {
+      if (event.target instanceof Node && popupContainer.contains(event.target)) return;
+      onUserGestureRef.current?.();
+    };
+    container.addEventListener('pointerdown', handle, true);
+    container.addEventListener('wheel', handle, { capture: true, passive: true });
+    return () => {
+      container.removeEventListener('pointerdown', handle, true);
+      container.removeEventListener('wheel', handle, true);
+    };
+  }, [popupContainer]);
 
   // 응답이 바뀌면 핀을 complexId로 비교해 바뀐 것만 다시 만든다.
   useEffect(() => {
@@ -440,15 +480,20 @@ export function KakaoMapView({
         button.focus();
         return true;
       },
-      async moveToQuery(query, level) {
+      async moveToQuery(query, level, isCurrent) {
         const maps = mapsRef.current;
         const map = mapRef.current;
-        if (!maps || !map) return false;
+        if (!maps || !map) {
+          if (statusRef.current !== 'loading') return 'not-found';
+          startViewRef.current = { kind: 'region', query, level, fallback: startFallback(startViewRef.current) };
+          return 'deferred';
+        }
         const found = await geocode(maps, query);
-        if (!found || mapRef.current !== map) return false;
+        if (!isCurrent() || mapRef.current !== map) return 'stale';
+        if (!found) return 'not-found';
         map.setLevel(level);
         map.setCenter(new maps.LatLng(found.lat, found.lng));
-        return true;
+        return 'moved';
       },
     }),
     [],

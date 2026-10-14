@@ -65,20 +65,26 @@ async function setup(page, state) {
   await page.route('https://dapi.kakao.com/**', (route) =>
     state.sdk === 'block' ? route.abort() : route.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_SDK }),
   );
-  await page.route('**/api/**', (route) => {
+  await page.route('**/api/**', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
     const path = url.pathname;
-    const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body });
+    // 지연 응답은 그사이 앱이 요청을 끊으면 fulfill이 실패한다 — 끊긴 요청이라 무시한다.
+    const json = (status, body) => route.fulfill({ status, contentType: 'application/json', body }).catch(() => {});
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     if (path === '/api/complexes/map') {
       state.mapRequests.push(url.searchParams);
       if (state.mapStatus === 500) return json(500, errBody('INTERNAL_SERVER_ERROR', '지도 조회 중 서버 오류가 발생했습니다'));
       // 단지 하나 주변의 좁은 범위(선택 단지 조회, features/map/selection.ts) — 위도 폭 0.01 미만이면 nearbyItems를 준다.
+      // nearbyItems가 함수면 요청 파라미터(필터)로 고른다. nearbyDelayMs만큼 늦게 답한다.
       const [swLat, , neLat] = (url.searchParams.get('bounds') ?? '').split(',').map(Number);
       if (state.nearbyItems && neLat - swLat < 0.01) {
         state.nearbyRequests = (state.nearbyRequests ?? 0) + 1;
+        state.nearbyParams = [...(state.nearbyParams ?? []), url.searchParams];
         state.events = [...(state.events ?? []), 'nearby'];
-        return json(200, okBody({ items: state.nearbyItems, truncated: false, limit: 500 }));
+        const items = typeof state.nearbyItems === 'function' ? state.nearbyItems(url.searchParams) : state.nearbyItems;
+        if (state.nearbyDelayMs) await sleep(state.nearbyDelayMs);
+        return json(200, okBody({ items, truncated: false, limit: 500 }));
       }
       return json(200, okBody({ items: state.items ?? ITEMS, truncated: !!state.truncated, limit: 500 }));
     }
@@ -103,6 +109,7 @@ async function setup(page, state) {
     if (detailMatch) {
       state.detailRequests = [...(state.detailRequests ?? []), detailMatch[1]];
       state.events = [...(state.events ?? []), `detail:${detailMatch[1]}`];
+      if (state.detailDelayMs) await sleep(state.detailDelayMs);
     }
     if (detailMatch && state.details?.[detailMatch[1]]) return json(200, okBody(state.details[detailMatch[1]]));
     if (detailMatch) return json(404, errBody('COMPLEX_NOT_FOUND', '존재하지 않는 단지입니다'));
@@ -531,6 +538,213 @@ const detailOf = (id, lat, lng, extra = {}) => ({
     const [, bSwLng, , bNeLng] = state.mapRequests[before - 1].get('bounds').split(',').map(Number);
     return neLng - swLng > (bNeLng - bSwLng) * 1.3;
   })());
+  await context.close();
+}
+
+// 13) 지역 검색이 겹칠 때 — 앞 검색의 지오코딩이 뒤 검색보다 늦게 끝나도 지도를 앞 지역으로 되돌리지 않고, 앞 검색의
+//     "못 찾음" 토스트도 띄우지 않는다. 대조: 단독 검색이 못 찾으면 토스트가 뜬다.
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await page.addInitScript(() => {
+    window.__FAKE_KAKAO_OPTIONS = { geocodeDelays: { '서울특별시 강남구': 800, 없는지역: 400 } };
+  });
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  const search = page.getByPlaceholder('지역명으로 지도 이동');
+  const toast = page.getByText('위치를 찾을 수 없습니다');
+  const urlLat = () => Number(new URL(page.url()).searchParams.get('lat'));
+  const searchFor = async (query) => {
+    await search.fill(query);
+    await search.press('Enter');
+  };
+
+  await searchFor('서울특별시 강남구'); // 800ms 뒤에 끝난다
+  await searchFor('경기도 수원시 장안구'); // 10ms 뒤에 끝난다
+  await page.waitForTimeout(1500);
+  ok('13: URL 검색 조건은 뒤 검색(수원 장안구)', new URL(page.url()).searchParams.get('keyword') === '경기도 수원시 장안구');
+  ok(`13: 늦게 끝난 앞 검색이 지도를 강남으로 되돌리지 않음(lat ${urlLat()})`, Math.abs(urlLat() - 37.304) < 0.001);
+
+  await searchFor('없는지역'); // 주소 400ms + 키워드 400ms 뒤 못 찾음
+  await searchFor('경기도 수원시 장안구');
+  await page.waitForTimeout(1500);
+  ok('13: 밀린 앞 검색의 "못 찾음" 토스트를 띄우지 않음', (await toast.count()) === 0);
+
+  await page.evaluate(() => {
+    window.__FAKE_KAKAO_OPTIONS.geocodeDelays = {};
+  });
+  await searchFor('없는지역');
+  await toast.first().waitFor({ timeout: 3000 }).catch(() => {});
+  ok('13: 대조 — 단독 검색이 못 찾으면 토스트', (await toast.count()) > 0);
+  await context.close();
+}
+
+// 14~17 공통 — 현재 위치(navigator.geolocation)를 지연·성공/실패를 조절할 수 있는 가짜로 바꾼다.
+function stubGeolocation() {
+  window.__geo = { delay: 800, ok: true, lat: 35.1796, lng: 129.0756 };
+  Object.defineProperty(navigator, 'geolocation', {
+    configurable: true,
+    value: {
+      getCurrentPosition(success, error) {
+        const g = window.__geo;
+        setTimeout(
+          () =>
+            g.ok
+              ? success({ coords: { latitude: g.lat, longitude: g.lng } })
+              : error({ code: 1, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }),
+          g.delay,
+        );
+      },
+    },
+  });
+}
+const BUSAN_LAT = 35.1796;
+const SUWON_LAT = 37.304;
+const mapHelpers = (page) => ({
+  search: page.getByPlaceholder('지역명으로 지도 이동'),
+  locate: page.getByRole('button', { name: '현재 위치로 이동' }),
+  notFoundToast: page.getByText('위치를 찾을 수 없습니다'),
+  geoToast: page.getByText(/위치 권한이 없어|현재 위치를 가져오지 못했습니다/),
+  urlLat: () => Number(new URL(page.url()).searchParams.get('lat')),
+  searchFor: async (query) => {
+    const input = page.getByPlaceholder('지역명으로 지도 이동');
+    await input.fill(query);
+    await input.press('Enter');
+  },
+  setGeo: (patch) => page.evaluate((p) => Object.assign(window.__geo, p), patch),
+});
+
+// 14) 현재 위치 — 조회 중에 다른 이동·선택을 하면 결과(이동·토스트)를 버리고 버튼 잠금만 푼다.
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await page.addInitScript(stubGeolocation);
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  const h = mapHelpers(page);
+
+  await h.locate.click();
+  await page.waitForTimeout(1500);
+  ok(`14: 대조 — 방해가 없으면 현재 위치로 이동(lat ${h.urlLat()})`, Math.abs(h.urlLat() - BUSAN_LAT) < 0.001);
+
+  await h.locate.click();
+  await h.searchFor('경기도 수원시 장안구');
+  await page.waitForTimeout(1500);
+  ok(`14: 조회 중 지역 검색 → 늦게 온 현재 위치로 옮기지 않음(lat ${h.urlLat()})`, Math.abs(h.urlLat() - SUWON_LAT) < 0.001);
+  ok('14: 버튼 잠금은 풀림', (await h.locate.count()) === 1 && (await h.locate.isEnabled()));
+
+  await h.setGeo({ ok: false });
+  await page.getByRole('button', { name: '현재 위치로 이동' }).click();
+  await rows(page).first().locator('[data-map-select]').click();
+  await page.waitForTimeout(1500);
+  ok('14: 조회 중 목록 선택 → 늦게 온 실패 토스트를 띄우지 않음', (await h.geoToast.count()) === 0);
+  ok('14: 실패해도 버튼 잠금은 풀림', (await h.locate.count()) === 1 && (await h.locate.isEnabled()));
+
+  await h.setGeo({ ok: true });
+  await h.locate.click();
+  await page.getByTestId('map-canvas').dispatchEvent('pointerdown');
+  await page.waitForTimeout(1500);
+  ok(`14: 조회 중 지도를 직접 만지면 옮기지 않음(lat ${h.urlLat()})`, Math.abs(h.urlLat() - BUSAN_LAT) > 0.5);
+
+  await h.setGeo({ ok: false });
+  await h.locate.click();
+  await h.geoToast.first().waitFor({ timeout: 3000 }).catch(() => {});
+  ok('14: 대조 — 방해가 없으면 실패 토스트', (await h.geoToast.count()) > 0);
+  await context.close();
+}
+
+// 15) 딥링크 선택 조회 중 필터를 바꾸면 옛 필터 결과를 버리고 새 필터로 다시 찾는다.
+{
+  const far = item(9, { latitude: CENTER.lat + 0.08, longitude: CENTER.lng + 0.1, representativeAmount: 123000 });
+  const farJeonse = { ...far, representativeDealCategory: 'RENT', rentType: 'JEONSE', representativeAmount: 77000 };
+  const state = {
+    mapStatus: 200,
+    truncated: true,
+    nearbyDelayMs: 800,
+    nearbyItems: (params) => [params.get('rentType') === 'JEONSE' ? farJeonse : far],
+  };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map?lat=${far.latitude}&lng=${far.longitude}&level=10&complexId=9`);
+  for (let i = 0; i < 100 && !(state.nearbyRequests >= 1); i++) await page.waitForTimeout(50);
+  ok('15: 전제 — 선택 단지 조회가 진행 중', state.nearbyRequests === 1);
+  await page.getByRole('button', { name: /거래유형/ }).click();
+  const filterDialog = page.getByRole('dialog', { name: '필터' });
+  await filterDialog.getByLabel('전세').check();
+  await filterDialog.getByRole('button', { name: '필터 적용' }).click();
+  await popup(page).waitFor({ timeout: 8000 });
+  await page.waitForTimeout(1200);
+  const text = await popup(page).innerText();
+  ok('15: 팝업은 새 필터(전세 7.7억) 결과', text.includes('7억 7,000만원'));
+  ok('15: 옛 필터(매매 12.3억) 결과를 넣지 않음', !text.includes('12억 3,000만원'));
+  ok('15: 새 필터로 다시 조회', state.nearbyParams.at(-1)?.get('rentType') === 'JEONSE');
+  await context.close();
+}
+
+// 16) 지도가 뜨기 전(시작 위치 지오코딩·진입 단지 좌표 조회 중)에 지역을 검색하면 그 지역에서 연다.
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await page.addInitScript(() => {
+    window.__FAKE_KAKAO_OPTIONS = { geocodeDelays: { '서울특별시 강남구': 2000 } };
+  });
+  await setup(page, state);
+  await page.goto(`${BASE}/map?regionCode=1168000000&regionLabel=${encodeURIComponent('서울특별시 강남구')}`);
+  const h = mapHelpers(page);
+  await h.search.waitFor();
+  ok('16: 전제 — 검색할 때 지도는 아직 불러오는 중', await page.getByText('지도를 불러오는 중').isVisible());
+  await h.searchFor('경기도 수원시 장안구');
+  await page.waitForTimeout(3000);
+  ok(`16: 시작 지오코딩 중 검색 → 검색한 지역에서 엶(lat ${h.urlLat()})`, Math.abs(h.urlLat() - SUWON_LAT) < 0.001);
+  ok('16: "못 찾음" 토스트 없음', (await h.notFoundToast.count()) === 0);
+  await context.close();
+}
+// (현재 위치 버튼 등 지도 컨트롤은 지도가 준비된 뒤에만 그려져, 지도가 뜨기 전의 현재 위치 조회는 화면에서 일어나지 않는다.)
+{
+  const lat = CENTER.lat + 0.08;
+  const lng = CENTER.lng + 0.1;
+  const state = { mapStatus: 200, detailDelayMs: 2000, details: { 9: detailOf(9, lat, lng) } };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map?complexId=9`);
+  const h = mapHelpers(page);
+  await h.search.waitFor();
+  ok('16: 전제 — 검색할 때 지도 컴포넌트가 아직 없음(진입 단지 좌표 조회 중)', (await page.getByTestId('map-canvas').count()) === 0);
+  await h.searchFor('경기도 수원시 장안구');
+  await page.waitForTimeout(3000);
+  ok(`16: 진입 단지 좌표 조회 중 검색 → 검색한 지역에서 엶(lat ${h.urlLat()})`, Math.abs(h.urlLat() - SUWON_LAT) < 0.001);
+  ok('16: 진입 단지 좌표 조회 중 검색 → "못 찾음" 토스트 없음', (await h.notFoundToast.count()) === 0);
+  await context.close();
+}
+
+// 17) 지역 검색·현재 위치 조회 중에 화면을 떠나면(목록으로) 늦게 온 결과의 토스트를 다른 화면에 띄우지 않는다.
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await page.addInitScript(() => {
+    window.__FAKE_KAKAO_OPTIONS = { geocodeDelays: { 없는지역: 400 } };
+  });
+  await page.addInitScript(stubGeolocation);
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  const h = mapHelpers(page);
+  await h.searchFor('없는지역'); // 주소 400ms + 키워드 400ms 뒤 못 찾음
+  await page.getByRole('link', { name: '목록으로' }).click();
+  await page.waitForURL(/\/search/);
+  await page.waitForTimeout(1500);
+  ok('17: 검색 중 화면을 떠나면 "못 찾음" 토스트를 띄우지 않음', (await h.notFoundToast.count()) === 0);
+
+  await page.goto(`${BASE}/map?keyword=${encodeURIComponent('경기도 수원시 장안구')}`);
+  await rows(page).first().waitFor();
+  await h.setGeo({ ok: false });
+  await h.locate.click();
+  await page.getByRole('link', { name: '목록으로' }).click();
+  await page.waitForURL(/\/search/);
+  await page.waitForTimeout(1500);
+  ok('17: 현재 위치 조회 중 화면을 떠나면 실패 토스트를 띄우지 않음', (await h.geoToast.count()) === 0);
   await context.close();
 }
 

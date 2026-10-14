@@ -194,12 +194,14 @@
   MarkerClusterer.prototype.redraw = function () {};
 
   const Status = { OK: 'OK', ZERO_RESULT: 'ZERO_RESULT', ERROR: 'ERROR' };
+  // 검색어별 지연(__FAKE_KAKAO_OPTIONS.geocodeDelays) — 앞 검색이 뒤 검색보다 늦게 끝나는 경우를 만든다(map01-check 13).
   function lookup(query, cb) {
+    const delays = (window.__FAKE_KAKAO_OPTIONS || {}).geocodeDelays || {};
     setTimeout(() => {
       const hit = FAKE_GEOCODE[query];
       if (hit) cb([hit], Status.OK);
       else cb([], Status.ZERO_RESULT);
-    }, 10);
+    }, delays[query] ?? 10);
   }
   function Geocoder() {}
   Geocoder.prototype.addressSearch = lookup;

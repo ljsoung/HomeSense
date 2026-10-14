@@ -15,6 +15,7 @@ import {
   buildMapApiQuery,
   buildSearchHref,
   COMPLEX_LEVEL,
+  DEFAULT_VIEWPORT,
   levelForRegionCode,
   parseMapUrl,
   resolveInitialView,
@@ -68,6 +69,18 @@ export function MapPage() {
   const { filters } = urlState;
   const selectedId = urlState.complexId ?? null;
 
+  // 비동기 결과 적용 규칙 — 위치를 옮기거나 단지를 고르는 사용자 동작(지역 검색·현재 위치·목록/핀 선택·확대/축소·지도 직접
+  // 조작)마다 번호를 올리고, 언마운트하면 한 번 더 올린다. 늦게 끝난 작업은 시작할 때의 번호가 그대로일 때만 결과를 적용하고
+  // 오류를 알린다 — 그사이 더 새로운 동작이 있었거나 화면을 떠났으면 조용히 버린다.
+  const intentRef = useRef(0);
+  const beginIntent = useCallback(() => ++intentRef.current, []);
+  useEffect(
+    () => () => {
+      intentRef.current += 1;
+    },
+    [],
+  );
+
   // 진입 시 한 번 정한다 — 이후 지도를 움직여 URL이 바뀌어도 시작 위치는 다시 계산하지 않는다.
   const [initialView] = useState(() => resolveInitialView(urlState, readLastViewport()));
   const [startView, setStartView] = useState<StartView | null>(() =>
@@ -80,11 +93,15 @@ export function MapPage() {
   useEffect(() => {
     if (initialView.kind !== 'complex') return;
     let cancelled = false;
+    const intent = intentRef.current;
     const fallback = () => toStartView(initialView.fallback);
     getComplexDetail(initialView.complexId)
       .then((detail) => {
         if (cancelled) return;
         entryDetailRef.current = detail;
+        // 좌표를 받는 사이 다른 지역을 검색했으면 그 지역이 시작 위치다(검색이 이미 startView를 정했다). KakaoMapView는
+        // 마운트할 때만 startView를 읽어 덮어써도 지도는 그대로지만, 상태가 실제 시작 위치와 어긋나지 않게 둔다.
+        if (intentRef.current !== intent) return;
         if (detail.latitude != null && detail.longitude != null) {
           setStartView({ kind: 'point', viewport: { lat: detail.latitude, lng: detail.longitude, level: COMPLEX_LEVEL } });
         } else {
@@ -92,7 +109,7 @@ export function MapPage() {
         }
       })
       .catch(() => {
-        if (!cancelled) setStartView(fallback());
+        if (!cancelled && intentRef.current === intent) setStartView(fallback());
       });
     return () => {
       cancelled = true;
@@ -155,6 +172,7 @@ export function MapPage() {
       navigate(`/complexes/${item.complexId}`);
       return;
     }
+    beginIntent();
     mapRef.current?.panTo(item.latitude, item.longitude);
     if (isMobile) setSheetSnap('collapsed');
     select(item.complexId, 'list');
@@ -175,8 +193,18 @@ export function MapPage() {
   // 지역 검색 — 고른 지역(또는 입력한 지역명)으로 지도를 옮기고, SRCH-01로 돌아갈 때 쓰도록 검색 조건도 URL에 남긴다.
   const [searchValue, setSearchValue] = useState(filters.regionLabel ?? filters.keyword ?? '');
   const moveToQuery = async (query: string, level: number) => {
-    const moved = await mapRef.current?.moveToQuery(query, level);
-    if (!moved) showToast('위치를 찾을 수 없습니다. 지역명을 확인해 주세요.', 'error');
+    const intent = beginIntent();
+    const map = mapRef.current;
+    if (!map) {
+      // 지도 컴포넌트가 아직 없다(진입 단지 좌표 조회 중) — 이 검색어를 시작 위치로 삼는다.
+      setStartView({ kind: 'region', query, level, fallback: DEFAULT_VIEWPORT });
+      return;
+    }
+    const result = await map.moveToQuery(query, level, () => intentRef.current === intent);
+    // 밀린 검색(stale)은 알리지 않는다 — 앞 지역을 못 찾았다는 토스트가 뒤 지역 화면이나 다른 화면에 뜨면 안 된다.
+    if (result === 'not-found' && intentRef.current === intent) {
+      showToast('위치를 찾을 수 없습니다. 지역명을 확인해 주세요.', 'error');
+    }
   };
   const handleSelectRegion = (region: RegionAutocompleteResponse) => {
     setSearchValue(region.fullPath);
@@ -198,7 +226,8 @@ export function MapPage() {
     void moveToQuery(query, 5);
   };
 
-  // 현재 위치 — 조회 중에는 버튼을 잠근다. 권한 거부·실패는 토스트로 알리고 지도는 그대로 둔다.
+  // 현재 위치 — 조회 중에는 버튼을 잠근다. 권한 거부·실패는 토스트로 알리고 지도는 그대로 둔다. 조회 중에 다른 이동·선택을
+  // 했거나 화면을 떠났으면 결과(이동·토스트)를 버리고 버튼 잠금만 푼다.
   const [locating, setLocating] = useState(false);
   const goToCurrentLocation = () => {
     if (locating) return;
@@ -206,14 +235,17 @@ export function MapPage() {
       showToast('이 브라우저에서는 현재 위치를 쓸 수 없습니다.', 'error');
       return;
     }
+    const intent = beginIntent();
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocating(false);
+        if (intentRef.current !== intent) return;
         mapRef.current?.moveTo(position.coords.latitude, position.coords.longitude);
       },
       (error) => {
         setLocating(false);
+        if (intentRef.current !== intent) return;
         showToast(
           error.code === error.PERMISSION_DENIED ? '위치 권한이 없어 현재 위치로 이동할 수 없습니다.' : '현재 위치를 가져오지 못했습니다.',
           'error',
@@ -247,13 +279,16 @@ export function MapPage() {
       if (!signal.aborted && found) setKnownSelected(found);
     }),
   );
+  // 조회 중에 다른 단지를 고르거나 팝업을 닫거나 화면을 떠나면 끊고 결과를 버린다. 필터를 바꿔도 끊고 새 필터로 다시
+  // 찾는다(옛 필터의 대표 거래를 팝업에 넣지 않게). 정렬·페이지는 범위 조회에 쓰이지 않아 제외한다.
+  const lookupFilterKey = useMemo(() => JSON.stringify({ ...filters, sort: undefined, page: undefined }), [filters]);
   useEffect(() => {
     if (!needsSelectedLookup || selectedId === null) return;
     const controller = new AbortController();
     // 실패(상세 404·네트워크)하면 팝업 없이 둔다 — 지도와 목록은 그대로 쓸 수 있다.
     lookupSelected(selectedId, controller.signal).catch(() => {});
     return () => controller.abort();
-  }, [needsSelectedLookup, selectedId]);
+  }, [needsSelectedLookup, selectedId, lookupFilterKey]);
   // 지도에 그리는 핀 — 응답 항목 + 응답에 없는 선택 단지.
   const mapItems = useMemo<MapPinItem[]>(
     () => (selectedItem && !responseSelected ? [...points.items, selectedItem] : points.items),
@@ -291,6 +326,7 @@ export function MapPage() {
       selectedId={selectedId}
       onIdle={handleIdle}
       onSelectPin={(id) => {
+        beginIntent();
         // 핀을 지도 가운데로 옮긴다 — 가장자리 핀의 팝업이 필터 막대·시트 아래로 잘리지 않게 한다(목록 선택과 같다).
         const target = mapItems.find((item) => item.complexId === id);
         if (target) mapRef.current?.panTo(target.latitude, target.longitude);
@@ -300,6 +336,7 @@ export function MapPage() {
         if (selectedId !== null) closePopup(false);
       }}
       onStatusChange={setMapStatus}
+      onUserGesture={beginIntent}
       popup={selectedItem ? <MapPopup item={selectedItem} autoFocus={popupAutoFocus} onClose={() => closePopup(true)} /> : null}
     >
       {/* 지도 위 안내 — 범위 안 결과가 상한을 넘어 잘렸을 때. */}
@@ -315,10 +352,26 @@ export function MapPage() {
       )}
       {/* 지도 컨트롤(Figma 6:4623) — 확대·축소·현재 위치. */}
       <div className={`absolute right-4 z-10 flex flex-col gap-1 ${isMobile ? 'top-14' : 'bottom-6'}`}>
-        <button type="button" onClick={() => mapRef.current?.zoomBy(-1)} aria-label="지도 확대" className={CONTROL_BUTTON_CLASS}>
+        <button
+          type="button"
+          onClick={() => {
+            beginIntent();
+            mapRef.current?.zoomBy(-1);
+          }}
+          aria-label="지도 확대"
+          className={CONTROL_BUTTON_CLASS}
+        >
           <PlusIcon className="size-4" />
         </button>
-        <button type="button" onClick={() => mapRef.current?.zoomBy(1)} aria-label="지도 축소" className={CONTROL_BUTTON_CLASS}>
+        <button
+          type="button"
+          onClick={() => {
+            beginIntent();
+            mapRef.current?.zoomBy(1);
+          }}
+          aria-label="지도 축소"
+          className={CONTROL_BUTTON_CLASS}
+        >
           <MinusIcon className="size-4" />
         </button>
         <button
