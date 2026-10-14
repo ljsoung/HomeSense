@@ -18,9 +18,9 @@ export interface MapPointsState {
 
 /**
  * 지도 범위 조회. `query`(bounds + 필터의 직렬화 문자열)가 바뀌면 300ms 뒤에 부른다 — 지도 idle과 필터 적용이 같은
- * 경로를 타고, 지도와 목록 패널이 이 응답 하나를 함께 쓴다(목록용 API를 따로 부르지 않는다). 새 요청을 보내면 이전
- * 요청은 AbortController로 끊고, 요청 번호가 최신이 아닌 늦은 응답은 버린다. 실패하면 이전 결과(마커·목록)를 지우지
- * 않는다.
+ * 경로를 타고, 지도와 목록 패널이 이 응답 하나를 함께 쓴다(목록용 API를 따로 부르지 않는다). 조회가 바뀌면 디바운스를
+ * 기다리지 않고 곧바로 진행 중 요청을 AbortController로 끊고 요청 번호를 올려, 늦게 온 응답을 버린다. 실패하면 이전
+ * 결과(마커·목록)를 지우지 않는다.
  */
 export function useMapPoints(query: URLSearchParams | null) {
   const queryKey = query?.toString() ?? null;
@@ -38,7 +38,6 @@ export function useMapPoints(query: URLSearchParams | null) {
   useEffect(() => {
     if (queryKey === null) return;
     const timer = window.setTimeout(() => {
-      controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
       const seq = ++requestSeq.current;
@@ -53,10 +52,15 @@ export function useMapPoints(query: URLSearchParams | null) {
           setState((prev) => ({ ...prev, initialLoading: false, loading: false, errorMessage: getErrorMessage(error) }));
         });
     }, MAP_FETCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
+    // 조회가 바뀌는 즉시(다시 시도·언마운트 포함) 진행 중 요청을 끊고 번호를 올린다 — 다음 타이머까지 기다리면 그 300ms
+    // 동안 도착한 옛 응답이 번호 확인을 통과해 이전 뷰포트·필터 결과로 지도와 목록을 덮었다.
+    return () => {
+      window.clearTimeout(timer);
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      requestSeq.current += 1;
+    };
   }, [queryKey, retryToken]);
-
-  useEffect(() => () => controllerRef.current?.abort(), []);
 
   const retry = useCallback(() => setRetryToken((n) => n + 1), []);
 
