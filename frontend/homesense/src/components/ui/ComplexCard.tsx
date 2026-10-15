@@ -13,8 +13,16 @@ interface ComplexCardProps {
   /** 세션 확인 중에 누른 하트가 판정을 기다리는 중이면 true — 하트에 aria-busy와 대기 표시를 단다. */
   favoritePending?: boolean;
   className?: string;
-  /** 'grid' = HOME-01 인기 단지(기존 동작 그대로), 'list' = SRCH-01 검색 결과 목록형 카드. */
-  variant?: 'grid' | 'list';
+  /**
+   * 'grid' = HOME-01 인기 단지(기존 동작 그대로), 'list' = SRCH-01 검색 결과 목록형 카드,
+   * 'compact' = MAP-01 목록 패널 행(Figma 6:4397 — 썸네일 72×56, 이름·면적·층·가격). 'compact'는 링크가 아니라 지도에서
+   * 그 단지를 고르는 버튼이고(onSelect), 상세 이동은 지도 팝업의 "상세보기"가 맡는다.
+   */
+  variant?: 'grid' | 'list' | 'compact';
+  /** 'compact' 전용 — 지도에서 선택된 단지면 강조한다(Figma 6:4451 — 민트 배경, 왼쪽 브랜드 선). */
+  selected?: boolean;
+  /** 'compact' 전용 — 행을 누르면 부른다. */
+  onSelect?: () => void;
 }
 
 /**
@@ -37,7 +45,16 @@ const APPROXIMATE_LOCATION_CAPTION = '지도 위치는 근사 위치입니다.';
  * 서버는 null 필드를 키째 빼므로 값 유무는 `!= null`로 본다 — `!== null`이면 빠진 키(undefined)가 통과해
  * "· undefined층"이 됐다.
  */
-export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePending = false, className = '', variant = 'grid' }: ComplexCardProps) {
+export function ComplexCard({
+  complex,
+  isFavorited,
+  onToggleFavorite,
+  favoritePending = false,
+  className = '',
+  variant = 'grid',
+  selected = false,
+  onSelect,
+}: ComplexCardProps) {
   // 배지·주황 표시는 서버가 계산한 precisionBadge로 정한다. 안내 문구만 근사의 이유(유사 매칭/근사 좌표)에 따라 고른다.
   const isApproximate = complex.precisionBadge === 'APPROXIMATE';
   const approximateCaption = complex.matchMethod === 'SIMILAR' ? SIMILAR_CAPTION : APPROXIMATE_LOCATION_CAPTION;
@@ -57,6 +74,59 @@ export function ComplexCard({ complex, isFavorited, onToggleFavorite, favoritePe
       <HeartIcon filled={isFavorited} className={isFavorited ? 'text-[#ff2056]' : ''} />
     </button>
   );
+
+  if (variant === 'compact') {
+    // 행 전체를 누르면 선택한다 — 이름 버튼의 ::after가 행을 덮고, 하트는 그 위 레이어(z-10)라 따로 눌린다(링크·버튼
+    // 안에 버튼을 넣지 않는다). 하트의 보이는 크기는 Figma대로 16px이고 누르는 영역은 ::before로 44px 이상으로 넓힌다
+    // (UI정의서 6.3절).
+    const meta = [formatArea(complex.representativeArea), complex.floor != null ? `${complex.floor}층` : null]
+      .filter(Boolean)
+      .join(' · ');
+    return (
+      <div
+        data-complex-id={complex.complexId}
+        className={`relative flex gap-3 border-l-[3px] px-4 py-3.5 transition-colors ${
+          selected ? 'border-l-brand bg-[#f0f9f7]' : 'border-l-transparent hover:bg-[#f9fafb]'
+        } ${className}`}
+      >
+        <div
+          className={`relative h-14 w-[72px] shrink-0 overflow-hidden rounded-[14px] bg-gradient-to-br from-[#e8f5f2] to-[#d1eae6] ${
+            isApproximate ? 'after:absolute after:inset-0 after:bg-[rgba(255,185,0,0.1)]' : ''
+          }`}
+        >
+          <div className="flex h-full w-full items-center justify-center">
+            <HomeIcon className="size-6 opacity-40 [&_path]:stroke-brand" />
+          </div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <DataTrustBadge housingType={complex.representativeHousingType} precisionBadge={complex.precisionBadge} />
+          <button
+            type="button"
+            onClick={onSelect}
+            aria-pressed={selected}
+            data-map-select=""
+            className="mt-1 block max-w-full truncate text-left text-[13px] font-bold leading-[16.25px] text-[#101828] after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-brand focus-visible:after:ring-inset"
+          >
+            {complex.complexName}
+          </button>
+          {meta && <p className="pt-0.5 text-[11px] leading-[16.5px] text-[#99a1af]">{meta}</p>}
+          <p className="pt-0.5 text-[16px] font-extrabold leading-6 tracking-[-0.3px] text-[#1c1c1e]">
+            {describeDealAmount(complex.representativeDealCategory, complex.rentType, complex.representativeAmount, complex.monthlyRentAmount)}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onToggleFavorite}
+          aria-label={isFavorited ? `${complex.complexName} 관심 매물 해제` : `${complex.complexName} 관심 매물 등록`}
+          aria-pressed={isFavorited}
+          aria-busy={favoritePending || undefined}
+          className={`relative z-10 mt-0.5 self-start text-[#99a1af] transition-colors before:absolute before:-inset-3.5 before:content-[''] hover:text-[#e7000b] ${favoritePendingClass(favoritePending)}`}
+        >
+          <HeartIcon filled={isFavorited} className={`size-4 ${isFavorited ? 'text-[#ff2056]' : ''}`} />
+        </button>
+      </div>
+    );
+  }
 
   if (variant === 'list') {
     // 목록형 카드 레이아웃(썸네일 | 배지·이름·주소·메타 | 가격·평단가+하트)은 Figma 노드

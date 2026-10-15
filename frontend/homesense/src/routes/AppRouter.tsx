@@ -1,7 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import { PlaceholderPage } from '../pages/PlaceholderPage';
 import { ComplexDetailRoute } from '../pages/complex/ComplexDetailPage';
 import { LoginPage } from '../pages/auth/LoginPage';
+import { MapPage } from '../pages/map/MapPage';
 import { PasswordResetPage } from '../pages/auth/PasswordResetPage';
 import { SignupPage } from '../pages/auth/SignupPage';
 import { FavoritesPage } from '../pages/favorites/FavoritesPage';
@@ -27,7 +27,7 @@ export function AppRouter() {
         <Route path="/password-reset" element={<PasswordResetPage />} />
         <Route path="/search" element={<SearchResultsPage />} />
         <Route path="/complexes/:id" element={<ComplexDetailRoute />} />
-        <Route path="/map" element={<PlaceholderPage programId="MAP-01" title="지도로 보기" />} />
+        <Route path="/map" element={<MapPage />} />
         <Route
           path={MY_ROUTES.home}
           element={

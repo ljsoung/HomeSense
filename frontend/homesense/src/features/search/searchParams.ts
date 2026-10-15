@@ -155,7 +155,6 @@ export function serializeSearchParams(filters: SearchFilters): URLSearchParams {
  */
 export function buildApiQuery(filters: SearchFilters, pageSizeOverride?: number): URLSearchParams {
   const params = new URLSearchParams();
-  const defaults = defaultFilters();
 
   if (filters.regionCode) {
     params.set('regionCode', filters.regionCode);
@@ -163,6 +162,22 @@ export function buildApiQuery(filters: SearchFilters, pageSizeOverride?: number)
     params.set('keyword', filters.keyword);
   }
 
+  appendFilterApiParams(params, filters);
+
+  params.set('sort', filters.sort);
+  params.set('page', String(filters.page - 1));
+  params.set('size', String(pageSizeOverride ?? 20));
+
+  return params;
+}
+
+/**
+ * 매물유형·거래유형·슬라이더 필터를 API 파라미터로 붙인다. `GET /api/complexes/search`(buildApiQuery)와
+ * `GET /api/complexes/map`(MAP-01, features/map/mapParams.ts)이 같은 이름·같은 생략 규칙을 쓰도록 한 곳에 둔다 —
+ * 백엔드도 두 엔드포인트가 같은 조건 코드를 탄다(CLAUDE.md "MAP-01 백엔드 보강" 절).
+ */
+export function appendFilterApiParams(params: URLSearchParams, filters: SearchFilters): void {
+  const defaults = defaultFilters();
   const isDefaultHousingTypes = filters.housingTypes.length === 2;
   if (!isDefaultHousingTypes) {
     filters.housingTypes.forEach((type) => params.append('housingTypes', type));
@@ -178,12 +193,6 @@ export function buildApiQuery(filters: SearchFilters, pageSizeOverride?: number)
   if (filters.amountMax !== defaults.amountMax) params.set('amountMax', String(filters.amountMax));
   if (filters.buildYearMin !== defaults.buildYearMin) params.set('buildYearMin', String(filters.buildYearMin));
   if (filters.buildYearMax !== defaults.buildYearMax) params.set('buildYearMax', String(filters.buildYearMax));
-
-  params.set('sort', filters.sort);
-  params.set('page', String(filters.page - 1));
-  params.set('size', String(pageSizeOverride ?? 20));
-
-  return params;
 }
 
 export const KEYWORD_MIN_LENGTH = 2;

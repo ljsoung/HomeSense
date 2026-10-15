@@ -9,6 +9,7 @@ import { useFavoriteToggle } from '../home/useFavoriteToggle';
 import { ComplexBreadcrumb, ComplexHeader } from './ComplexHeader';
 import { BasicInfoSummary, DetailInfoSection, MatchPendingNotice } from './ComplexInfoSections';
 import { CARD_CLASS, displayAddress } from './detailFormat';
+import { buildComplexMapHref } from '../../features/map/mapParams';
 import { LocationCard } from './LocationCard';
 import { PriceTrendCard } from './PriceTrendCard';
 import { TradeDetailModal } from './TradeDetailModal';
@@ -179,6 +180,11 @@ function ComplexDetailPage({ rawId }: { rawId: string | undefined }) {
               address={data ? displayAddress(data) : null}
               locationPrecision={data?.locationPrecision}
               loading={detailLoading}
+              mapHref={
+                data && data.latitude != null && data.longitude != null
+                  ? buildComplexMapHref(data.complexId, data.latitude, data.longitude)
+                  : undefined
+              }
             />
           </div>
         </aside>
