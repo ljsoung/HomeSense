@@ -833,6 +833,67 @@ const mapHelpers = (page) => ({
   await context.close();
 }
 
+// 20) 자유 텍스트 검색어 검증 — SRCH-01과 같은 규칙(keywordIssue, 2~50자). 어긴 검색어는 URL·지도를 바꾸지 않고 안내만 띄운다.
+//     URL로 들어온 잘못된 검색어(공유 링크)는 "목록으로" 링크를 두지 않는다(SRCH-01이 결과 대신 검색어 오류를 보이므로).
+{
+  const state = { mapStatus: 200 };
+  const SUWON = '경기도 수원시 장안구';
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map?keyword=${encodeURIComponent(SUWON)}`);
+  await rows(page).first().waitFor();
+  await page.waitForTimeout(500);
+  const h = mapHelpers(page);
+  const listLink = page.getByRole('link', { name: '목록으로' });
+  const keywordOf = () => new URL(page.url()).searchParams.get('keyword');
+  const latBefore = h.urlLat();
+  const linkBefore = await listLink.getAttribute('href');
+  const tooShort = page.getByText('검색어는 2자 이상 입력해주세요.');
+
+  await h.searchFor('래');
+  await tooShort.first().waitFor({ timeout: 3000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  ok('20: 1자 검색어 → 2자 이상 안내', (await tooShort.count()) > 0);
+  ok(`20: 1자 검색어는 URL에 남기지 않음(keyword ${keywordOf()})`, keywordOf() === SUWON);
+  ok('20: 1자 검색어로 지도를 옮기지 않음', Math.abs(h.urlLat() - latBefore) < 1e-6);
+  ok('20: "목록으로" 링크는 이전 검색어 그대로', (await listLink.getAttribute('href')) === linkBefore);
+
+  // 51자 이상은 입력란 maxLength(50)가 막는다 — 50자 초과 규칙 자체는 keywordIssue 단위 테스트가 맡는다.
+  await h.search.fill('가'.repeat(51));
+  ok('20: 검색 입력란은 50자까지만 받음', (await h.search.inputValue()).length === 50);
+  await h.search.fill('');
+
+  await h.searchFor('수원');
+  await page.waitForTimeout(500);
+  ok('20: 대조 — 2자 검색어는 URL에 남김', keywordOf() === '수원');
+
+  await page.goto(`${BASE}/map?keyword=${encodeURIComponent('래')}`);
+  await rows(page).first().waitFor();
+  ok('20: URL로 들어온 1자 검색어 → "목록으로" 링크 없음', (await listLink.count()) === 0);
+  await context.close();
+
+  // 모바일 — 검색 시트는 받아들인 검색어일 때만 닫는다.
+  const m = await newPage(browser, 390, 800);
+  await setup(m.page, { mapStatus: 200 });
+  await m.page.goto(`${BASE}/map`);
+  await m.page.getByTestId('map-filter-chips').waitFor();
+  await m.page.getByTestId('map-filter-chips').getByRole('button').first().click();
+  const sheet = m.page.getByRole('dialog', { name: '지역 검색' });
+  await sheet.waitFor();
+  const input = sheet.getByRole('combobox');
+  await input.fill('래');
+  await input.press('Enter');
+  await m.page.getByText('검색어는 2자 이상 입력해주세요.').first().waitFor({ timeout: 3000 }).catch(() => {});
+  ok('20: 모바일 1자 검색어 → 안내가 보임', await m.page.getByText('검색어는 2자 이상 입력해주세요.').first().isVisible().catch(() => false));
+  ok('20: 모바일 1자 검색어 → 시트가 열린 채', await sheet.isVisible());
+  ok('20: 모바일 1자 검색어 → URL에 keyword 없음', !new URL(m.page.url()).searchParams.has('keyword'));
+  await input.fill('수원');
+  await input.press('Enter');
+  await sheet.waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
+  ok('20: 모바일 2자 검색어 → 시트 닫힘·URL에 남김', !(await sheet.isVisible().catch(() => false)) && new URL(m.page.url()).searchParams.get('keyword') === '수원');
+  await m.context.close();
+}
+
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

@@ -29,7 +29,15 @@ import {
 import { fetchSelectedComplex, type MapPinItem } from '../../features/map/selection';
 import { useMapPoints } from '../../features/map/useMapPoints';
 import type { RegionAutocompleteResponse } from '../../features/region/types';
-import { defaultFilters, hasSearchCondition, type SearchFilters, type SortUi } from '../../features/search/searchParams';
+import {
+  defaultFilters,
+  hasSearchCondition,
+  KEYWORD_ISSUE_MESSAGE,
+  keywordIssue,
+  urlKeywordIssue,
+  type SearchFilters,
+  type SortUi,
+} from '../../features/search/searchParams';
 import { MEDIA_MD_DOWN, useMediaQuery } from '../../lib/useMediaQuery';
 import { useFavoriteToggle } from '../home/useFavoriteToggle';
 import { KakaoMapView, type KakaoMapHandle, type MapStatus, type StartView } from './KakaoMapView';
@@ -235,15 +243,23 @@ export function MapPage() {
     }));
     void moveToQuery(region.fullPath, levelForRegionCode(region.legalDongCd));
   };
-  const handleSubmitKeyword = (value: string) => {
+  /** 검색어를 받아들였으면 true. SRCH-01과 같은 규칙(keywordIssue, 2~50자)을 어긴 검색어는 URL에 남기지 않고 지도도 옮기지
+   *  않는다 — 남기면 "목록으로" 링크가 SRCH-01의 검색어 오류 화면으로 간다. */
+  const handleSubmitKeyword = (value: string): boolean => {
+    const issue = keywordIssue(value);
+    if (issue) {
+      showToast(KEYWORD_ISSUE_MESSAGE[issue], 'error');
+      return false;
+    }
     const query = value.trim();
-    if (!query) return;
+    if (!query) return false;
     replaceUrl((prev) => ({
       ...prev,
       complexId: undefined,
       filters: { ...prev.filters, keyword: query, regionCode: undefined, regionLabel: undefined },
     }));
     void moveToQuery(query, 5);
+    return true;
   };
 
   // 현재 위치 — 조회 중에는 버튼을 잠근다. 권한 거부·실패는 토스트로 알리고 지도는 그대로 둔다. 조회 중에 다른 이동·선택을
@@ -317,7 +333,8 @@ export function MapPage() {
   );
   const areaLabel = filters.regionLabel ?? filters.keyword ?? '지도 영역';
   const countText = points.initialLoading ? '…' : formatMapCount(points.items.length, points.truncated);
-  const searchHref = hasSearchCondition(filters) ? buildSearchHref(filters) : undefined;
+  // URL로 들어온 검색어가 SRCH-01 규칙을 어기면(공유 링크 등) 목록 링크를 두지 않는다 — SRCH-01이 결과 대신 검색어 오류만 보인다.
+  const searchHref = hasSearchCondition(filters) && !urlKeywordIssue(filters) ? buildSearchHref(filters) : undefined;
 
   const listPanel = (
     <MapListPanel

@@ -38,7 +38,8 @@ interface MapFilterBarProps {
   onOpenFilters: () => void;
   searchValue: string;
   onSearchValueChange: (value: string) => void;
-  onSubmitKeyword: (value: string) => void;
+  /** 검색어를 받아들였으면 true — 모바일 검색 시트는 받아들인 경우에만 닫는다(규칙을 어기면 시트를 열어 둔 채 고치게 한다). */
+  onSubmitKeyword: (value: string) => boolean;
   onSelectRegion: (region: RegionAutocompleteResponse) => void;
   /** 데스크톱 막대 오른쪽 건수(Figma 6:4373 "6건"). */
   countText: ReactNode;
@@ -111,8 +112,7 @@ export function MapFilterBar(props: MapFilterBarProps) {
             value={props.searchValue}
             onChange={props.onSearchValueChange}
             onSubmitKeyword={(value) => {
-              setSearchOpen(false);
-              props.onSubmitKeyword(value);
+              if (props.onSubmitKeyword(value)) setSearchOpen(false);
             }}
             onSelectRegion={(region) => {
               setSearchOpen(false);
