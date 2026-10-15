@@ -1,5 +1,5 @@
 import type { DealCategory, RentType } from '../complex/types';
-import { appendFilterApiParams, parseSearchParams, serializeSearchParams, type SearchFilters } from '../search/searchParams';
+import { appendFilterApiParams, keywordIssue, parseSearchParams, serializeSearchParams, type SearchFilters } from '../search/searchParams';
 
 /**
  * MAP-01 URL 상태. 필터는 SRCH-01과 같은 파라미터 이름·같은 모듈(features/search/searchParams.ts)로 파싱·직렬화해 두 화면을
@@ -181,13 +181,18 @@ export interface PointView {
   source: 'complex' | 'viewport' | 'stored' | 'default';
 }
 
-/** 지역 라벨을 지오코딩해 그 중심으로 간다. 실패하면 fallback. */
+/** 지역 라벨(또는 검색어)을 지오코딩해 그 중심으로 간다. 실패하면 fallback. */
 export interface RegionView {
   kind: 'region';
   query: string;
   level: number;
   fallback: PointView;
+  /** 못 찾으면 "위치를 찾을 수 없습니다"를 알린다 — 검색어로 들어온 경우(지도에서 검색어를 제출할 때와 같다). */
+  notifyNotFound?: true;
 }
+
+/** 자유 텍스트 검색어로 옮길 때의 레벨 — 지도 검색창 제출과 진입이 같은 값을 쓴다. */
+export const KEYWORD_LEVEL = 5;
 
 /** complexId만 있고 좌표가 없다 — 단지 좌표를 조회한 뒤 그 위치로 간다. 실패하면 fallback(다음 순위). */
 export interface ComplexView {
@@ -203,8 +208,10 @@ export type InitialView = PointView | RegionView | ComplexView;
  * 1) complexId(+좌표) — DTL-01 "지도에서 크게 보기"
  * 2) URL의 lat·lng·level — 새로고침·상세에서 뒤로
  * 3) regionLabel — SRCH-01 "지도로 보기"(SDK Geocoder로 지역명 중심)
- * 4) 마지막으로 본 위치(localStorage)
- * 5) 기본 위치(서울시청 부근)
+ * 4) keyword — SRCH-01 키워드 검색의 "지도로 보기". keywordIssue(2~50자)를 통과한 것만, 지도 검색창과 같은 Geocoder →
+ *    Places 경로로 찾는다. 못 찾으면 다음 순위로 가고 "위치를 찾을 수 없습니다"를 알린다(notifyNotFound).
+ * 5) 마지막으로 본 위치(localStorage)
+ * 6) 기본 위치(서울시청 부근)
  */
 export function resolveInitialView(state: MapUrlState, stored: MapViewport | null): InitialView {
   const lastResort: PointView = stored
@@ -215,6 +222,10 @@ export function resolveInitialView(state: MapUrlState, stored: MapViewport | nul
     if (state.viewport) return { kind: 'point', viewport: state.viewport, source: 'viewport' };
     const label = state.filters.regionLabel?.trim();
     if (label) return { kind: 'region', query: label, level: levelForRegionCode(state.filters.regionCode), fallback: lastResort };
+    const keyword = state.filters.keyword?.trim();
+    if (keyword && keywordIssue(keyword) === null) {
+      return { kind: 'region', query: keyword, level: KEYWORD_LEVEL, fallback: lastResort, notifyNotFound: true };
+    }
     return lastResort;
   };
 

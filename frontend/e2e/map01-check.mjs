@@ -933,6 +933,72 @@ for (const [label, jeonse] of [['전세 거래 있음', true], ['전세 거래 �
   await context.close();
 }
 
+// 22) 키워드만 있는 진입 — SRCH-01 키워드 검색의 "지도로 보기"는 지도 검색창과 같은 Geocoder → Places 경로로 그 장소에서 연다.
+//     못 찾으면 대체 위치(마지막 위치 → 기본 위치)로 열고 "위치를 찾을 수 없습니다". 1자 검색어는 지오코딩하지 않는다.
+//     찾는 동안 다른 지역을 검색하면 앞 결과·토스트를 버린다(비동기 결과 적용 규칙).
+{
+  const notFound = (page) => page.getByText('위치를 찾을 수 없습니다');
+  const openFromSearch = async (keyword, init) => {
+    const ctx = await newPage(browser, 1280, 800);
+    if (init) await ctx.page.addInitScript(init);
+    await setup(ctx.page, { mapStatus: 200 });
+    await ctx.page.goto(`${BASE}/search?keyword=${encodeURIComponent(keyword)}`);
+    // GNB에도 "지도로 보기"(/map)가 있다 — 검색 조건을 싣는 SRCH-01 링크를 고른다.
+    const link = ctx.page.locator('a[href^="/map?"]', { hasText: '지도로 보기' });
+    ok(`22: SRCH-01 "지도로 보기" 링크에 keyword(${keyword})`, new URL((await link.getAttribute('href')) ?? '', BASE).searchParams.get('keyword') === keyword);
+    await link.click();
+    await ctx.page.waitForURL(/\/map/);
+    await rows(ctx.page).first().waitFor();
+    await ctx.page.waitForTimeout(600);
+    return ctx;
+  };
+
+  let { context, page } = await openFromSearch('경기도 수원시 장안구');
+  let h = mapHelpers(page);
+  ok(`22: SRCH-01 키워드 → 지도로 보기 → 그 장소로 엶(lat ${h.urlLat()})`, Math.abs(h.urlLat() - SUWON_LAT) < 0.001);
+  ok('22: 검색어 레벨(5)', new URL(page.url()).searchParams.get('level') === '5');
+  ok('22: 찾으면 "못 찾음" 토스트 없음', (await notFound(page).count()) === 0);
+  await context.close();
+
+  ({ context, page } = await openFromSearch('없는지역'));
+  h = mapHelpers(page);
+  await notFound(page).first().waitFor({ timeout: 3000 }).catch(() => {});
+  ok(`22: 못 찾는 키워드 → 기본 위치(lat ${h.urlLat()})`, Math.abs(h.urlLat() - CENTER.lat) < 0.001);
+  ok('22: 못 찾는 키워드 → "위치를 찾을 수 없습니다" 토스트', (await notFound(page).count()) > 0);
+  await context.close();
+
+  // 마지막으로 본 위치가 있으면 그쪽이 대체 위치다.
+  ({ context, page } = await openFromSearch('없는지역', () => {
+    localStorage.setItem('homesense.map.lastViewport', JSON.stringify({ lat: 35.1796, lng: 129.0756, level: 7 }));
+  }));
+  h = mapHelpers(page);
+  ok(`22: 못 찾으면 마지막 위치로(lat ${h.urlLat()})`, Math.abs(h.urlLat() - BUSAN_LAT) < 0.001);
+  await context.close();
+
+  // 1자 검색어 URL — 지오코딩하지 않고(토스트 없음) 기본 위치.
+  ({ context, page } = await newPage(browser, 1280, 800));
+  await setup(page, { mapStatus: 200 });
+  await page.goto(`${BASE}/map?keyword=${encodeURIComponent('래')}`);
+  await rows(page).first().waitFor();
+  await page.waitForTimeout(600);
+  ok('22: 1자 검색어 진입 → 기본 위치·토스트 없음', Math.abs(mapHelpers(page).urlLat() - CENTER.lat) < 0.001 && (await notFound(page).count()) === 0);
+  await context.close();
+
+  // 시작 지오코딩(800ms)이 끝나기 전에 다른 지역을 검색 → 그 지역에서 열고, 앞 검색어의 "못 찾음"을 알리지 않는다.
+  ({ context, page } = await newPage(browser, 1280, 800));
+  await page.addInitScript(() => {
+    window.__FAKE_KAKAO_OPTIONS = { geocodeDelays: { 없는지역: 800 } };
+  });
+  await setup(page, { mapStatus: 200 });
+  await page.goto(`${BASE}/map?keyword=${encodeURIComponent('없는지역')}`);
+  h = mapHelpers(page);
+  await h.searchFor('경기도 수원시 장안구');
+  await page.waitForTimeout(2500);
+  ok(`22: 시작 지오코딩 중 검색 → 검색한 지역에서 엶(lat ${h.urlLat()})`, Math.abs(h.urlLat() - SUWON_LAT) < 0.001);
+  ok('22: 시작 지오코딩 중 검색 → 앞 검색어의 "못 찾음" 토스트 없음', (await notFound(page).count()) === 0);
+  await context.close();
+}
+
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

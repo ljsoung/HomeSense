@@ -17,6 +17,7 @@ import {
   COMPLEX_LEVEL,
   DEFAULT_VIEWPORT,
   filterKeyOfMapQuery,
+  KEYWORD_LEVEL,
   levelForRegionCode,
   mapFilterKey,
   parseMapUrl,
@@ -53,8 +54,11 @@ import { MapPopup } from './MapPopup';
 function toStartView(view: PointView | RegionView): StartView {
   return view.kind === 'point'
     ? { kind: 'point', viewport: view.viewport }
-    : { kind: 'region', query: view.query, level: view.level, fallback: view.fallback.viewport };
+    : { kind: 'region', query: view.query, level: view.level, fallback: view.fallback.viewport, notifyNotFound: view.notifyNotFound };
 }
+
+/** 지역·검색어로 위치를 찾지 못했을 때 — 지도 검색창 제출과 검색어 진입이 같은 문구를 쓴다. */
+const NOT_FOUND_MESSAGE = '위치를 찾을 수 없습니다. 지역명을 확인해 주세요.';
 
 const CONTROL_BUTTON_CLASS =
   'flex size-9 items-center justify-center rounded-[14px] border border-[#e5e7eb] bg-white text-[#364153] shadow-[0_4px_3px_rgba(0,0,0,0.1),0_2px_2px_rgba(0,0,0,0.1)] hover:bg-[#f7f8fa] disabled:cursor-wait disabled:opacity-60';
@@ -233,7 +237,7 @@ export function MapPage() {
     }
     // 밀린 검색(stale)은 알리지 않는다 — 앞 지역을 못 찾았다는 토스트가 뒤 지역 화면이나 다른 화면에 뜨면 안 된다.
     if (result === 'not-found' && intentRef.current === intent) {
-      showToast('위치를 찾을 수 없습니다. 지역명을 확인해 주세요.', 'error');
+      showToast(NOT_FOUND_MESSAGE, 'error');
     }
   };
   const handleSelectRegion = (region: RegionAutocompleteResponse) => {
@@ -260,7 +264,7 @@ export function MapPage() {
       complexId: undefined,
       filters: { ...prev.filters, keyword: query, regionCode: undefined, regionLabel: undefined },
     }));
-    void moveToQuery(query, 5);
+    void moveToQuery(query, KEYWORD_LEVEL);
     return true;
   };
 
@@ -385,6 +389,7 @@ export function MapPage() {
       }}
       onStatusChange={setMapStatus}
       onUserGesture={beginIntent}
+      onStartNotFound={() => showToast(NOT_FOUND_MESSAGE, 'error')}
       popup={selectedItem ? <MapPopup item={selectedItem} autoFocus={popupAutoFocus} onClose={() => closePopup(true)} /> : null}
     >
       {/* 지도 위 안내 — 범위 안 결과가 상한을 넘어 잘렸을 때. */}

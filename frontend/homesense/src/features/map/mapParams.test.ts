@@ -11,6 +11,7 @@ import {
   formatBounds,
   formatClusterCount,
   formatPinPrice,
+  KEYWORD_LEVEL,
   mapFilterKey,
   levelForRegionCode,
   parseMapUrl,
@@ -144,6 +145,23 @@ describe('초기 중심 결정 순서', () => {
       level: 7,
       fallback: { kind: 'point', viewport: stored, source: 'stored' },
     });
+  });
+
+  it('4) 지역 라벨이 없으면 규칙(2~50자)을 통과한 keyword를 지오코딩하고, 못 찾으면 알리며 마지막 위치로', () => {
+    expect(resolveInitialView(parseMapUrl(params('keyword=래미안 대치')), stored)).toEqual({
+      kind: 'region',
+      query: '래미안 대치',
+      level: KEYWORD_LEVEL,
+      fallback: { kind: 'point', viewport: stored, source: 'stored' },
+      notifyNotFound: true,
+    });
+  });
+
+  it('4) 1자·공백 keyword는 지오코딩하지 않고, 지역 라벨이 있으면 라벨이 먼저다', () => {
+    expect(resolveInitialView(parseMapUrl(params('keyword=래')), stored)).toEqual({ kind: 'point', viewport: stored, source: 'stored' });
+    expect(resolveInitialView(parseMapUrl(params('keyword=%20%20')), null)).toEqual({ kind: 'point', viewport: DEFAULT_VIEWPORT, source: 'default' });
+    const both = resolveInitialView(parseMapUrl(params('regionCode=4111100000&regionLabel=경기도 수원시 장안구&keyword=래미안')), stored);
+    expect(both.kind === 'region' && both.query).toBe('경기도 수원시 장안구');
   });
 
   it('4) 마지막으로 본 위치, 5) 기본 위치', () => {

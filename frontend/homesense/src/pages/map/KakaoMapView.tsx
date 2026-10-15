@@ -16,7 +16,10 @@ import { hasRepresentativeTrade, type MapPinItem } from '../../features/map/sele
 import { describeDealAmount } from '../../lib/format';
 
 /** 시작 위치 — MapPage가 complexId 조회까지 끝낸 결과. 지역 라벨은 SDK Geocoder가 필요해 여기서 처리한다. */
-export type StartView = { kind: 'point'; viewport: MapViewport } | { kind: 'region'; query: string; level: number; fallback: MapViewport };
+export type StartView =
+  | { kind: 'point'; viewport: MapViewport }
+  /** notifyNotFound: 못 찾아 fallback으로 열면 onStartNotFound를 부른다(검색어로 들어온 경우). */
+  | { kind: 'region'; query: string; level: number; fallback: MapViewport; notifyNotFound?: boolean };
 
 export type MapStatus = 'loading' | 'ready' | 'error';
 
@@ -50,6 +53,11 @@ interface KakaoMapViewProps {
   onStatusChange?: (status: MapStatus) => void;
   /** 사용자가 지도를 직접 만졌다(누르기·끌기·휠). 진행 중인 위치 이동(검색·현재 위치)의 결과를 버리는 데 쓴다. 팝업 안은 제외. */
   onUserGesture?: () => void;
+  /**
+   * 시작 위치(notifyNotFound가 켜진 검색어)를 못 찾아 대체 위치로 열었다. 지도가 만들어진 뒤 한 번 — 그사이 시작 위치가
+   * 바뀌었거나(지도가 뜨기 전 다른 검색) 지도가 사라졌으면(언마운트·재마운트) 부르지 않는다.
+   */
+  onStartNotFound?: () => void;
   /** 선택된 단지의 팝업 내용. 핀 바로 위에 띄운다. */
   popup: ReactNode;
   /** 지도 위에 겹쳐 그릴 요소(컨트롤·범례·안내). SDK 오류 상태에서도 그린다. */
@@ -156,6 +164,7 @@ export function KakaoMapView({
   onMapClick,
   onStatusChange,
   onUserGesture,
+  onStartNotFound,
   popup,
   children,
 }: KakaoMapViewProps) {
@@ -189,9 +198,11 @@ export function KakaoMapView({
   });
   const onStatusChangeRef = useRef(onStatusChange);
   const onUserGestureRef = useRef(onUserGesture);
+  const onStartNotFoundRef = useRef(onStartNotFound);
   useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
     onUserGestureRef.current = onUserGesture;
+    onStartNotFoundRef.current = onStartNotFound;
   });
   const statusRef = useRef(status);
   useEffect(() => {
@@ -224,19 +235,23 @@ export function KakaoMapView({
 
     // 찾는 사이 시작 위치가 바뀌었으면(지도가 뜨기 전에 다른 지역을 검색) 앞 결과는 버리고 새 시작
     // 위치로 다시 정한다 — 늦게 끝난 첫 지오코딩이 지도를 처음 지역에서 열지 않게 한다.
-    const resolveStart = async (maps: KakaoMapsNamespace): Promise<MapViewport> => {
+    const resolveStart = async (maps: KakaoMapsNamespace): Promise<{ viewport: MapViewport; notFound: boolean }> => {
       for (;;) {
         const view = startViewRef.current;
-        if (view.kind === 'point') return view.viewport;
+        if (view.kind === 'point') return { viewport: view.viewport, notFound: false };
         const found = await geocode(maps, view.query);
-        if (cancelled || startViewRef.current === view) return found ? { ...found, level: view.level } : view.fallback;
+        if (cancelled || startViewRef.current === view) {
+          return found
+            ? { viewport: { ...found, level: view.level }, notFound: false }
+            : { viewport: view.fallback, notFound: view.notifyNotFound === true };
+        }
       }
     };
 
     loadKakaoMaps()
       .then(async (maps) => {
         if (cancelled) return;
-        const start = await resolveStart(maps);
+        const { viewport: start, notFound: startNotFound } = await resolveStart(maps);
         if (cancelled) return;
         mapsRef.current = maps;
         container.innerHTML = '';
@@ -291,6 +306,7 @@ export function KakaoMapView({
         setStatus('ready');
         setErrorMessage(null);
         handleIdle();
+        if (startNotFound) onStartNotFoundRef.current?.();
       })
       .catch((error: unknown) => {
         if (cancelled) return;
