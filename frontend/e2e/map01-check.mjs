@@ -86,7 +86,9 @@ async function setup(page, state) {
         if (state.nearbyDelayMs) await sleep(state.nearbyDelayMs);
         return json(200, okBody({ items, truncated: false, limit: 500 }));
       }
-      return json(200, okBody({ items: state.items ?? ITEMS, truncated: !!state.truncated, limit: 500 }));
+      // state.items가 함수면 요청 파라미터(필터)로 고른다.
+      const items = typeof state.items === 'function' ? state.items(url.searchParams) : (state.items ?? ITEMS);
+      return json(200, okBody({ items, truncated: !!state.truncated, limit: 500 }));
     }
     if (path === '/api/auth/login') {
       state.loggedIn = true;
@@ -892,6 +894,43 @@ const mapHelpers = (page) => ({
   await sheet.waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
   ok('20: 모바일 2자 검색어 → 시트 닫힘·URL에 남김', !(await sheet.isVisible().catch(() => false)) && new URL(m.page.url()).searchParams.get('keyword') === '수원');
   await m.context.close();
+}
+
+// 21) 필터를 바꾼 뒤 새 응답에 선택 단지가 없으면 — 옛 필터(매매)의 가격을 팝업에 남기지 않고 새 필터(전세)로 다시 조회한다.
+//     새 필터에 맞는 거래가 없으면 "선택한 조건의 최근 거래가 없습니다".
+for (const [label, jeonse] of [['전세 거래 있음', true], ['전세 거래 없음', false]]) {
+  const target = ITEMS[2]; // 지도단지3, 매매 4억 5,000만원
+  const targetJeonse = { ...target, representativeDealCategory: 'RENT', rentType: 'JEONSE', representativeAmount: 22000 };
+  const state = {
+    mapStatus: 200,
+    items: (params) => (params.get('rentType') === 'JEONSE' ? ITEMS.filter((i) => i.complexId !== 3) : ITEMS),
+    nearbyItems: (params) => (params.get('rentType') === 'JEONSE' && jeonse ? [targetJeonse] : []),
+    details: { 3: detailOf(3, target.latitude, target.longitude) },
+  };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  await page.getByRole('button', { name: '지도단지3', exact: true }).click();
+  await popup(page).waitFor();
+  ok(`21(${label}): 전제 — 매매 가격 팝업`, (await popup(page).innerText()).includes('4억 5,000만원'));
+  await page.getByRole('button', { name: /거래유형/ }).click();
+  const filterDialog = page.getByRole('dialog', { name: '필터' });
+  await filterDialog.getByLabel('전세').check();
+  await filterDialog.getByRole('button', { name: '필터 적용' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('ul[aria-label="지도 단지 목록"] > li').length === 5);
+  for (let i = 0; i < 60 && !(state.nearbyParams ?? []).some((p) => p.get('rentType') === 'JEONSE'); i++) await page.waitForTimeout(50);
+  await page.waitForTimeout(800);
+  const text = (await popup(page).count()) === 1 ? await popup(page).innerText() : '';
+  ok(`21(${label}): 전세 기준으로 다시 조회`, (state.nearbyParams ?? []).some((p) => p.get('rentType') === 'JEONSE'));
+  ok(`21(${label}): 팝업에 매매 가격이 남지 않음`, !text.includes('4억 5,000만원'));
+  if (jeonse) {
+    ok(`21(${label}): 팝업은 전세 가격(2억 2,000만원)`, text.includes('2억 2,000만원'));
+  } else {
+    ok(`21(${label}): 팝업은 "선택한 조건의 최근 거래가 없습니다"`, text.includes('선택한 조건의 최근 거래가 없습니다'));
+  }
+  ok(`21(${label}): URL 선택 유지`, page.url().includes('complexId=3'));
+  await context.close();
 }
 
 await browser.close();

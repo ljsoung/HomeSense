@@ -14,6 +14,8 @@ export interface MapPointsState {
   loading: boolean;
   /** 마지막 요청이 실패했으면 서버 error.message(없으면 공통 문구). 이전 결과는 그대로 둔다. */
   errorMessage: string | null;
+  /** 지금 items를 돌려준 조회 문자열 — 새 조회가 진행 중이면 이전 조회다(어느 필터 기준 응답인지 알 수 있게). */
+  itemsQuery: string | null;
 }
 
 /**
@@ -30,6 +32,7 @@ export function useMapPoints(query: URLSearchParams | null) {
     initialLoading: true,
     loading: false,
     errorMessage: null,
+    itemsQuery: null,
   });
   const [retryToken, setRetryToken] = useState(0);
   const requestSeq = useRef(0);
@@ -45,7 +48,14 @@ export function useMapPoints(query: URLSearchParams | null) {
       searchComplexesInBounds(new URLSearchParams(queryKey), controller.signal)
         .then((result) => {
           if (seq !== requestSeq.current) return;
-          setState({ items: result.items, truncated: result.truncated, initialLoading: false, loading: false, errorMessage: null });
+          setState({
+            items: result.items,
+            truncated: result.truncated,
+            initialLoading: false,
+            loading: false,
+            errorMessage: null,
+            itemsQuery: queryKey,
+          });
         })
         .catch((error: unknown) => {
           if (seq !== requestSeq.current || axios.isCancel(error)) return;

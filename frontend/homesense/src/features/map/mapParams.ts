@@ -127,6 +127,25 @@ export function buildMapApiQuery(filters: SearchFilters, bounds: MapBounds): URL
 }
 
 /**
+ * 지도 조회의 필터 부분(bounds 제외, 정렬된 문자열) — 지도 API에 실리는 필터만이라 정렬·페이지·지역·검색어는 들어가지 않는다.
+ * 선택 단지의 값(응답 항목·마지막으로 알던 값)이 어느 필터 기준인지 비교하는 데 쓴다.
+ */
+export function mapFilterKey(filters: SearchFilters): string {
+  const params = new URLSearchParams();
+  appendFilterApiParams(params, filters);
+  params.sort();
+  return params.toString();
+}
+
+/** 지도 조회 문자열(buildMapApiQuery 결과)의 필터 부분 — mapFilterKey와 같은 형태. */
+export function filterKeyOfMapQuery(query: string): string {
+  const params = new URLSearchParams(query);
+  params.delete('bounds');
+  params.sort();
+  return params.toString();
+}
+
+/**
  * SDK 없이 화면 크기와 레벨로 bounds를 근사한다 — 지도 SDK를 불러오지 못해도 목록 패널은 동작해야 하기 때문이다(UI정의서
  * 예외 처리). 카카오맵은 레벨이 1 오를 때마다 축척이 2배가 되고, 레벨 3에서 1px이 약 0.9m다(2026-10-13 실제 SDK 화면의 축척
  * 막대로 잰 값 — 레벨 4에서 100m ≈ 60px, 레벨 8에서 2km ≈ 58px). 정확한 축척이 아니라 목록이 화면에 보이는 지도와 대략

@@ -16,7 +16,9 @@ import {
   buildSearchHref,
   COMPLEX_LEVEL,
   DEFAULT_VIEWPORT,
+  filterKeyOfMapQuery,
   levelForRegionCode,
+  mapFilterKey,
   parseMapUrl,
   resolveInitialView,
   serializeMapUrl,
@@ -294,15 +296,24 @@ export function MapPage() {
   const [listCollapsed, setListCollapsed] = useState(false);
 
   // 선택한 단지 — 최신 응답에 있으면 그 항목을 쓰고 마지막으로 알던 값으로 기억한다. 응답에 없으면(상한을 넘어 잘림, 지도를
-  // 옮겨 범위 밖, 필터 변경) 마지막으로 알던 값으로 핀과 팝업을 유지한다. 처음부터 없으면(DTL-01 딥링크로 넓은 레벨 진입)
-  // 지금 지도 중심(딥링크면 단지 좌표) 주변의 좁은 범위 조회로 먼저 찾고, 없을 때만 상세 API로 받는다(features/map/selection.ts).
+  // 옮겨 범위 밖) 마지막으로 알던 값으로 핀과 팝업을 유지한다. 처음부터 없으면(DTL-01 딥링크로 넓은 레벨 진입) 지금 지도
+  // 중심(딥링크면 단지 좌표) 주변의 좁은 범위 조회로 먼저 찾고, 없을 때만 상세 API로 받는다(features/map/selection.ts).
+  // 마지막으로 알던 값은 그 값을 받은 필터 키와 함께 기억하고, 지금 필터와 키가 다르면 쓰지 않는다 — 필터를 바꾼 뒤 새 응답에
+  // 선택 단지가 없으면 옛 필터의 대표 거래(예: 매매 가격)를 팝업에 남기지 않고 새 필터로 다시 조회한다.
+  const filterKey = useMemo(() => mapFilterKey(filters), [filters]);
   const responseSelected = selectedId === null ? undefined : points.items.find((item) => item.complexId === selectedId);
-  const [knownSelected, setKnownSelected] = useState<MapPinItem | null>(null);
-  if (responseSelected && knownSelected !== responseSelected) setKnownSelected(responseSelected);
+  const responseFilterKey = points.itemsQuery === null ? null : filterKeyOfMapQuery(points.itemsQuery);
+  const [knownSelected, setKnownSelected] = useState<{ item: MapPinItem; filterKey: string } | null>(null);
+  if (responseSelected && responseFilterKey !== null && knownSelected?.item !== responseSelected) {
+    setKnownSelected({ item: responseSelected, filterKey: responseFilterKey });
+  }
   const selectedItem: MapPinItem | undefined =
-    responseSelected ?? (knownSelected !== null && knownSelected.complexId === selectedId ? knownSelected : undefined);
+    responseSelected ??
+    (knownSelected !== null && knownSelected.item.complexId === selectedId && knownSelected.filterKey === filterKey
+      ? knownSelected.item
+      : undefined);
   const needsSelectedLookup = selectedId !== null && !points.initialLoading && selectedItem === undefined;
-  const lookupSelected = useEffectEvent((complexId: number, signal: AbortSignal) =>
+  const lookupSelected = useEffectEvent((complexId: number, lookupFilterKey: string, signal: AbortSignal) =>
     fetchSelectedComplex(
       complexId,
       filters,
@@ -312,20 +323,19 @@ export function MapPage() {
       },
       signal,
     ).then((found) => {
-      if (!signal.aborted && found) setKnownSelected(found);
+      if (!signal.aborted && found) setKnownSelected({ item: found, filterKey: lookupFilterKey });
     }),
   );
   // 조회 중에 다른 단지를 고르거나 팝업을 닫거나 화면을 떠나면 끊고 결과를 버린다. 필터를 바꿔도 끊고 새 필터로 다시
-  // 찾는다(옛 필터의 대표 거래를 팝업에 넣지 않게). 정렬·페이지는 범위 조회에 쓰이지 않아 제외한다. 동작 번호(intentRef)는
-  // 보지 않는다 — 확대·축소·지도 터치는 선택을 바꾸지 않으니 팝업 가격 조회를 끊지 않는다.
-  const lookupFilterKey = useMemo(() => JSON.stringify({ ...filters, sort: undefined, page: undefined }), [filters]);
+  // 찾는다(옛 필터의 대표 거래를 팝업에 넣지 않게). 키는 지도 API에 실리는 필터만이라 정렬·페이지는 들어가지 않는다. 동작
+  // 번호(intentRef)는 보지 않는다 — 확대·축소·지도 터치는 선택을 바꾸지 않으니 팝업 가격 조회를 끊지 않는다.
   useEffect(() => {
     if (!needsSelectedLookup || selectedId === null) return;
     const controller = new AbortController();
     // 실패(상세 404·네트워크)하면 팝업 없이 둔다 — 지도와 목록은 그대로 쓸 수 있다.
-    lookupSelected(selectedId, controller.signal).catch(() => {});
+    lookupSelected(selectedId, filterKey, controller.signal).catch(() => {});
     return () => controller.abort();
-  }, [needsSelectedLookup, selectedId, lookupFilterKey]);
+  }, [needsSelectedLookup, selectedId, filterKey]);
   // 지도에 그리는 핀 — 응답 항목 + 응답에 없는 선택 단지.
   const mapItems = useMemo<MapPinItem[]>(
     () => (selectedItem && !responseSelected ? [...points.items, selectedItem] : points.items),

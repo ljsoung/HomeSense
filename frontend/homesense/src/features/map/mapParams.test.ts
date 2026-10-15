@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSearchParams, serializeSearchParams } from '../search/searchParams';
+import { defaultFilters, parseSearchParams, serializeSearchParams } from '../search/searchParams';
 import {
   approximateBounds,
   buildComplexMapHref,
@@ -7,9 +7,11 @@ import {
   buildMapHref,
   buildSearchHref,
   DEFAULT_VIEWPORT,
+  filterKeyOfMapQuery,
   formatBounds,
   formatClusterCount,
   formatPinPrice,
+  mapFilterKey,
   levelForRegionCode,
   parseMapUrl,
   resolveInitialView,
@@ -178,5 +180,22 @@ describe('표기', () => {
     const filters = parseSearchParams(params('housingTypes=VILLA&dealType=매매&areaMax=120'));
     const mapQuery = serializeMapUrl({ filters });
     expect(mapQuery.toString()).toBe(serializeSearchParams(filters).toString());
+  });
+});
+
+describe('필터 키 — 선택 단지 값이 어느 필터 기준인지 비교', () => {
+  const bounds = { swLat: 37.5, swLng: 126.9, neLat: 37.6, neLng: 127.0 };
+
+  it('조회 문자열의 필터 부분은 bounds와 무관하게 mapFilterKey와 같다', () => {
+    const filters = { ...defaultFilters(), dealType: '전세' as const, areaMin: 60 };
+    const other = { swLat: 35, swLng: 129, neLat: 35.1, neLng: 129.1 };
+    expect(filterKeyOfMapQuery(buildMapApiQuery(filters, bounds).toString())).toBe(mapFilterKey(filters));
+    expect(filterKeyOfMapQuery(buildMapApiQuery(filters, other).toString())).toBe(mapFilterKey(filters));
+  });
+
+  it('거래유형이 바뀌면 키가 달라지고, 정렬·페이지·검색어는 키에 들어가지 않는다', () => {
+    const base = defaultFilters();
+    expect(mapFilterKey({ ...base, dealType: '전세' })).not.toBe(mapFilterKey(base));
+    expect(mapFilterKey({ ...base, sort: 'AMOUNT', page: 3, keyword: '수원' })).toBe(mapFilterKey(base));
   });
 });
