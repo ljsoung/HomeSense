@@ -769,6 +769,70 @@ const mapHelpers = (page) => ({
   await context.close();
 }
 
+// 19) 화면 폭이 768px 경계를 넘으면(태블릿 회전 등) 지도가 다시 마운트된다 — 진입 위치로 돌아가지 않고 마지막 위치·레벨에서
+//     다시 시작하고, URL도 그 위치를 유지한다(데스크톱 → 모바일 → 데스크톱).
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  const h = mapHelpers(page);
+  const urlLevel = () => Number(new URL(page.url()).searchParams.get('level'));
+  await h.searchFor('경기도 수원시 장안구');
+  for (let i = 0; i < 40 && Math.abs(h.urlLat() - SUWON_LAT) >= 0.001; i++) await page.waitForTimeout(50);
+  await page.getByRole('button', { name: '지도 축소' }).click();
+  for (let i = 0; i < 40 && urlLevel() !== 6; i++) await page.waitForTimeout(50);
+  ok(`19: 전제 — 수원으로 옮기고 레벨 6(lat ${h.urlLat()}, level ${urlLevel()})`, Math.abs(h.urlLat() - SUWON_LAT) < 0.001 && urlLevel() === 6);
+
+  for (const [width, label] of [[390, '모바일'], [1280, '데스크톱']]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.waitForTimeout(800);
+    const center = await page.evaluate(() => ({ lat: window.__fakeMap.getCenter().getLat(), level: window.__fakeMap.getLevel() }));
+    ok(`19: ${label}로 바뀐 뒤 새 지도가 마지막 위치에서 시작(lat ${center.lat}, level ${center.level})`, Math.abs(center.lat - SUWON_LAT) < 0.001 && center.level === 6);
+    ok(`19: ${label}로 바뀐 뒤 URL 위치 유지(lat ${h.urlLat()}, level ${urlLevel()})`, Math.abs(h.urlLat() - SUWON_LAT) < 0.001 && urlLevel() === 6);
+  }
+  await context.close();
+}
+
+// 19b) 같은 경계 전환에서 선택·팝업·필터도 유지된다 — 전세 필터를 적용하고 단지를 고른 뒤 그 단지가 응답에서 빠진 상태
+//      (마지막으로 알던 값으로 핀·팝업을 그리는 경로)로 1280 → 390 → 1280.
+{
+  const state = { mapStatus: 200 };
+  const { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, state);
+  await page.goto(`${BASE}/map`);
+  await rows(page).first().waitFor();
+  await page.getByRole('button', { name: /거래유형/ }).click();
+  const filterDialog = page.getByRole('dialog', { name: '필터' });
+  await filterDialog.getByLabel('전세').check();
+  await filterDialog.getByRole('button', { name: '필터 적용' }).click();
+  for (let i = 0; i < 40 && state.mapRequests.at(-1)?.get('rentType') !== 'JEONSE'; i++) await page.waitForTimeout(50);
+  await page.getByRole('button', { name: '지도단지3', exact: true }).click();
+  await popup(page).waitFor();
+  state.items = ITEMS.filter((i) => i.complexId !== 3);
+  state.truncated = true;
+  await page.getByRole('button', { name: '지도 축소' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('ul[aria-label="지도 단지 목록"] > li').length === 5);
+  await page.waitForTimeout(200);
+  ok('19b: 전제 — 전세 필터 적용, 선택 단지가 응답에서 빠진 채 팝업·핀 유지',
+    decodeURIComponent(page.url()).includes('dealType=전세') && (await popup(page).count()) === 1 && (await pin(page, 3).getAttribute('aria-pressed')) === 'true');
+
+  for (const [width, label] of [[390, '모바일'], [1280, '데스크톱']]) {
+    const before = state.mapRequests.length;
+    await page.setViewportSize({ width, height: 800 });
+    await page.waitForTimeout(800);
+    const params = new URL(page.url()).searchParams;
+    ok(`19b: ${label} — URL 선택·필터 유지`, params.get('complexId') === '3' && params.get('dealType') === '전세');
+    ok(`19b: ${label} — 팝업 유지(지도단지3, 가격)`, (await popup(page).count()) === 1 && (await popup(page).innerText()).includes('지도단지3') && (await popup(page).innerText()).includes('억'));
+    ok(`19b: ${label} — 응답에 없는 선택 핀 유지(aria-pressed)`, (await pin(page, 3).count()) === 1 && (await pin(page, 3).getAttribute('aria-pressed')) === 'true');
+    ok(`19b: ${label} — 새 지도의 조회도 전세 필터`, state.mapRequests.length > before && state.mapRequests.slice(before).every((p) => p.get('rentType') === 'JEONSE'));
+    ok(`19b: ${label} — 필터 칩 적용 표시`, (await page.getByText('(적용됨)').count()) > 0);
+    ok(`19b: ${label} — 선택 단지를 상세 API로 다시 부르지 않음`, !(state.detailRequests ?? []).includes('3'));
+  }
+  await context.close();
+}
+
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

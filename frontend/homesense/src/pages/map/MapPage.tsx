@@ -119,6 +119,16 @@ export function MapPage() {
   const [bounds, setBounds] = useState<MapBounds | null>(null);
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
   const apiQuery = useMemo(() => (bounds ? buildMapApiQuery(filters, bounds) : null), [bounds, filters]);
+
+  // 화면 폭이 768px 경계를 넘으면(태블릿 회전·창 크기 변경) 레이아웃이 바뀌어 지도가 다시 마운트된다. KakaoMapView는 마운트할
+  // 때만 startView를 읽으므로, 지도가 한 번이라도 위치를 알렸으면(bounds) 마지막 위치(URL 뷰포트)에서 다시 시작한다 — 그러지
+  // 않으면 진입 때 위치로 돌아가고 첫 idle이 URL까지 그 위치로 덮는다. 아직 위치를 알리지 않았으면(지도 생성 중) 시작 위치를
+  // 그대로 쓴다(그사이 검색은 moveToQuery가 startView에 반영한다).
+  const [layoutIsMobile, setLayoutIsMobile] = useState(isMobile);
+  if (layoutIsMobile !== isMobile) {
+    setLayoutIsMobile(isMobile);
+    if (bounds !== null && urlState.viewport) setStartView({ kind: 'point', viewport: urlState.viewport });
+  }
   const points = useMapPoints(apiQuery);
 
   const replaceUrl = useCallback(
@@ -201,6 +211,16 @@ export function MapPage() {
       return;
     }
     const result = await map.moveToQuery(query, level, () => intentRef.current === intent);
+    // 지도가 아직 만들어지는 중이라 검색어가 그 지도의 시작 위치로 넘어갔다 — 그사이 레이아웃이 바뀌어 지도가 다시 마운트돼도
+    // 같은 검색어로 시작하게 여기에도 남긴다.
+    if (result === 'deferred' && intentRef.current === intent) {
+      setStartView((prev) => ({
+        kind: 'region',
+        query,
+        level,
+        fallback: prev === null ? DEFAULT_VIEWPORT : prev.kind === 'point' ? prev.viewport : prev.fallback,
+      }));
+    }
     // 밀린 검색(stale)은 알리지 않는다 — 앞 지역을 못 찾았다는 토스트가 뒤 지역 화면이나 다른 화면에 뜨면 안 된다.
     if (result === 'not-found' && intentRef.current === intent) {
       showToast('위치를 찾을 수 없습니다. 지역명을 확인해 주세요.', 'error');
