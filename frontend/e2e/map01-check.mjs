@@ -999,6 +999,54 @@ for (const [label, jeonse] of [['전세 거래 있음', true], ['전세 거래 �
   await context.close();
 }
 
+// 23) 같은 라우트 안에서 URL의 검색 조건이 바뀌면 검색창을 맞춘다 — /map?keyword=래미안에서 GNB "지도로 보기"(데스크톱)·
+//     하단 탭 "지도"(모바일)로 조건 없는 /map에 가면 검색창·검색 시트가 비어 있다. 입력 중인 값은 지도를 움직여도 덮지 않는다.
+{
+  const RAEMIAN = '래미안';
+  let { context, page } = await newPage(browser, 1280, 800);
+  await setup(page, { mapStatus: 200 });
+  await page.goto(`${BASE}/map?keyword=${encodeURIComponent(RAEMIAN)}`);
+  await rows(page).first().waitFor();
+  const search = page.getByPlaceholder('지역명으로 지도 이동');
+  ok('23: 전제 — 데스크톱 검색창에 래미안', (await search.inputValue()) === RAEMIAN);
+  await page.locator('header').getByRole('link', { name: '지도로 보기' }).click();
+  for (let i = 0; i < 40 && new URL(page.url()).searchParams.has('keyword'); i++) await page.waitForTimeout(50);
+  await page.waitForTimeout(300);
+  ok('23: GNB 지도로 보기 → URL에 keyword 없음', !new URL(page.url()).searchParams.has('keyword'));
+  ok(`23: GNB 지도로 보기 → 데스크톱 검색창 비움("${await search.inputValue()}")`, (await search.inputValue()) === '');
+
+  await search.fill('수원');
+  const before = page.url();
+  await page.getByRole('button', { name: '지도 축소' }).click();
+  for (let i = 0; i < 40 && page.url() === before; i++) await page.waitForTimeout(50);
+  await page.waitForTimeout(300);
+  ok('23: 전제 — 입력 중에 지도를 움직여 URL이 바뀜', page.url() !== before);
+  ok(`23: 입력 중인 값은 덮지 않음("${await search.inputValue()}")`, (await search.inputValue()) === '수원');
+  await context.close();
+
+  ({ context, page } = await newPage(browser, 390, 800));
+  await setup(page, { mapStatus: 200 });
+  await page.goto(`${BASE}/map?keyword=${encodeURIComponent(RAEMIAN)}`);
+  await page.getByTestId('map-filter-chips').waitFor();
+  const openSheet = async () => {
+    await page.getByTestId('map-filter-chips').getByRole('button').first().click();
+    const sheet = page.getByRole('dialog', { name: '지역 검색' });
+    await sheet.waitFor();
+    return sheet;
+  };
+  let sheet = await openSheet();
+  ok('23: 전제 — 모바일 검색 시트에 래미안', (await sheet.getByRole('combobox').inputValue()) === RAEMIAN);
+  await page.keyboard.press('Escape');
+  await sheet.waitFor({ state: 'detached' });
+  await page.locator('nav').getByRole('link', { name: '지도' }).click();
+  for (let i = 0; i < 40 && new URL(page.url()).searchParams.has('keyword'); i++) await page.waitForTimeout(50);
+  await page.waitForTimeout(300);
+  sheet = await openSheet();
+  ok(`23: 하단 탭 지도 → 모바일 검색 시트 비움("${await sheet.getByRole('combobox').inputValue()}")`, (await sheet.getByRole('combobox').inputValue()) === '');
+  ok('23: 모바일 칩 라벨도 "지역 검색"', (await page.getByTestId('map-filter-chips').getByRole('button').first().innerText()).includes('지역 검색'));
+  await context.close();
+}
+
 await browser.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);
