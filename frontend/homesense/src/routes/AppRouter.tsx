@@ -9,6 +9,7 @@ import { HomePage } from '../pages/home/HomePage';
 import { PrivacyPolicyPage } from '../pages/legal/PrivacyPolicyPage';
 import { MyPage, MyPageSkeleton } from '../pages/my/MyPage';
 import { MyPreparingPage } from '../pages/my/MyPreparingPage';
+import { NotificationHistoryPage } from '../pages/notifications/NotificationHistoryPage';
 import { NotificationSettingsPage } from '../pages/notificationSettings/NotificationSettingsPage';
 import { SearchResultsPage } from '../pages/search/SearchResultsPage';
 import { MY_ROUTES } from './paths';
@@ -61,7 +62,7 @@ export function AppRouter() {
           path={MY_ROUTES.notifications}
           element={
             <RequireAuth>
-              <MyPreparingPage programId="MY-04" title="알림 이력" />
+              <NotificationHistoryPage />
             </RequireAuth>
           }
         />
