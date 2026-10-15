@@ -1,5 +1,6 @@
 package com.jiseong.homesense.notification.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -20,11 +21,13 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -223,6 +226,12 @@ class NotificationControllerTest {
                 .andExpect(jsonPath("$.data[0].createdAt").value("2026-10-06T03:10:00"))
                 // 발송 전(sent_at NULL) 알림은 sentAt 키가 빠진다(non_null 직렬화, BAT-NTF-01 D1)
                 .andExpect(jsonPath("$.data[0].sentAt").doesNotExist())
+                // record 컴포넌트 isRead는 JSON 키도 isRead다(프론트 NotificationResponse.isRead가 이 키를 읽는다)
+                .andExpect(jsonPath("$.data[0].isRead").value(false))
+                .andExpect(jsonPath("$.data[0].read").doesNotExist())
+                .andExpect(jsonPath("$.data[0].complexId").value(10))
+                .andExpect(jsonPath("$.data[0].tradeId").value(20))
+                .andExpect(jsonPath("$.data[0].legalDongCd").doesNotExist())
                 .andExpect(jsonPath("$.pageMeta.totalElements").value(1));
     }
 
@@ -234,6 +243,30 @@ class NotificationControllerTest {
         mockMvc.perform(get("/api/notifications"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").isEmpty());
+    }
+
+    @Test
+    void 알림이력_type은_대소문자를_가리지_않고_허용_목록_밖이면_전체로_본다() throws Exception {
+        when(notificationService.getNotifications(eq(1L), any(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/notifications").param("type", "price_change")).andExpect(status().isOk());
+        verify(notificationService).getNotifications(eq(1L), eq(NotificationType.PRICE_CHANGE), any());
+
+        mockMvc.perform(get("/api/notifications").param("type", "EVERYTHING")).andExpect(status().isOk());
+        verify(notificationService).getNotifications(eq(1L), isNull(), any());
+    }
+
+    @Test
+    void 알림이력_sort와_큰_size가_와도_400이_아니라_서비스로_넘긴다() throws Exception {
+        // 정렬 고정·크기 상한(50)은 서비스가 맡는다(NotificationServiceTest). 여기서는 없는 정렬 속성이 와도 요청이 깨지지 않는지 본다.
+        when(notificationService.getNotifications(eq(1L), isNull(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/notifications").param("sort", "nope,asc").param("size", "500").param("page", "1"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(notificationService).getNotifications(eq(1L), isNull(), pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
     }
 
     @Test

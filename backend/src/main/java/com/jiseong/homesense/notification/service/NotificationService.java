@@ -9,10 +9,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.jiseong.homesense.common.config.NotificationHistoryProperties;
 import com.jiseong.homesense.favorite.entity.FavoriteProperty;
 import com.jiseong.homesense.favorite.entity.FavoriteRegion;
 import com.jiseong.homesense.favorite.exception.FavoriteNotFoundException;
@@ -44,11 +46,15 @@ import lombok.RequiredArgsConstructor;
 @Transactional
 public class NotificationService {
 
+    /** 알림 이력 한 페이지의 최대 건수. */
+    public static final int MAX_PAGE_SIZE = 50;
+
     private final NotificationSettingRepository notificationSettingRepository;
     private final NotificationRepository notificationRepository;
     private final FavoritePropertyRepository favoritePropertyRepository;
     private final FavoriteRegionRepository favoriteRegionRepository;
     private final UserRepository userRepository;
+    private final NotificationHistoryProperties historyProperties;
 
     @Transactional(readOnly = true)
     public List<NotificationSettingResponse> getSettings(Long userId) {
@@ -138,15 +144,32 @@ public class NotificationService {
         }
     }
 
+    /**
+     * 알림 이력(MY-04)과 MY-01 최근 알림 미리보기가 함께 쓴다.
+     *
+     * <ul>
+     *   <li>정렬은 created_at DESC, notification_id DESC로 고정하고 요청의 정렬(?sort=)은 버린다 — 같은 배치 런의 알림은
+     *       created_at이 같아 보조 정렬이 없으면 페이지 경계에서 중복·누락이 생긴다.</li>
+     *   <li>페이지 크기는 {@value #MAX_PAGE_SIZE}건까지(전역 상한은 Spring 기본 2000이라 따로 막는다).</li>
+     *   <li>발생 후 {@code homesense.notification.history.retention-months}(기본 6)개월이 지난 알림은 빠진다("자동 보관") —
+     *       데이터는 지우지 않는다. 기준 시각은 created_at을 쓰는 JPA auditing과 같은 JVM 기본 타임존의 현재 시각이다
+     *       (KST Clock을 쓰면 JVM이 UTC일 때 경계가 9시간 어긋난다 — BAT-NTF-01 D2와 같은 이유).</li>
+     * </ul>
+     */
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(Long userId, NotificationType typeFilter, Pageable pageable) {
+        Pageable page = PageRequest.of(pageable.getPageNumber(), Math.min(pageable.getPageSize(), MAX_PAGE_SIZE));
+        LocalDateTime since = LocalDateTime.now().minusMonths(historyProperties.retentionMonths());
         Page<Notification> notifications = typeFilter != null
-                ? notificationRepository.findByUser_UserIdAndNotificationTypeOrderByCreatedAtDescNotificationIdDesc(
-                        userId, typeFilter, pageable)
-                : notificationRepository.findByUser_UserIdOrderByCreatedAtDescNotificationIdDesc(userId, pageable);
+                ? notificationRepository
+                        .findByUser_UserIdAndNotificationTypeAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                                userId, typeFilter, since, page)
+                : notificationRepository.findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                        userId, since, page);
         return notifications.map(NotificationResponse::from);
     }
 
+    /** 읽음 처리는 조회 기간과 무관하다 — 기간 밖 알림도 본인 것이면 읽음으로 바꾼다. 이미 읽었으면 그대로(멱등). */
     public void markAsRead(Long userId, Long notificationId) {
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(NotificationNotFoundException::new);
