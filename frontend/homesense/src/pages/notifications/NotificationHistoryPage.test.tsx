@@ -74,6 +74,18 @@ describe('NotificationHistoryPage 시간 표시(D10)', () => {
     expect(row.textContent).toContain('3시간 전 · 2026-10-06 09:00');
   });
 
+  it('7일이 지난 알림은 상대 시각 없이 절대 시각만(데스크톱·모바일)', async () => {
+    const old = { ...unsent, notificationId: 3, title: '오래된 단지 실거래가 1.0% 상승', createdAt: '2026-09-28T09:00:00' };
+    renderAt(1280, [old]);
+    const desktopRow = await screen.findByRole('link', { name: /오래된 단지/ });
+    expect(desktopRow.textContent).toContain('2026-09-28 09:00');
+    expect(desktopRow.textContent).not.toContain('2026.09.28');
+    cleanup();
+    renderAt(390, [old]);
+    const mobileRow = await screen.findByRole('link', { name: /오래된 단지/ });
+    expect(mobileRow.querySelector('time')?.textContent).toBe('2026-09-28 09:00');
+  });
+
   it('안 읽은 행에는 스크린리더 "읽지 않음"과 점, 읽은 행에는 없다', async () => {
     renderAt(1280, [unsent, { ...unsent, notificationId: 2, title: '창신동 신규 실거래 3건', notificationType: 'NEW_TRADE', isRead: true }]);
     const unreadRow = await screen.findByRole('link', { name: /숭인 힐스테이트.*읽지 않음/ });
