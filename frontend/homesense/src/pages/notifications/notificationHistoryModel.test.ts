@@ -9,7 +9,9 @@ import {
   priceDirectionOf,
   resolveNotificationLink,
   serializeHistoryParams,
+  showsRelativeTime,
 } from './notificationHistoryModel';
+import { formatRelativeTime } from '../../lib/relativeTime';
 
 const params = (query: string) => new URLSearchParams(query);
 
@@ -81,6 +83,33 @@ describe('시간 표시(D10)', () => {
     expect(formatAbsoluteDateTime('2026-10-06T03:10:00')).toBe('2026-10-06 03:10');
     expect(formatAbsoluteDateTime('2026-10-06T23:59:59.123')).toBe('2026-10-06 23:59');
     expect(formatAbsoluteDateTime('형식 밖')).toBe('형식 밖');
+  });
+});
+
+describe('showsRelativeTime(D10) — formatRelativeTime과 같은 7일 경계', () => {
+  const created = '2026-10-01T12:00:00'; // KST
+  const base = Date.parse('2026-10-01T12:00:00+09:00');
+  const HOUR = 3_600_000;
+  const DAY = 24 * HOUR;
+
+  it('6일 23시간 → 상대 시각을 보인다("6일 전")', () => {
+    const now = base + 6 * DAY + 23 * HOUR;
+    expect(showsRelativeTime(created, now)).toBe(true);
+    expect(formatRelativeTime(created, now)).toBe('6일 전');
+  });
+
+  it('정확히 7일 → 보이지 않는다(formatRelativeTime도 날짜로 바뀐다)', () => {
+    const now = base + 7 * DAY;
+    expect(showsRelativeTime(created, now)).toBe(false);
+    expect(formatRelativeTime(created, now)).toBe('2026.10.01');
+  });
+
+  it('8일 → 보이지 않는다', () => {
+    expect(showsRelativeTime(created, base + 8 * DAY)).toBe(false);
+  });
+
+  it('읽을 수 없는 값은 false', () => {
+    expect(showsRelativeTime('형식 밖', base)).toBe(false);
   });
 });
 

@@ -31,6 +31,7 @@ import {
   resolveNotificationLink,
   RETENTION_NOTICE,
   serializeHistoryParams,
+  showsRelativeTime,
   type HistoryFilter,
   type NotificationLink,
 } from './notificationHistoryModel';
@@ -393,7 +394,8 @@ function NotificationRow({
 }) {
   const link: NotificationLink = resolveNotificationLink(notification);
   const unread = !notification.isRead;
-  const relative = formatRelativeTime(notification.createdAt, now);
+  // 7일이 지나면 formatRelativeTime이 날짜를 돌려줘 절대 시각과 겹친다 — 그때는 상대 시각을 보이지 않는다(D10).
+  const relative = showsRelativeTime(notification.createdAt, now) ? formatRelativeTime(notification.createdAt, now) : null;
   const absolute = formatAbsoluteDateTime(notification.createdAt);
   const desktop = layout === 'desktop';
 
@@ -418,13 +420,11 @@ function NotificationRow({
           </time>
         ) : (
           <span className="pt-1 text-[11px] leading-[16.5px] text-[#99a1af]">
-            <time dateTime={notification.createdAt}>
-              {relative} · {absolute}
-            </time>
+            <time dateTime={notification.createdAt}>{relative ? `${relative} · ${absolute}` : absolute}</time>
           </span>
         )}
       </span>
-      {desktop && <span className="shrink-0 text-[12.5px] leading-[18.75px] text-[#99a1af]">{relative}</span>}
+      {desktop && relative && <span className="shrink-0 text-[12.5px] leading-[18.75px] text-[#99a1af]">{relative}</span>}
       <span className={`flex w-6 shrink-0 justify-center ${desktop ? '' : 'pt-1.5'}`}>
         {unread && <span aria-hidden="true" data-testid="unread-dot" className="size-2 rounded-full bg-[#0f5c54]" />}
       </span>

@@ -1,4 +1,5 @@
 import type { NotificationResponse, NotificationType } from '../../features/notification/types';
+import { parseServerDateTime, RELATIVE_TIME_WINDOW_MS } from '../../lib/relativeTime';
 import { regionSearchHref } from '../favorites/favoritesModel';
 
 /** 목록에 보이는 기간(개월) — 서버 homesense.notification.history.retention-months 기본값과 같아야 한다(CLAUDE.md "SCR-MY-04" D6). */
@@ -99,6 +100,17 @@ export function clampPage(page: number, totalPages: number): number {
 export function formatAbsoluteDateTime(value: string): string {
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(value);
   return match ? `${match[1]} ${match[2]}` : value;
+}
+
+/**
+ * formatRelativeTime이 상대 시각("N일 전")을 돌려주는 동안이면 true — 같은 경계(RELATIVE_TIME_WINDOW_MS, 7일)와 같은 해석
+ * (parseServerDateTime)을 쓴다. 지나면 그 함수는 날짜를 돌려줘 절대 시각과 겹치므로 MY-04는 상대 시각을 보이지 않는다(D10).
+ * 읽을 수 없는 값은 false. 미래 시각(시계 차이)은 "방금 전"이라 true.
+ */
+export function showsRelativeTime(value: string, now: number): boolean {
+  const time = parseServerDateTime(value);
+  if (Number.isNaN(time)) return false;
+  return now - time < RELATIVE_TIME_WINDOW_MS;
 }
 
 /** 유형 필터 빈 상태 문구(D9). 전체 빈 상태는 별도 화면. */

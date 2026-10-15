@@ -152,6 +152,11 @@ async function scenarioRender(label, viewport, layout) {
     const notice = page.getByText('발생 후 6개월이 지난 알림은 자동 보관됩니다');
     ok(`${label} 1/D6: 보관 안내는 페이지네이션 아래`, (await notice.boundingBox()).y > (await pagination.boundingBox()).y);
   }
+  // 7일이 지난 알림(9월) — 상대 시각이 날짜로 바뀌어 절대 시각과 겹치지 않게 절대 시각만(D10)
+  const oldText = await row(page, layout === 'mobile' ? 30 : 39).textContent();
+  ok(`${label} 1/D10: 7일 지난 알림은 날짜가 한 번만(점 표기 날짜 없음)`, /2026-09-\d{2} 03:00/.test(oldText) && !/2026\.09\.\d{2}/.test(oldText), oldText);
+  const recentText = await row(page, 45).textContent();
+  ok(`${label} 1/D10: 7일 이내 알림은 상대 시각`, /(시간|분|일) 전|방금 전/.test(recentText), recentText);
   ok(`${label} 1: 가로 스크롤 없음`, await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await context.close();
 }
@@ -190,6 +195,13 @@ async function scenarioOpen(label, viewport) {
     await ready(page);
     await row(page, 45).click();
     ok(`${label} 3: PATCH ${patchMode === 'hold' ? '응답 전' : '500'}에도 DTL-01로 이동`, await page.waitForURL(/\/complexes\/10$/, { timeout: 3000 }).then(() => true, () => false), page.url());
+    if (patchMode === 'fail') {
+      // 실패한 읽음 처리는 기억에서 지운다 — 뒤로 와 다시 받은 서버 상태(안 읽음)가 그대로 보여야 한다(D2).
+      await page.waitForTimeout(300);
+      await page.goBack();
+      await ready(page);
+      ok(`${label} 3: PATCH 500 → 이동 → 뒤로 오면 점이 다시 보임`, (await row(page, 45).locator('[data-testid="unread-dot"]').count()) === 1);
+    }
     await context.close();
   }
   // PATCH 500 + 새 탭 열기(화면에 남음) → 점을 되돌린다

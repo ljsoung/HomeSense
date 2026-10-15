@@ -13,6 +13,9 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
+/** 이 시간이 지나기 전까지 상대 시각("N일 전")을, 지나면 날짜를 보인다. 경계를 같이 써야 하는 화면(MY-04)이 이 값을 쓴다. */
+export const RELATIVE_TIME_WINDOW_MS = 7 * DAY;
+
 /**
  * "방금 전 / N분 전 / N시간 전 / N일 전", 7일 이상 지나면 "YYYY.MM.DD"(서버 문자열의 날짜 부분 그대로).
  * 시계 차이로 미래 시각이 오면 "방금 전"으로 본다. 읽을 수 없는 값은 원문의 날짜 부분을 돌려준다.
@@ -28,6 +31,6 @@ export function formatRelativeTime(value: string | null | undefined, now: number
   if (diff < MINUTE) return '방금 전';
   if (diff < HOUR) return `${Math.floor(diff / MINUTE)}분 전`;
   if (diff < DAY) return `${Math.floor(diff / HOUR)}시간 전`;
-  if (diff < 7 * DAY) return `${Math.floor(diff / DAY)}일 전`;
+  if (diff < RELATIVE_TIME_WINDOW_MS) return `${Math.floor(diff / DAY)}일 전`;
   return datePart;
 }
