@@ -29,6 +29,17 @@ log('v1.1 note unchanged (자기 확인 항목 도입 반영)', row('v1.1')?.[2]
 log('v1.2 row keeps its own date 2026-09-21', row('v1.2')?.[1] === '2026-09-21');
 log('v1.2 note reads server-side verification', row('v1.2')?.[2] === '6항 연령 확인 관련 문구 수정: 가입 시 서버에서도 연령 확인 항목을 검증하도록 변경 반영', row('v1.2')?.[2]);
 log('7-day notice sentence still present', section.includes('최소 7일'));
+
+// 6항(v1.4): 회원정보 수정·이메일 정정 안내 뒤에, 권리 행사를 보호책임자 이메일로 요청하면 지체 없이 조치한다는 문장이 있어야 한다.
+const rights = (await page.locator('#rights').innerText()).replace(/\s+/g, ' ');
+const editAt = rights.indexOf('마이페이지 > 회원정보 수정에서 닉네임과 비밀번호를 변경할 수 있습니다');
+const emailAt = rights.indexOf('정정이 필요한 경우 제10항의 개인정보보호책임자에게 요청할 수 있습니다');
+const requestAt = rights.indexOf('위 권리 행사는 “10. 개인정보 보호책임자”에 안내된 이메일로 요청하실 수 있으며, 회사는 본인 확인 후 지체 없이 조치하겠습니다');
+log('6항: 회원정보 수정 문장 있음', editAt >= 0);
+log('6항: 이메일 정정 문장 있음', emailAt >= 0);
+log('6항: 보호책임자 이메일 요청·지체 없이 조치 문장 있음', requestAt >= 0);
+log('6항: 순서 = 회원정보 수정 → 이메일 정정 → 보호책임자 요청', editAt >= 0 && editAt < emailAt && emailAt < requestAt, `${editAt},${emailAt},${requestAt}`);
+log('6항: "준비 중" 옛 문구 없음', !rights.includes('준비 중'));
 await browser.close();
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
