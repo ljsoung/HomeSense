@@ -5,17 +5,20 @@ import java.time.Duration;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import com.jiseong.homesense.common.security.FailedAttemptPolicy;
+
 /**
  * SVC-AUTH-01.login() 부가 기능 — Redis 키 {@code login:fail:{email}}로 연속 로그인 실패 횟수를 세어
  * MAX_ATTEMPTS(5)회 이상이면 계정을 잠근다. 실패할 때마다 카운터의 TTL을 LOCK_TTL(5분)로 다시 걸어,
- * 잠금은 "마지막 실패로부터 5분"이 지나면 카운터 자체가 사라지며 자연히 풀린다.
+ * 잠금은 "마지막 실패로부터 5분"이 지나면 카운터 자체가 사라지며 자연히 풀린다. 두 값은 비밀번호 변경의 현재 비밀번호
+ * 확인 실패 잠금과 공유한다({@link FailedAttemptPolicy}).
  */
 @Component
 class LoginAttemptService {
 
     private static final String KEY_PREFIX = "login:fail:";
-    private static final int MAX_ATTEMPTS = 5;
-    private static final Duration LOCK_TTL = Duration.ofMinutes(5);
+    private static final int MAX_ATTEMPTS = FailedAttemptPolicy.MAX_ATTEMPTS;
+    private static final Duration LOCK_TTL = FailedAttemptPolicy.LOCK_TTL;
 
     private final StringRedisTemplate redisTemplate;
 

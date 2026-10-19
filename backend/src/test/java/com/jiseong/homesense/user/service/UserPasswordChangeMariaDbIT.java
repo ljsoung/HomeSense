@@ -1,0 +1,203 @@
+package com.jiseong.homesense.user.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.MariaDBContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import com.jayway.jsonpath.JsonPath;
+import com.jiseong.homesense.common.security.AccessTokenEpochService;
+import com.jiseong.homesense.common.security.JwtTokenProvider;
+
+/**
+ * MY-05 비밀번호 변경(PUT /api/users/me)을 실제 필터 체인(MockMvc)·MariaDB·Redis로 검증한다. UserServiceTest(Mockito)는
+ * 세션 종료 호출 여부만 증명하고, (1) 그 호출이 이 회원의 Refresh Token을 실제로 모두 폐기하고 기존 Access Token을
+ * JwtAuthenticationFilter에서 401로 만드는지, (2) 실패하면 비밀번호·닉네임·토큰이 커밋되지 않는지는 증명하지 못한다.
+ *
+ * <p>Redis는 로컬 Redis(localhost:6379)를 쓴다(다른 IT와 같은 알려진 격리 한계, CLAUDE.md 백로그). 매 테스트 전에 이
+ * 회원의 키를 지운다.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@Testcontainers
+@Tag("integration")
+class UserPasswordChangeMariaDbIT {
+
+    private static final String EMAIL = "password-change-it@test.com";
+    private static final String PASSWORD = "Abcd1234!";
+    private static final String NEW_PASSWORD = "Efgh5678!";
+
+    @Container
+    static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")
+            .withDatabaseName("homesense_it")
+            .withUsername("homesense")
+            .withPassword("homesense");
+
+    @DynamicPropertySource
+    static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MARIADB::getJdbcUrl);
+        registry.add("spring.datasource.username", MARIADB::getUsername);
+        registry.add("spring.datasource.password", MARIADB::getPassword);
+        registry.add("spring.datasource.driver-class-name", MARIADB::getDriverClassName);
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "none");
+        registry.add("spring.sql.init.mode", () -> "always");
+        registry.add("spring.sql.init.schema-locations", () -> "classpath:testcontainers/withdrawn-user-purge-schema.sql");
+    }
+
+    /** 실제 동작 그대로 쓰되, 원자성 테스트에서만 컷오프 쓰기가 실패하게 만든다. */
+    @MockitoSpyBean
+    private AccessTokenEpochService accessTokenEpochService;
+
+    @Autowired
+    private MockMvc mockMvc;
+    @Autowired
+    private JwtTokenProvider jwtTokenProvider;
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+    @Autowired
+    private StringRedisTemplate redis;
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    private long userId;
+    private String accessToken;
+
+    @BeforeEach
+    void setUp() {
+        WithdrawalTestSeed seed = new WithdrawalTestSeed(jdbc);
+        seed.wipeAll();
+        userId = seed.user(EMAIL, passwordEncoder.encode(PASSWORD), "ACTIVE", null);
+        redis.delete(List.of("user:status:" + userId, "user:tokenEpochMs:" + userId, "password-change:fail:" + userId,
+                "login:fail:" + EMAIL));
+        // 이 기기와 다른 기기의 세션 두 개. 이 IT는 폐기 여부만 세므로 저장값은 고유하기만 하면 된다.
+        seed.refreshToken(userId, "password-change-it-device-a", false);
+        seed.refreshToken(userId, "password-change-it-device-b", false);
+        accessToken = jwtTokenProvider.createAccessToken(userId, "USER");
+    }
+
+    @Test
+    void 비밀번호를_바꾸면_닉네임과_함께_저장되고_Refresh_Token이_모두_폐기되고_기존_Access_Token은_401이다() throws Exception {
+        expectMe(accessToken, 200);
+
+        mockMvc.perform(put("/api/users/me").header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("새닉네임", PASSWORD, NEW_PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.nickname").value("새닉네임"));
+
+        assertThat(passwordEncoder.matches(NEW_PASSWORD, storedPassword())).isTrue();
+        assertThat(storedNickname()).isEqualTo("새닉네임");
+        assertThat(activeRefreshTokens()).isZero();
+        expectMe(accessToken, 401);
+
+        // 새 비밀번호로 로그인하면 정상 — 옛 비밀번호는 거부된다.
+        login(PASSWORD, 401);
+        expectMe(login(NEW_PASSWORD, 200), 200);
+    }
+
+    @Test
+    void 현재_비밀번호가_틀리면_400이고_닉네임_비밀번호_토큰_모두_그대로이며_실패_카운트가_남는다() throws Exception {
+        mockMvc.perform(put("/api/users/me").header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("새닉네임", "Wrong123!", NEW_PASSWORD)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_CURRENT_PASSWORD"));
+
+        assertThat(passwordEncoder.matches(PASSWORD, storedPassword())).isTrue();
+        assertThat(storedNickname()).isEqualTo("닉네임");
+        assertThat(activeRefreshTokens()).isEqualTo(2);
+        assertThat(redis.opsForValue().get("password-change:fail:" + userId)).isEqualTo("1");
+        expectMe(accessToken, 200);
+    }
+
+    @Test
+    void 실패가_5회_쌓이면_맞는_비밀번호도_429로_막히고_아무것도_바뀌지_않는다() throws Exception {
+        redis.opsForValue().set("password-change:fail:" + userId, "5");
+
+        mockMvc.perform(put("/api/users/me").header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(null, PASSWORD, NEW_PASSWORD)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("PASSWORD_CHANGE_LOCKED"));
+
+        assertThat(passwordEncoder.matches(PASSWORD, storedPassword())).isTrue();
+        assertThat(activeRefreshTokens()).isEqualTo(2);
+    }
+
+    @Test
+    void 컷오프_쓰기가_실패하면_비밀번호_닉네임_토큰_폐기가_모두_롤백된다() throws Exception {
+        doThrow(new RedisConnectionFailureException("redis down"))
+                .when(accessTokenEpochService).invalidateTokensIssuedBefore(eq(userId), any());
+
+        mockMvc.perform(put("/api/users/me").header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("새닉네임", PASSWORD, NEW_PASSWORD)))
+                .andExpect(status().is5xxServerError());
+
+        assertThat(passwordEncoder.matches(PASSWORD, storedPassword())).isTrue();
+        assertThat(storedNickname()).isEqualTo("닉네임");
+        assertThat(activeRefreshTokens()).isEqualTo(2);
+    }
+
+    private static String body(String nickname, String currentPassword, String newPassword) {
+        StringBuilder json = new StringBuilder("{");
+        if (nickname != null) json.append("\"nickname\":\"").append(nickname).append("\",");
+        json.append("\"currentPassword\":\"").append(currentPassword).append("\",");
+        json.append("\"newPassword\":\"").append(newPassword).append("\"}");
+        return json.toString();
+    }
+
+    private String storedPassword() {
+        return jdbc.queryForObject("SELECT password FROM user WHERE user_id = ?", String.class, userId);
+    }
+
+    private String storedNickname() {
+        return jdbc.queryForObject("SELECT nickname FROM user WHERE user_id = ?", String.class, userId);
+    }
+
+    private long activeRefreshTokens() {
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM refresh_token WHERE user_id = ? AND revoked_yn = FALSE",
+                Long.class, userId);
+        return count == null ? 0 : count;
+    }
+
+    private void expectMe(String token, int expectedStatus) throws Exception {
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().is(expectedStatus));
+    }
+
+    private String login(String password, int expectedStatus) throws Exception {
+        String response = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + EMAIL + "\",\"password\":\"" + password + "\"}"))
+                .andExpect(status().is(expectedStatus))
+                .andReturn().getResponse().getContentAsString();
+        return expectedStatus == 200 ? JsonPath.read(response, "$.data.accessToken") : null;
+    }
+}
