@@ -66,7 +66,11 @@ export function NotificationHistoryPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const params = parseHistoryParams(searchParams);
-  const history = useNotificationHistory({ filter: params.filter, page: params.page, mode });
+  // URL page는 URL 동기화(정규화·범위 밖 replace·페이지 이동)에만 쓰고, 조회·화면은 실효 페이지를 본다. 무한 스크롤은 URL page를
+  // 쓰지 않고 항상 첫 페이지부터 받는다. URL에서 지우지 않는 이유: 태블릿 ↔ 모바일 회전 뒤 번호형으로 돌아오면 그 페이지로
+  // 돌아가야 한다.
+  const effectivePage = mode === 'infinite' ? 1 : params.page;
+  const history = useNotificationHistory({ filter: params.filter, page: effectivePage, mode });
   const navigate = useNavigate();
   const { showToast } = useToast();
 
@@ -75,7 +79,7 @@ export function NotificationHistoryPage() {
     if (needsNormalization(searchParams)) setSearchParams(serializeHistoryParams(params), { replace: true });
   });
 
-  // 범위를 넘는 page → 마지막 페이지로 replace(번호형만).
+  // 범위를 넘는 page → 마지막 페이지로 replace(번호형만 — 무한 스크롤 응답의 totalPages는 20건 기준이라 번호형 page를 줄이면 틀린다).
   const totalPages = history.pageMeta?.totalPages;
   useEffect(() => {
     if (mode !== 'paged' || history.status !== 'success' || totalPages === undefined) return;
@@ -117,9 +121,6 @@ export function NotificationHistoryPage() {
     navigate(MISSING_TARGET_FALLBACK);
   };
 
-  // 무한 스크롤은 URL page를 쓰지 않고 항상 첫 페이지부터 받는다(훅의 pageKey와 같다). URL에서 지우지 않는 이유: 태블릿 ↔ 모바일
-  // 회전 뒤 번호형으로 돌아오면 그 페이지로 돌아가야 한다.
-  const effectivePage = mode === 'infinite' ? 1 : params.page;
   const isAllEmpty = history.status === 'success' && params.filter === 'ALL' && history.items.length === 0 && effectivePage === 1;
   const filterBar = isAllEmpty ? null : <FilterChips layout={layout} value={params.filter} onChange={changeFilter} />;
 
@@ -131,7 +132,7 @@ export function NotificationHistoryPage() {
       history={history}
       onOpen={markRead}
       onOpenMissing={openMissing}
-      currentPage={params.page}
+      currentPage={effectivePage}
       onPageChange={changePage}
     />
   );

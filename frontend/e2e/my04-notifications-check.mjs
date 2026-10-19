@@ -294,6 +294,27 @@ async function scenarioInfinite(label, viewport) {
   await page.waitForTimeout(600);
   ok(`${label} 6: 재시도 → 40행`, (await rows(page).count()) === 40, String(await rows(page).count()));
   await context.close();
+
+  // 번호형 URL(?page=99, 알림 있음) — 무한 스크롤은 URL page를 쓰지 않는다: 첫 페이지부터, 범위 밖 replace도 하지 않는다.
+  // 태블릿 폭으로 바꾸면 번호형이 되어 그때 마지막 페이지(5)로 옮긴다.
+  ({ context, page, calls } = await open(viewport, { path: '/notifications?page=99' }));
+  await ready(page);
+  await page.waitForTimeout(600);
+  ok(`${label} 6: ?page=99 → 첫 페이지 20행`, (await rows(page).count()) === 20, String(await rows(page).count()));
+  ok(`${label} 6: ?page=99 → 맨 위가 최신(45)`, (await rows(page).first().locator('[data-notification-id]').getAttribute('data-notification-id')) === '45');
+  ok(`${label} 6: ?page=99 → 요청은 page=0만`, listGets(calls).length > 0 && listGets(calls).every((c) => new URLSearchParams(c.query).get('page') === '0'), JSON.stringify(listGets(calls).map((c) => c.query)));
+  ok(`${label} 6: ?page=99 → URL은 그대로(범위 밖 replace 없음)`, new URL(page.url()).searchParams.get('page') === '99', page.url());
+  ok(`${label} 6: ?page=99 → "이 페이지에 알림이 없어요" 없음, 페이지네이션 없음`,
+    (await page.getByText('이 페이지에 알림이 없어요').count()) === 0 && (await page.getByRole('navigation', { name: /페이지/ }).count()) === 0);
+  await page.mouse.wheel(0, 4000);
+  await page.waitForFunction(() => document.querySelectorAll('ul[aria-label="알림 목록"] > li').length >= 40, null, { timeout: 4000 }).catch(() => {});
+  ok(`${label} 6: ?page=99 → 스크롤하면 다음 페이지(40행)`, (await rows(page).count()) === 40, String(await rows(page).count()));
+  await page.setViewportSize({ width: 768, height: 1024 });
+  const clamped = await page.waitForFunction(() => new URL(location.href).searchParams.get('page') === '5', null, { timeout: 5000 }).then(() => true, () => false);
+  ok(`${label} 6: ?page=99에서 태블릿 폭으로 → 번호형 마지막 페이지(5)`, clamped, page.url());
+  await page.waitForFunction(() => document.querySelectorAll('ul[aria-label="알림 목록"] > li').length === 5, null, { timeout: 5000 }).catch(() => {});
+  ok(`${label} 6: 태블릿 5페이지 → 5행`, (await rows(page).count()) === 5, String(await rows(page).count()));
+  await context.close();
 }
 
 async function scenarioEmpty(label, viewport) {
