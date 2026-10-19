@@ -5,3 +5,10 @@ export interface UserResponse {
   nickname: string;
   createdAt: string;
 }
+
+/** UpdateUserRequest.java — 모두 선택. 이메일 필드는 없다(이메일 변경은 범위 밖, MY-05 D1). */
+export interface UpdateUserRequest {
+  nickname?: string;
+  currentPassword?: string;
+  newPassword?: string;
+}

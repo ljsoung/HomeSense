@@ -377,13 +377,12 @@ async function scenarioKeyboard(label, viewport) {
 
 async function scenarioPlaceholders(label, viewport) {
   const { context, page } = await open(viewport);
-  // MY-02(/favorites)는 2026-10-02, MY-03(/notifications/settings)은 2026-10-07, MY-04(/notifications)는 2026-10-15 구현됐다 —
-  // my02·my03·my04 e2e가 검증한다.
-  for (const [to, id] of [['/my/profile', 'MY-05']]) {
-    await page.goto(`${BASE}${to}`);
-    ok(`${label} 5절: ${to} 준비 중(${id})`, await page.getByText(id, { exact: true }).waitFor({ timeout: 5000 }).then(() => true, () => false)
-      && (await page.getByText('준비 중인 화면입니다.').isVisible()));
-  }
+  // 마이페이지 하위 화면은 모두 구현됐다(MY-02 2026-10-02, MY-03 2026-10-07, MY-04 2026-10-15, MY-05 2026-10-19) — 각 e2e가 검증한다.
+  // 여기서는 MY-01 "회원정보 수정"의 목적지(/my/profile)가 준비 중 화면이 아니라 MY-05인지만 본다.
+  await page.goto(`${BASE}/my/profile`);
+  ok(`${label} 5절: /my/profile → MY-05 회원정보 수정`,
+    await page.getByRole('heading', { name: '회원정보 수정', level: 1 }).waitFor({ timeout: 5000 }).then(() => true, () => false)
+      && (await page.getByText('준비 중인 화면입니다.').count()) === 0);
   await context.close();
   const anon = await open(viewport, { loggedIn: false });
   await anon.page.goto(`${BASE}/my/profile`);
