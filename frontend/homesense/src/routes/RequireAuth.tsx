@@ -20,7 +20,7 @@ import { assertNever } from '../lib/assertNever';
  * 관리자 권한 확인은 이 가드의 범위 밖이다.
  */
 export function RequireAuth({ children, checkingFallback }: { children: ReactNode; checkingFallback?: ReactNode }) {
-  const { status, signedOutByUser } = useAuth();
+  const { status, signedOutByUser, signedOutRedirectTo } = useAuth();
   const location = useLocation();
   const [sawAuthenticated, setSawAuthenticated] = useState(status === 'authenticated');
   if (status === 'authenticated' && !sawAuthenticated) {
@@ -37,7 +37,7 @@ export function RequireAuth({ children, checkingFallback }: { children: ReactNod
       );
     case 'anonymous':
       if (signedOutByUser && sawAuthenticated) {
-        return <Navigate to="/" replace />;
+        return <Navigate to={signedOutRedirectTo} replace />;
       }
       return <Navigate to="/login" replace state={{ from: location }} />;
     case 'authenticated':

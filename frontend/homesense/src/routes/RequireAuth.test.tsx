@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AuthContext, type AuthContextValue, type AuthStatus } from '../features/auth/authContext';
 import { RequireAuth } from './RequireAuth';
 
-function authValue(status: AuthStatus, signedOutByUser = false): AuthContextValue {
+function authValue(status: AuthStatus, signedOutByUser = false, signedOutRedirectTo = '/'): AuthContextValue {
   return {
     status,
     user: null,
@@ -12,7 +12,9 @@ function authValue(status: AuthStatus, signedOutByUser = false): AuthContextValu
     signup: async () => {},
     logout: async () => {},
     endSession: () => {},
+    applyUserUpdate: () => {},
     signedOutByUser,
+    signedOutRedirectTo,
   };
 }
 
@@ -93,6 +95,13 @@ describe('RequireAuth', () => {
     update(authValue('anonymous', true));
     expect(screen.getByText('홈 화면')).toBeTruthy();
     expect(screen.queryByText(/로그인 화면/)).toBeNull();
+  });
+
+  it('비밀번호 변경처럼 목적지를 로그인 화면으로 정해 세션을 끝내면 로그인 화면으로 보내고 복귀 목적지는 남기지 않는다', () => {
+    const update = renderSwitchable();
+    update(authValue('anonymous', true, '/login'));
+    expect(screen.getByText('로그인 화면(from=)')).toBeTruthy();
+    expect(screen.queryByText('홈 화면')).toBeNull();
   });
 
   it('화면을 보던 중 세션이 끝나면(사용자 동작 아님) 로그인 화면으로 보낸다', () => {
