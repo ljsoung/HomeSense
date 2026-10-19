@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -11,7 +13,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +44,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.jayway.jsonpath.JsonPath;
 import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
+import com.jiseong.homesense.user.dto.WithdrawCommand;
+import com.jiseong.homesense.user.exception.InvalidCurrentPasswordException;
+import com.jiseong.homesense.user.exception.PasswordConfirmLockedException;
 
 /**
  * MY-05 비밀번호 변경(PUT /api/users/me)과 탈퇴(DELETE /api/users/me)의 비밀번호 확인(공용 실패 잠금)을 실제 필터 체인(MockMvc)·MariaDB·Redis로 검증한다. UserServiceTest(Mockito)는
@@ -80,12 +91,15 @@ class UserPasswordConfirmMariaDbIT {
     private MockMvc mockMvc;
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
-    @Autowired
+    /** 동시 요청 테스트에서 실제로 비교까지 간 시도 수를 센다. 동작은 실제 그대로다. */
+    @MockitoSpyBean
     private PasswordEncoder passwordEncoder;
     @Autowired
     private StringRedisTemplate redis;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private UserService userService;
 
     private long userId;
     private String accessToken;
@@ -221,6 +235,48 @@ class UserPasswordConfirmMariaDbIT {
 
         assertThat(storedStatus()).isEqualTo("WITHDRAWN");
         assertThat(failCount()).isNull();
+    }
+
+    /**
+     * 잠금 확인과 실패 기록이 따로였을 때는 BCrypt 비교 동안 동시 요청이 모두 잠금 확인을 통과해 8건 모두 비교됐다(전부 400).
+     * 시도를 비교 전에 원자적으로 예약하면 정확히 5건만 비교되고 나머지는 429다. 메인 스레드는 조율·검증만 하고 서비스 호출은 워커
+     * 스레드에서 한다(각자 트랜잭션·커넥션).
+     */
+    @Test
+    void 같은_회원의_틀린_비밀번호_요청이_동시에_와도_비교까지_가는_시도는_5회를_넘지_않는다() throws Exception {
+        int threads = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CyclicBarrier start = new CyclicBarrier(threads);
+        try {
+            List<Future<Class<?>>> results = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                results.add(pool.submit(() -> {
+                    start.await(10, TimeUnit.SECONDS);
+                    try {
+                        userService.withdraw(userId, new WithdrawCommand("Wrong123!"));
+                        return null;
+                    } catch (InvalidCurrentPasswordException | PasswordConfirmLockedException e) {
+                        return e.getClass();
+                    }
+                }));
+            }
+            List<Class<?>> outcomes = new ArrayList<>();
+            for (Future<Class<?>> result : results) {
+                outcomes.add(result.get(30, TimeUnit.SECONDS));
+            }
+
+            assertThat(outcomes).filteredOn(InvalidCurrentPasswordException.class::equals).hasSize(5);
+            assertThat(outcomes).filteredOn(PasswordConfirmLockedException.class::equals).hasSize(threads - 5);
+            // 결과 개수만으로는 "비교한 뒤 예약"하는 회귀를 못 잡는다 — 잠긴 요청은 비교 자체를 하지 않아야 한다.
+            verify(passwordEncoder, times(5)).matches(eq("Wrong123!"), any());
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // 잠긴 뒤의 시도는 카운트를 늘리지 않는다. TTL은 걸려 있다.
+        assertThat(failCount()).isEqualTo("5");
+        assertThat(redis.getExpire("password-confirm:fail:" + userId)).isPositive();
+        assertThat(storedStatus()).isEqualTo("ACTIVE");
     }
 
     private org.springframework.test.web.servlet.ResultActions withdraw(String password) throws Exception {

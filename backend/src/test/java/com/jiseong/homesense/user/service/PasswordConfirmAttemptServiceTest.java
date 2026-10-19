@@ -1,11 +1,12 @@
 package com.jiseong.homesense.user.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.Duration;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,16 +14,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 
-/** 키·임계치·TTL이 로그인 실패 잠금(LoginAttemptServiceTest)과 같은 값인지 본다. */
+/**
+ * 키·임계치·TTL이 로그인 실패 잠금과 같은 값으로 스크립트에 넘어가는지 본다. 스크립트 자체(임계치에서 멈춤, 동시 요청)는
+ * 실제 Redis가 필요해 UserPasswordConfirmMariaDbIT가 검증한다.
+ */
 @ExtendWith(MockitoExtension.class)
 class PasswordConfirmAttemptServiceTest {
 
     @Mock
     private StringRedisTemplate redisTemplate;
-    @Mock
-    private ValueOperations<String, String> valueOperations;
 
     private PasswordConfirmAttemptService service;
 
@@ -32,37 +34,20 @@ class PasswordConfirmAttemptServiceTest {
     }
 
     @Test
-    void 실패_카운트가_5_미만이면_잠기지_않는다() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("password-confirm:fail:7")).thenReturn("4");
+    @SuppressWarnings("unchecked")
+    void 시도_예약은_키_임계치_5_TTL_5분으로_스크립트를_한_번_실행한다() {
+        when(redisTemplate.execute(any(RedisScript.class), eq(List.of("password-confirm:fail:7")), eq("5"),
+                eq("300000"))).thenReturn(1L);
 
-        assertThat(service.isLocked(7L)).isFalse();
+        assertThat(service.tryAcquire(7L)).isTrue();
     }
 
     @Test
-    void 실패_카운트가_5_이상이면_잠긴다() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("password-confirm:fail:7")).thenReturn("5");
+    @SuppressWarnings("unchecked")
+    void 스크립트가_0을_돌려주면_잠긴_것이다() {
+        when(redisTemplate.execute(any(RedisScript.class), any(List.class), any(), any())).thenReturn(0L);
 
-        assertThat(service.isLocked(7L)).isTrue();
-    }
-
-    @Test
-    void 카운트가_없으면_잠기지_않는다() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("password-confirm:fail:7")).thenReturn(null);
-
-        assertThat(service.isLocked(7L)).isFalse();
-    }
-
-    @Test
-    void 실패를_기록하면_증가시키고_5분_TTL을_다시_건다() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-
-        service.recordFailure(7L);
-
-        verify(valueOperations).increment("password-confirm:fail:7");
-        verify(redisTemplate).expire(eq("password-confirm:fail:7"), eq(Duration.ofMinutes(5)));
+        assertThat(service.tryAcquire(7L)).isFalse();
     }
 
     @Test

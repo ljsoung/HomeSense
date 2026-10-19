@@ -100,7 +100,7 @@ class UserServiceTest {
 
         assertThat(response.nickname()).isEqualTo("새닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded");
-        verify(passwordConfirmAttemptService, never()).isLocked(anyLong());
+        verify(passwordConfirmAttemptService, never()).tryAcquire(anyLong());
         verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
     }
 
@@ -108,6 +108,7 @@ class UserServiceTest {
     void updateUser_비밀번호만_바꾸면_재해시해_저장하고_모든_세션을_끝내고_실패_카운트를_지운다() {
         User user = User.createUser("user@test.com", "encoded-old", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("current1!", "encoded-old")).thenReturn(true);
         when(passwordEncoder.encode("New1234!")).thenReturn("encoded-new");
 
@@ -117,13 +118,13 @@ class UserServiceTest {
         assertThat(response.nickname()).isEqualTo("닉네임");
         verify(userSessionRevoker).revokeAllSessions(1L);
         verify(passwordConfirmAttemptService).reset(1L);
-        verify(passwordConfirmAttemptService, never()).recordFailure(anyLong());
     }
 
     @Test
     void updateUser_닉네임과_비밀번호를_함께_바꾸면_둘_다_저장하고_세션을_끝낸다() {
         User user = User.createUser("user@test.com", "encoded-old", "이전닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("current1!", "encoded-old")).thenReturn(true);
         when(passwordEncoder.encode("New1234!")).thenReturn("encoded-new");
 
@@ -138,6 +139,7 @@ class UserServiceTest {
     void updateUser_현재비밀번호가_불일치하면_400예외와_카운트_증가_닉네임도_비밀번호도_바뀌지_않는다() {
         User user = User.createUser("user@test.com", "encoded-old", "이전닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("wrong", "encoded-old")).thenReturn(false);
 
         assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand("새닉네임", "wrong", "New1234!")))
@@ -145,7 +147,8 @@ class UserServiceTest {
 
         assertThat(user.getPassword()).isEqualTo("encoded-old");
         assertThat(user.getNickname()).isEqualTo("이전닉네임");
-        verify(passwordConfirmAttemptService).recordFailure(1L);
+        // 예약한 시도가 그대로 실패로 남는다 — 지우지 않는다.
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
         verify(passwordConfirmAttemptService, never()).reset(anyLong());
         verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
     }
@@ -154,13 +157,13 @@ class UserServiceTest {
     void updateUser_실패_잠금_상태면_비밀번호를_확인하지_않고_429예외를_던진다() {
         User user = User.createUser("user@test.com", "encoded-old", "이전닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(passwordConfirmAttemptService.isLocked(1L)).thenReturn(true);
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(false);
 
         assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand("새닉네임", "current1!", "New1234!")))
                 .isInstanceOf(PasswordConfirmLockedException.class);
 
         verify(passwordEncoder, never()).matches(any(), any());
-        verify(passwordConfirmAttemptService, never()).recordFailure(anyLong());
+        verify(passwordConfirmAttemptService, never()).reset(anyLong());
         assertThat(user.getNickname()).isEqualTo("이전닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded-old");
     }
@@ -169,6 +172,8 @@ class UserServiceTest {
     void updateUser_새비밀번호는_있는데_현재비밀번호가_없으면_400예외를_던진다() {
         User user = User.createUser("user@test.com", "encoded-old", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
 
         assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand(null, null, "New1234!")))
                 .isInstanceOf(InvalidCurrentPasswordException.class);
@@ -201,13 +206,15 @@ class UserServiceTest {
     void withdraw_비밀번호가_불일치하면_400예외와_공용_카운트_증가_탈퇴처리하지_않는다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("wrong", "encoded")).thenReturn(false);
 
         assertThatThrownBy(() -> userService.withdraw(1L, new WithdrawCommand("wrong")))
                 .isInstanceOf(InvalidCurrentPasswordException.class);
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
-        verify(passwordConfirmAttemptService).recordFailure(1L);
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
+        verify(passwordConfirmAttemptService, never()).reset(anyLong());
         verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
         verify(userStatusCacheService, never()).setStatus(anyLong(), any());
     }
@@ -216,7 +223,7 @@ class UserServiceTest {
     void withdraw_공용_실패_잠금_상태면_비밀번호를_확인하지_않고_429예외를_던진다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(passwordConfirmAttemptService.isLocked(1L)).thenReturn(true);
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(false);
 
         assertThatThrownBy(() -> userService.withdraw(1L, new WithdrawCommand("correct")))
                 .isInstanceOf(PasswordConfirmLockedException.class);
@@ -230,6 +237,7 @@ class UserServiceTest {
     void withdraw_비밀번호가_일치하면_소프트삭제하고_토큰을_일괄_폐기한다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("correct", "encoded")).thenReturn(true);
 
         userService.withdraw(1L, new WithdrawCommand("correct"));
