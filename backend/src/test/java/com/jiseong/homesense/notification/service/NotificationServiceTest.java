@@ -23,13 +23,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
+import com.jiseong.homesense.common.config.NotificationHistoryProperties;
 import com.jiseong.homesense.favorite.entity.FavoriteProperty;
 import com.jiseong.homesense.favorite.entity.FavoriteRegion;
 import com.jiseong.homesense.favorite.exception.FavoriteNotFoundException;
@@ -70,7 +73,7 @@ class NotificationServiceTest {
     @BeforeEach
     void setUp() {
         notificationService = new NotificationService(notificationSettingRepository, notificationRepository,
-                favoritePropertyRepository, favoriteRegionRepository, userRepository);
+                favoritePropertyRepository, favoriteRegionRepository, userRepository, new NotificationHistoryProperties(6));
     }
 
     // ---- updateSettings: 대상 검증 ----
@@ -257,31 +260,70 @@ class NotificationServiceTest {
     // ---- getNotifications ----
 
     @Test
-    void getNotifications_필터가_없으면_전체_조회한다() {
+    void getNotifications_필터가_없으면_기간_창_안의_전체를_조회한다() {
         Notification notification = mock(Notification.class);
         when(notification.getCreatedAt()).thenReturn(LocalDateTime.now());
-        Pageable pageable = PageRequest.of(0, 10);
-        Page<Notification> page = new PageImpl<>(List.of(notification), pageable, 1);
-        when(notificationRepository.findByUser_UserIdOrderByCreatedAtDescNotificationIdDesc(1L, pageable)).thenReturn(page);
+        Page<Notification> page = new PageImpl<>(List.of(notification), PageRequest.of(0, 10), 1);
+        when(notificationRepository.findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                eq(1L), any(), any())).thenReturn(page);
 
-        Page<NotificationResponse> result = notificationService.getNotifications(1L, null, pageable);
+        LocalDateTime before = LocalDateTime.now().minusMonths(6);
+        Page<NotificationResponse> result = notificationService.getNotifications(1L, null, PageRequest.of(0, 10));
+        LocalDateTime after = LocalDateTime.now().minusMonths(6);
 
         assertThat(result.getContent()).hasSize(1);
+        ArgumentCaptor<LocalDateTime> since = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(notificationRepository).findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                eq(1L), since.capture(), any());
+        assertThat(since.getValue()).isBetween(before, after);
         verify(notificationRepository, never())
-                .findByUser_UserIdAndNotificationTypeOrderByCreatedAtDescNotificationIdDesc(any(), any(), any());
+                .findByUser_UserIdAndNotificationTypeAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                        any(), any(), any(), any());
     }
 
     @Test
     void getNotifications_필터가_있으면_유형별로_조회한다() {
-        Pageable pageable = PageRequest.of(0, 10);
-        Page<Notification> page = new PageImpl<>(List.of(), pageable, 0);
-        when(notificationRepository.findByUser_UserIdAndNotificationTypeOrderByCreatedAtDescNotificationIdDesc(
-                1L, NotificationType.NEW_TRADE, pageable)).thenReturn(page);
+        when(notificationRepository
+                .findByUser_UserIdAndNotificationTypeAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                        eq(1L), eq(NotificationType.NEW_TRADE), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
 
-        Page<NotificationResponse> result = notificationService.getNotifications(1L, NotificationType.NEW_TRADE, pageable);
+        Page<NotificationResponse> result = notificationService.getNotifications(1L, NotificationType.NEW_TRADE, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
-        verify(notificationRepository, never()).findByUser_UserIdOrderByCreatedAtDescNotificationIdDesc(any(), any());
+        verify(notificationRepository, never())
+                .findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(any(), any(), any());
+    }
+
+    @Test
+    void getNotifications_요청의_정렬은_버리고_페이지_크기는_50건까지로_줄인다() {
+        when(notificationRepository.findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                eq(1L), any(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        notificationService.getNotifications(1L, null, PageRequest.of(2, 500, Sort.by("title")));
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(notificationRepository).findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                eq(1L), any(), pageable.capture());
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(2);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(NotificationService.MAX_PAGE_SIZE);
+        assertThat(pageable.getValue().getSort().isUnsorted()).isTrue();
+    }
+
+    @Test
+    void getNotifications_보관_개월수는_설정값을_쓴다() {
+        NotificationService threeMonths = new NotificationService(notificationSettingRepository, notificationRepository,
+                favoritePropertyRepository, favoriteRegionRepository, userRepository, new NotificationHistoryProperties(3));
+        when(notificationRepository.findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                eq(1L), any(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        LocalDateTime before = LocalDateTime.now().minusMonths(3);
+        threeMonths.getNotifications(1L, null, PageRequest.of(0, 10));
+
+        ArgumentCaptor<LocalDateTime> since = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(notificationRepository).findByUser_UserIdAndCreatedAtGreaterThanEqualOrderByCreatedAtDescNotificationIdDesc(
+                eq(1L), since.capture(), any());
+        assertThat(since.getValue()).isBetween(before, LocalDateTime.now().minusMonths(3));
     }
 
     // ---- markAsRead ----

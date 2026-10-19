@@ -1189,6 +1189,7 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 - **테이블정의서 3.5절 `price_change_threshold_pct`: 허용 범위 0~20 정수(API 검증, 컬럼은 DECIMAL(4,1) 그대로)(2026-10-07).**
 - 3.3절 SVC-CPX-01 `searchInBounds()`·API-CPX-01 `GET /map`: 필터가 `/search`와 같은 이름·같은 조건 코드, 응답 `{items, truncated, limit}`, 항목 필드는 `ComplexSummaryResponse`와 같은 이름 + latitude·longitude·locationPrecision·precisionBadge, 정렬 complex_id 해시 순(결정적), 상한 설정값(기본 500), bounds 범위 검증(위도 ±90·경도 ±180·남서 ≤ 북동)(2026-10-13, "MAP-01 백엔드 보강" 절).
 - **UI정의서 MAP-01 "카카오맵 REST API(좌표·클러스터링)": 클러스터링은 REST가 아니라 JS SDK clusterer가 한다(2026-10-13).**
+- 3.8절 SVC-NTF-01 `getNotifications()`: 정렬 고정(`created_at DESC, notification_id DESC`, 요청 정렬 무시)·페이지 크기 50건까지·조회 기간 창(발생 후 6개월, `homesense.notification.history.retention-months`), 응답 `ApiResponse<List<NotificationResponse>>`+`pageMeta`(딥링크 3종·`createdAt`·`isRead`)(2026-10-15, "MY-04 백엔드 보강" 절).
 - 3.3절 SVC-CPX-01 `search()`·`getPopular()`·`getDetail()` 응답과 UI정의서 4.9절 UIC-09: `precisionBadge`(PRECISE/APPROXIMATE, SIMILAR 또는 근사 좌표면 근사) 추가, 캐시 이름 `complexDetailV4`·`popularComplexesV4`(2026-10-13).
 
 ### MAP-01 백엔드 보강 — 지도 범위 조회 (2026-10-13, `feature/backend/complex-map-support`)
@@ -1280,6 +1281,19 @@ SCR-MY-03(알림 설정) 프론트 착수 전 선행 작업이다. MY-03은 대�
 검증: `NotificationControllerTest`(16 — 목록 그대로 전달, 빈 목록·키 없음·201건 400, 임계치 -1·21·5.5·0.04·150 400, 경계 0·20 통과, 세 값 중 하나라도 없으면 400, 대상 둘 다·없음·중복 400, 남의 대상 403·없는 대상 404), `NotificationServiceTest`(15 — 중복, 매물·지역 id가 같은 숫자, 하나라도 남의 것이면 저장 없음, 매물·지역 혼합 upsert), `NotificationServiceMariaDbIT`(5 — 같은 대상 동시 저장 `CyclicBarrier` 2건, 신규·갱신 혼합, 남의 대상이 섞이면 아무것도 저장되지 않음, 관심 매물 삭제 시 설정 CASCADE) + 반대 순서 동시 요청 교착 없음 1건(2026-10-08 추가 — 위 "같은 회원의 저장 직렬화" 행). `NotificationServiceTest` 회원 행 잠금 뒤 upsert 순서 1건 — 정렬을 빼면 실패함을 확인했다. `./gradlew test` 679건 통과.
 
 **프로그램설계서·테이블정의서 반영 필요:** 3.8절 `UpdateNotificationSettingsRequest`(목록·한 트랜잭션), 검증 규칙(0~20 정수, 세 값 필수, 목록 1~200, 중복 400), 소유권 예외(403/404), upsert 방식(원자적). 테이블정의서 3.5절 `price_change_threshold_pct` 허용 범위(0~20 정수, API 검증).
+
+### MY-04 백엔드 보강 — 알림 이력 정렬·페이지·조회 기간 (2026-10-15, `feature/backend/notification-history-support`)
+
+SCR-MY-04(알림 이력) 프론트 착수 전 선행 작업이다. `GET /api/notifications`·`PATCH /{id}/read`는 이미 있었다. 확인 문서: `docs/specs/`가 없어 작업 지시에 옮긴 UI정의서 v2.1 5.5절 MY-04·프로그램설계서 3.8절·테이블정의서 `notification` 원문.
+
+**Phase 0 확인(2026-10-15 코드 기준):** 응답은 `ApiResponse<List<NotificationResponse>>` + `pageMeta(page 0-base, size, totalElements, totalPages)`. 항목 키는 `notificationId`·`notificationType`·`title`·`message`·`complexId`·`legalDongCd`·`tradeId`·**`isRead`**(record 컴포넌트 이름 그대로 — WebMvc 테스트로 `read` 키가 없음을 확인)·`createdAt`·`sentAt`. 시각은 오프셋 없는 `LocalDateTime`(`2026-10-06T03:10:00`), null 필드는 키째 빠진다. `type`은 대소문자 무시·허용 목록 밖이면 전체(400 아님). 정렬은 파생 쿼리가 `created_at DESC, notification_id DESC`로 이미 고정했지만 요청의 `?sort=`가 그 뒤에 덧붙었다. 페이지 크기는 전역 설정이 없어 Spring 기본 상한 2000. PATCH는 없는 알림 404 `NOTIFICATION_NOT_FOUND`, 남의 알림 403 `ACCESS_DENIED`, 이미 읽었으면 그대로 200(멱등), 응답 `data` 없음. 조회 기간 제한·보관 테이블·삭제 배치 없음. 미읽음 카운트 API 없음. 관심 등록은 알림 설정을 만들지 않는다(`FavoriteService`는 `notification_setting`을 읽기만).
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| D5 정렬·페이지 | `NotificationService.getNotifications()`가 요청 Pageable을 `PageRequest.of(page, min(size, 50))`(정렬 없음)로 바꿔 넘긴다 — 정렬은 파생 쿼리의 `created_at DESC, notification_id DESC`만 남고 `?sort=`는 버려진다. 상한 상수 `NotificationService.MAX_PAGE_SIZE`(50). 컨트롤러는 그대로 넘긴다. MY-01 미리보기도 같은 메서드라 같은 규칙 | 같은 배치 런의 알림은 created_at이 같아 ID 보조 정렬이 없으면 페이지 경계에서 중복·누락이 생긴다. 정렬이 덧붙으면 없는 속성이 500이 될 수 있다. `idx_notification_user_read_sent`는 이 정렬을 타지 못한다(user_id 범위 + filesort) — 인덱스는 추가하지 않았다 | 알림 수가 늘어 filesort가 문제가 되면 `(user_id, created_at, notification_id)` 인덱스를 검토한다 |
+| D6 조회 기간 창 | 목록·건수 조회에 `created_at >= 지금 − N개월` 조건(파생 쿼리 `...AndCreatedAtGreaterThanEqual...`). N은 `homesense.notification.history.retention-months`(환경변수 `NOTIFICATION_HISTORY_RETENTION_MONTHS`, 기본 6, `@Min(1)`, `NotificationHistoryProperties`). 데이터는 지우지 않고, 읽음 처리는 기간과 무관하다. 기준 시각은 `LocalDateTime.now()`(JVM 기본 타임존) — created_at을 쓰는 JPA auditing과 같은 소스다(KST Clock이면 JVM이 UTC일 때 경계가 9시간 어긋난다, BAT-NTF-01 D2와 같은 이유) | UI정의서 "오래된 알림은 자동 보관"을 문구와 실제 동작이 일치하게 구현한다. 보관 테이블·파기 배치는 범위 밖. `/privacy`는 알림 이력 보유 기간을 따로 적지 않고 "탈퇴 계정 파기 대상"으로만 언급해 충돌하지 않는다(2026-10-15 확인) | 보관 테이블·파기 배치를 도입하거나 개인정보 처리방침에 알림 보유 기간을 명시하게 되면 다시 본다. **MY-04 안내 문구의 개월 수(프론트 `HISTORY_RETENTION_MONTHS`)와 이 값은 같아야 한다** |
+
+검증: `NotificationServiceTest`(필터 없음·유형별 호출, 정렬 버림·크기 50, 보관 개월 수 설정값), `NotificationControllerTest`(`isRead` 키·`read` 키 없음·딥링크 필드, type 대소문자·허용 목록 밖, `?sort=nope&size=500`도 200), **`NotificationHistoryMariaDbIT`**(신규, 6건 — 같은 created_at 25건이 페이지 경계를 넘어도 중복·누락 없이 ID 역순, 요청 정렬 무시, 크기 50, 6개월 경계 포함·제외·데이터 보존, 남의 알림 403·같은 알림 두 번, 기간 밖 알림 읽음). 변형 검증: ID 보조 정렬을 빼면 경계 테스트, 기간 조건을 빼면 6개월 테스트가 각각 1건 실패한다. `./gradlew test` 824건, `./gradlew integrationTest` 123건(22개 클래스, 건너뜀 0) 통과(2026-10-15).
 
 ### BAT-NTF-01 관심대상 조건평가·알림 생성 (2026-10-06, `feature/backend/notification-trigger`)
 
