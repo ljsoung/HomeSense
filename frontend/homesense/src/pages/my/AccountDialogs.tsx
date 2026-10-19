@@ -110,7 +110,8 @@ function WithdrawDialog({ onClose }: { onClose: () => void }) {
     try {
       await withdraw(password);
     } catch (caught) {
-      // 서버 error.message 그대로(비밀번호 불일치 401 INVALID_CREDENTIALS 포함 — 비즈니스 401이라 재발급하지 않는다).
+      // 서버 error.message 그대로 — 코드·상태로 분기하지 않는다(비밀번호 불일치 400 INVALID_CURRENT_PASSWORD, 확인 실패 잠금 429
+      // PASSWORD_CONFIRM_LOCKED 모두 같은 자리에 문구만 보인다).
       setError(getErrorMessage(caught));
       setSubmitting(false);
       // 누른 버튼이 처리 중 비활성화되며 포커스를 잃으므로, 고쳐 입력할 비밀번호 칸으로 돌려준다.

@@ -53,7 +53,7 @@ async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn =
     if (p === '/api/users/me' && method === 'PUT') {
       const req = JSON.parse(body);
       if (putMode === 'wrongPassword') return json(400, errBody('INVALID_CURRENT_PASSWORD', '현재 비밀번호가 일치하지 않습니다'));
-      if (putMode === 'locked') return json(429, errBody('PASSWORD_CHANGE_LOCKED', '비밀번호 확인에 여러 번 실패했습니다. 잠시 후 다시 시도해주세요'));
+      if (putMode === 'locked') return json(429, errBody('PASSWORD_CONFIRM_LOCKED', '비밀번호 확인에 여러 번 실패했습니다. 잠시 후 다시 시도해주세요'));
       if (putMode === 'nicknameInvalid') {
         return route.fulfill({
           status: 400,

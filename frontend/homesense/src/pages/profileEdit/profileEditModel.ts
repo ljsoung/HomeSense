@@ -79,7 +79,7 @@ export function resolveSaveError(error: ApiError | undefined): { target: ErrorTa
   if (!error) return { target: 'banner', message: undefined };
   switch (error.code) {
     case 'INVALID_CURRENT_PASSWORD':
-    case 'PASSWORD_CHANGE_LOCKED':
+    case 'PASSWORD_CONFIRM_LOCKED':
       return { target: 'currentPassword', message: error.message };
     case 'VALIDATION_FAILED': {
       const field = error.fieldErrors?.find((fe) => FIELD_TARGETS.has(fe.field));

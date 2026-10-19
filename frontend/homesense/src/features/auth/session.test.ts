@@ -154,7 +154,9 @@ describe('401 인터셉터 — 재발급 후 재시도', () => {
 });
 
 describe('재발급 대상이 아닌 401', () => {
-  it('비즈니스 401(현재 비밀번호 불일치 INVALID_CREDENTIALS)은 재발급하지 않는다', async () => {
+  // 지금 /api/users/me의 비밀번호 불일치는 400이지만, 인증된 요청이 401을 받아도 code가 UNAUTHORIZED가 아니면 재발급하지 않는다는
+  // 판별 규칙 자체를 지킨다.
+  it('code가 UNAUTHORIZED가 아닌 401(비즈니스 401)은 재발급하지 않는다', async () => {
     tokenStorage.setTokens('A1', 'R1');
     handler = async (config) => {
       if (config.url === '/api/auth/refresh') refreshCalls.push(body(config));
@@ -167,14 +169,14 @@ describe('재발급 대상이 아닌 401', () => {
     expect(refreshCalls).toHaveLength(0);
   });
 
-  it('탈퇴 비밀번호 불일치(DELETE /api/users/me 401 INVALID_CREDENTIALS)는 재발급·재시도·세션 정리 없이 서버 문구로 실패한다', async () => {
-    // 백엔드 실제 응답과 같은 모양: UserService.withdraw() → InvalidCredentialsException → GlobalExceptionHandler.
+  it('탈퇴 비밀번호 불일치(DELETE /api/users/me 400 INVALID_CURRENT_PASSWORD)는 재발급·재시도·세션 정리 없이 서버 문구로 실패한다', async () => {
+    // 백엔드 실제 응답과 같은 모양: UserService.withdraw() → InvalidCurrentPasswordException(400) → GlobalExceptionHandler.
     tokenStorage.setTokens('A1', 'R1');
     const withdrawCalls: string[] = [];
     handler = async (config) => {
       if (config.url === '/api/auth/refresh') refreshCalls.push(body(config));
       if (config.method === 'delete') withdrawCalls.push(config.url ?? '');
-      return respond(config, 401, { ...unauthorized, error: { code: 'INVALID_CREDENTIALS', message: '비밀번호가 일치하지 않습니다' } });
+      return respond(config, 400, { ...unauthorized, error: { code: 'INVALID_CURRENT_PASSWORD', message: '현재 비밀번호가 일치하지 않습니다' } });
     };
     const expired = vi.fn();
     setSessionExpiredListener(expired);
@@ -183,7 +185,7 @@ describe('재발급 대상이 아닌 401', () => {
 
     const failure = await withdraw('wrong-password').catch((error: unknown) => error);
 
-    expect(getErrorMessage(failure)).toBe('비밀번호가 일치하지 않습니다');
+    expect(getErrorMessage(failure)).toBe('현재 비밀번호가 일치하지 않습니다');
     expect(withdrawCalls).toEqual(['/api/users/me']);
     expect(refreshCalls).toHaveLength(0);
     expect(expired).not.toHaveBeenCalled();

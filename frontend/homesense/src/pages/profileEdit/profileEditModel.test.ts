@@ -90,7 +90,7 @@ describe('resolveSaveError — 자리는 error.code로, 문구는 서버 그대�
       target: 'currentPassword',
       message: '현재 비밀번호가 일치하지 않습니다',
     });
-    expect(resolveSaveError({ code: 'PASSWORD_CHANGE_LOCKED', message: '잠김' }).target).toBe('currentPassword');
+    expect(resolveSaveError({ code: 'PASSWORD_CONFIRM_LOCKED', message: '잠김' }).target).toBe('currentPassword');
   });
 
   it('검증 실패 → fieldErrors의 필드, 알 수 없는 필드면 배너', () => {

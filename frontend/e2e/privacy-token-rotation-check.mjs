@@ -49,7 +49,9 @@ for (const vp of [
     trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.innerText.trim())),
   );
   const v13 = rows.find((r) => r[0] === 'v1.3');
-  log(tag('v1.3 행이 마지막 행으로 존재'), rows.at(-1)?.[0] === 'v1.3', rows.map((r) => r[0]).join(','));
+  // v1.4(6항, 시행일 미정)가 뒤에 붙었다 — v1.3은 시행일이 정해진 마지막 행이어야 한다.
+  const v13Index = rows.findIndex((r) => r[0] === 'v1.3');
+  log(tag('v1.3 행이 시행일이 정해진 마지막 행'), v13Index >= 0 && rows.slice(v13Index + 1).every((r) => r[1] === '미정'), rows.map((r) => `${r[0]}:${r[1]}`).join(','));
   log(tag('v1.3 비고: 2항·8항 변경 내용'), v13?.[2] === '2항·8항 관련 문구 수정: 탈퇴 계정 자동 파기 및 유예 기간, 토큰 재발급 시 교체와 재사용 탐지 반영', v13?.[2]);
   const amend = norm(await page.locator('#amendments').innerText());
   log(tag('방침 적용일 = v1.3 시행일'), !!v13 && amend.includes(`${v13[1]}부터 적용`), v13?.[1]);
