@@ -305,6 +305,14 @@ async function scenarioEmpty(label, viewport) {
   ok(`${label} 7: CTA → /`, (await cta.getAttribute('href')) === '/');
   await context.close();
 
+  // 번호형 URL(?page=2)로 들어와도 전체 빈 상태 — 모바일은 page를 쓰지 않고, 번호형은 마지막 페이지(1)로 옮긴 뒤 같은 화면이 된다.
+  ({ context, page } = await open(viewport, { count: 0, path: '/notifications?page=2' }));
+  const allEmpty = await page.getByText('아직 받은 알림이 없어요').waitFor({ timeout: 5000 }).then(() => true, () => false);
+  ok(`${label} 7: ?page=2 + 0건 → 전체 빈 상태`, allEmpty);
+  ok(`${label} 7: ?page=2 + 0건 → chip 숨김`, (await page.getByRole('radiogroup', { name: '알림 유형' }).count()) === 0);
+  ok(`${label} 7: ?page=2 + 0건 → "이 페이지에 알림이 없어요" 없음`, (await page.getByText('이 페이지에 알림이 없어요').count()) === 0);
+  await context.close();
+
   ({ context, page } = await open(viewport, { count: 1, path: '/notifications?type=NEW_TRADE' }));
   await page.getByText('신규거래 알림이 없어요').waitFor({ timeout: 5000 });
   ok(`${label} 7: 유형 필터 빈 상태 → chip 유지`, (await page.getByRole('radiogroup', { name: '알림 유형' }).count()) === 1);

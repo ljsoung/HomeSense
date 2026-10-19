@@ -117,7 +117,10 @@ export function NotificationHistoryPage() {
     navigate(MISSING_TARGET_FALLBACK);
   };
 
-  const isAllEmpty = history.status === 'success' && params.filter === 'ALL' && history.items.length === 0 && params.page === 1;
+  // 무한 스크롤은 URL page를 쓰지 않고 항상 첫 페이지부터 받는다(훅의 pageKey와 같다). URL에서 지우지 않는 이유: 태블릿 ↔ 모바일
+  // 회전 뒤 번호형으로 돌아오면 그 페이지로 돌아가야 한다.
+  const effectivePage = mode === 'infinite' ? 1 : params.page;
+  const isAllEmpty = history.status === 'success' && params.filter === 'ALL' && history.items.length === 0 && effectivePage === 1;
   const filterBar = isAllEmpty ? null : <FilterChips layout={layout} value={params.filter} onChange={changeFilter} />;
 
   const listBody = (

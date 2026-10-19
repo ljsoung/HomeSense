@@ -38,12 +38,15 @@ afterEach(() => {
   getNotificationPage.mockReset();
 });
 
-function renderAt(width: number, items: NotificationResponse[]) {
+function renderAt(width: number, items: NotificationResponse[], path = '/notifications') {
   stubViewport(width);
-  getNotificationPage.mockResolvedValue({ items, pageMeta: { page: 0, size: 10, totalElements: items.length, totalPages: 1 } });
+  getNotificationPage.mockResolvedValue({
+    items,
+    pageMeta: { page: 0, size: 10, totalElements: items.length, totalPages: items.length === 0 ? 0 : 1 },
+  });
   return render(
     <ToastProvider>
-      <MemoryRouter initialEntries={['/notifications']}>
+      <MemoryRouter initialEntries={[path]}>
         <NotificationHistoryPage />
       </MemoryRouter>
     </ToastProvider>,
@@ -93,5 +96,15 @@ describe('NotificationHistoryPage 시간 표시(D10)', () => {
     const readRow = screen.getByRole('link', { name: /창신동/ });
     expect(readRow.textContent).not.toContain('읽지 않음');
     expect(readRow.querySelector('[data-testid="unread-dot"]')).toBeNull();
+  });
+});
+
+describe('NotificationHistoryPage 빈 상태(D9)', () => {
+  it('모바일: 번호형 URL(?page=2)로 들어와도 0건이면 전체 빈 상태 — 무한 스크롤은 page를 쓰지 않는다', async () => {
+    renderAt(390, [], '/notifications?page=2');
+    expect(await screen.findByText('아직 받은 알림이 없어요')).toBeTruthy();
+    expect(screen.queryByRole('radiogroup', { name: '알림 유형' })).toBeNull();
+    expect(screen.queryByText('이 페이지에 알림이 없어요')).toBeNull();
+    expect(getNotificationPage).toHaveBeenCalledWith(expect.objectContaining({ page: 0 }), expect.anything());
   });
 });
