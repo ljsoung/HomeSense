@@ -1,0 +1,17 @@
+package com.jiseong.homesense.user.exception;
+
+import org.springframework.http.HttpStatus;
+
+import com.jiseong.homesense.common.exception.BusinessException;
+
+/**
+ * SVC-USER-01 — 비밀번호 변경(updateUser)의 현재 비밀번호, 탈퇴(withdraw)의 비밀번호 재확인이 저장된 값과 다르다. 설계서 3.2절은 InvalidCredentialsException
+ * (401)이지만 400으로 둔다: 인증된 요청의 401은 "토큰이 무효"로 읽혀 세션 만료 처리와 섞일 수 있다(CLAUDE.md "SVC-USER-01
+ * 회원정보 수정 보강" 절 D2). 탈퇴도 같은 코드다(공용 실패 잠금과 함께, 2026-10-19). 로그인의 InvalidCredentialsException(401)은 그대로다.
+ */
+public class InvalidCurrentPasswordException extends BusinessException {
+
+    public InvalidCurrentPasswordException() {
+        super("INVALID_CURRENT_PASSWORD", "현재 비밀번호가 일치하지 않습니다", HttpStatus.BAD_REQUEST);
+    }
+}

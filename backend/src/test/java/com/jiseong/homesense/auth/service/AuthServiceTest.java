@@ -93,7 +93,7 @@ class AuthServiceTest {
         authService = new AuthService(userRepository, refreshTokenRepository, passwordEncoder,
                 jwtTokenProvider, jwtProperties, refreshTokenHasher, loginAttemptService, withdrawalPolicy,
                 refreshTokenRotator, refreshTokenReuseHandler, passwordResetTokenService, passwordResetNotifier,
-                accessTokenEpochService);
+                new UserSessionRevoker(refreshTokenRepository, accessTokenEpochService));
     }
 
     @Test

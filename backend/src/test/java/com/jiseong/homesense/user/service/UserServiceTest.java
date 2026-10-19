@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -22,14 +23,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
+import com.jiseong.homesense.auth.service.UserSessionRevoker;
 import com.jiseong.homesense.common.config.WithdrawalProperties;
-import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.user.dto.UpdateUserCommand;
 import com.jiseong.homesense.user.dto.UserResponse;
 import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
+import com.jiseong.homesense.user.exception.InvalidCurrentPasswordException;
+import com.jiseong.homesense.user.exception.PasswordConfirmLockedException;
 import com.jiseong.homesense.user.exception.UserNotFoundException;
 import com.jiseong.homesense.user.repository.UserRepository;
 
@@ -44,6 +47,10 @@ class UserServiceTest {
     private PasswordEncoder passwordEncoder;
     @Mock
     private UserStatusCacheService userStatusCacheService;
+    @Mock
+    private PasswordConfirmAttemptService passwordConfirmAttemptService;
+    @Mock
+    private UserSessionRevoker userSessionRevoker;
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 12, 0, 0);
@@ -56,7 +63,7 @@ class UserServiceTest {
         WithdrawalPolicy withdrawalPolicy = new WithdrawalPolicy(fixedClock,
                 new WithdrawalProperties(7, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
         userService = new UserService(userRepository, refreshTokenRepository, passwordEncoder, withdrawalPolicy,
-                userStatusCacheService);
+                userStatusCacheService, passwordConfirmAttemptService, userSessionRevoker);
     }
 
     @Test
@@ -86,7 +93,7 @@ class UserServiceTest {
     }
 
     @Test
-    void updateUser_닉네임만_주어지면_닉네임만_바뀐다() {
+    void updateUser_닉네임만_주어지면_닉네임만_바뀌고_세션은_그대로다() {
         User user = User.createUser("user@test.com", "encoded", "이전닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
@@ -94,41 +101,87 @@ class UserServiceTest {
 
         assertThat(response.nickname()).isEqualTo("새닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded");
+        verify(passwordConfirmAttemptService, never()).tryAcquire(anyLong());
+        verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
     }
 
     @Test
-    void updateUser_현재비밀번호가_일치하면_비밀번호를_재해시하여_저장한다() {
+    void updateUser_비밀번호만_바꾸면_재해시해_저장하고_모든_세션을_끝내며_예약한_시도는_그대로_남긴다() {
         User user = User.createUser("user@test.com", "encoded-old", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("current1!", "encoded-old")).thenReturn(true);
         when(passwordEncoder.encode("New1234!")).thenReturn("encoded-new");
 
-        userService.updateUser(1L, new UpdateUserCommand(null, "current1!", "New1234!"));
+        UserResponse response = userService.updateUser(1L, new UpdateUserCommand(null, "current1!", "New1234!"));
 
         assertThat(user.getPassword()).isEqualTo("encoded-new");
+        assertThat(response.nickname()).isEqualTo("닉네임");
+        verify(userSessionRevoker).revokeAllSessions(1L);
+        // 성공해도 카운터를 지우지 않는다 — 잠금은 TTL로만 풀린다.
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
     }
 
     @Test
-    void updateUser_현재비밀번호가_불일치하면_InvalidCredentialsException을_던지고_비밀번호를_바꾸지_않는다() {
-        User user = User.createUser("user@test.com", "encoded-old", "닉네임");
+    void updateUser_닉네임과_비밀번호를_함께_바꾸면_둘_다_저장하고_세션을_끝낸다() {
+        User user = User.createUser("user@test.com", "encoded-old", "이전닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
+        when(passwordEncoder.matches("current1!", "encoded-old")).thenReturn(true);
+        when(passwordEncoder.encode("New1234!")).thenReturn("encoded-new");
+
+        UserResponse response = userService.updateUser(1L, new UpdateUserCommand("새닉네임", "current1!", "New1234!"));
+
+        assertThat(response.nickname()).isEqualTo("새닉네임");
+        assertThat(user.getPassword()).isEqualTo("encoded-new");
+        verify(userSessionRevoker).revokeAllSessions(1L);
+    }
+
+    @Test
+    void updateUser_현재비밀번호가_불일치하면_400예외와_카운트_증가_닉네임도_비밀번호도_바뀌지_않는다() {
+        User user = User.createUser("user@test.com", "encoded-old", "이전닉네임");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("wrong", "encoded-old")).thenReturn(false);
 
-        assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand(null, "wrong", "New1234!")))
-                .isInstanceOf(InvalidCredentialsException.class);
+        assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand("새닉네임", "wrong", "New1234!")))
+                .isInstanceOf(InvalidCurrentPasswordException.class);
 
+        assertThat(user.getPassword()).isEqualTo("encoded-old");
+        assertThat(user.getNickname()).isEqualTo("이전닉네임");
+        // 예약한 시도가 그대로 실패로 남는다 — 지우지 않는다.
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
+        verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
+    }
+
+    @Test
+    void updateUser_실패_잠금_상태면_비밀번호를_확인하지_않고_429예외를_던진다() {
+        User user = User.createUser("user@test.com", "encoded-old", "이전닉네임");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand("새닉네임", "current1!", "New1234!")))
+                .isInstanceOf(PasswordConfirmLockedException.class);
+
+        verify(passwordEncoder, never()).matches(any(), any());
+        assertThat(user.getNickname()).isEqualTo("이전닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded-old");
     }
 
     @Test
-    void updateUser_새비밀번호는_있는데_현재비밀번호가_없으면_InvalidCredentialsException을_던진다() {
+    void updateUser_새비밀번호는_있는데_현재비밀번호가_없으면_400예외를_던진다() {
         User user = User.createUser("user@test.com", "encoded-old", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
+
         assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand(null, null, "New1234!")))
-                .isInstanceOf(InvalidCredentialsException.class);
+                .isInstanceOf(InvalidCurrentPasswordException.class);
 
         assertThat(user.getPassword()).isEqualTo("encoded-old");
+        verify(passwordEncoder, never()).matches(any(), any());
     }
 
     @Test
@@ -140,6 +193,7 @@ class UserServiceTest {
 
         assertThat(user.getNickname()).isEqualTo("닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded");
+        verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
     }
 
     @Test
@@ -151,23 +205,41 @@ class UserServiceTest {
     }
 
     @Test
-    void withdraw_비밀번호가_불일치하면_InvalidCredentialsException을_던지고_탈퇴처리하지_않는다() {
+    void withdraw_비밀번호가_불일치하면_400예외와_공용_카운트_증가_탈퇴처리하지_않는다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("wrong", "encoded")).thenReturn(false);
 
         assertThatThrownBy(() -> userService.withdraw(1L, new WithdrawCommand("wrong")))
-                .isInstanceOf(InvalidCredentialsException.class);
+                .isInstanceOf(InvalidCurrentPasswordException.class);
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
         verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
         verify(userStatusCacheService, never()).setStatus(anyLong(), any());
     }
 
     @Test
-    void withdraw_비밀번호가_일치하면_소프트삭제하고_토큰을_일괄_폐기한다() {
+    void withdraw_공용_실패_잠금_상태면_비밀번호를_확인하지_않고_429예외를_던진다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.withdraw(1L, new WithdrawCommand("correct")))
+                .isInstanceOf(PasswordConfirmLockedException.class);
+
+        verify(passwordEncoder, never()).matches(any(), any());
+        assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
+    }
+
+    @Test
+    void withdraw_비밀번호가_일치하면_소프트삭제하고_토큰을_일괄_폐기하며_예약한_시도는_그대로_남긴다() {
+        User user = User.createUser("user@test.com", "encoded", "닉네임");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
         when(passwordEncoder.matches("correct", "encoded")).thenReturn(true);
 
         userService.withdraw(1L, new WithdrawCommand("correct"));
@@ -177,5 +249,8 @@ class UserServiceTest {
         assertThat(user.getWithdrawnAt()).isEqualTo(NOW);
         verify(refreshTokenRepository).revokeAllByUserId(eq(1L));
         verify(userStatusCacheService).setStatus(1L, UserStatus.WITHDRAWN);
+        // 성공해도 카운터를 지우지 않는다 — 잠금은 TTL로만 풀린다.
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
     }
 }

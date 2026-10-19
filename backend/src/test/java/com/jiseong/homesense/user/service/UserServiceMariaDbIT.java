@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -72,6 +73,8 @@ class UserServiceMariaDbIT {
     private RefreshTokenRepository refreshTokenRepository;
     @Autowired
     private PasswordEncoder passwordEncoder;
+    @Autowired
+    private StringRedisTemplate redis;
 
     @Test
     void 탈퇴하면_커밋_이후_재조회에서도_회원_상태와_토큰_폐기가_모두_반영돼_있다() {
@@ -80,6 +83,9 @@ class UserServiceMariaDbIT {
         RefreshToken token = refreshTokenRepository.saveAndFlush(
                 RefreshToken.issue(user, "token-hash", LocalDateTime.now().plusDays(1)));
 
+        // 탈퇴도 공용 비밀번호 확인 잠금(password-confirm:fail:{userId})을 본다. IT끼리 로컬 Redis를 공유하고 userId가 컨테이너마다
+        // 1부터 시작하므로, 다른 IT가 같은 userId로 남긴 카운트가 이 탈퇴를 429로 막지 않게 먼저 지운다(CLAUDE.md 백로그 — Redis 격리).
+        redis.delete("password-confirm:fail:" + user.getUserId());
         userService.withdraw(user.getUserId(), new WithdrawCommand("Abcd1234!"));
 
         // userService.withdraw()가 반환된 시점엔 이미 트랜잭션이 커밋된 뒤다(프록시 경계) — 여기서

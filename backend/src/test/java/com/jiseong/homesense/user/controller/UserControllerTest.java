@@ -1,6 +1,9 @@
 package com.jiseong.homesense.user.controller;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -25,13 +28,14 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.common.security.UserPrincipal;
 import com.jiseong.homesense.user.dto.UpdateUserCommand;
+import com.jiseong.homesense.user.exception.InvalidCurrentPasswordException;
+import com.jiseong.homesense.user.exception.PasswordConfirmLockedException;
 import com.jiseong.homesense.user.dto.UserResponse;
 import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.exception.UserNotFoundException;
@@ -129,15 +133,86 @@ class UserControllerTest {
     }
 
     @Test
-    void 현재비밀번호가_불일치하면_401을_반환한다() throws Exception {
+    void 현재비밀번호가_불일치하면_400_INVALID_CURRENT_PASSWORD를_반환한다() throws Exception {
         when(userService.updateUser(eq(1L), eq(new UpdateUserCommand(null, "wrong", "New1234!"))))
-                .thenThrow(new InvalidCredentialsException());
+                .thenThrow(new InvalidCurrentPasswordException());
 
         mockMvc.perform(put("/api/users/me")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"currentPassword\":\"wrong\",\"newPassword\":\"New1234!\"}"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.code").value("INVALID_CREDENTIALS"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_CURRENT_PASSWORD"))
+                .andExpect(jsonPath("$.error.message").value("현재 비밀번호가 일치하지 않습니다"));
+    }
+
+    @Test
+    void 비밀번호_확인_실패_잠금이면_429_PASSWORD_CONFIRM_LOCKED를_반환한다() throws Exception {
+        when(userService.updateUser(eq(1L), eq(new UpdateUserCommand(null, "current1!", "New1234!"))))
+                .thenThrow(new PasswordConfirmLockedException());
+
+        mockMvc.perform(put("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"current1!\",\"newPassword\":\"New1234!\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("PASSWORD_CONFIRM_LOCKED"))
+                .andExpect(jsonPath("$.error.message").value("비밀번호 확인에 여러 번 실패했습니다. 잠시 후 다시 시도해주세요"));
+    }
+
+    @Test
+    void 새비밀번호만_있고_현재비밀번호가_없으면_400과_currentPassword_필드에러를_반환하고_서비스를_부르지_않는다() throws Exception {
+        for (String body : new String[] {
+                "{\"newPassword\":\"New1234!\"}",
+                "{\"currentPassword\":\"\",\"newPassword\":\"New1234!\"}" }) {
+            mockMvc.perform(put("/api/users/me")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                    .andExpect(jsonPath("$.error.fieldErrors.length()").value(1))
+                    .andExpect(jsonPath("$.error.fieldErrors[0].field").value("currentPassword"));
+        }
+        verify(userService, never()).updateUser(any(), any());
+    }
+
+    @Test
+    void 새비밀번호가_정책을_위반하면_400과_newPassword_필드에러를_반환한다() throws Exception {
+        mockMvc.perform(put("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"current1!\",\"newPassword\":\"short\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("newPassword"));
+    }
+
+    @Test
+    void 빈_문자열_닉네임은_정책_위반이다() throws Exception {
+        mockMvc.perform(put("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nickname\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("nickname"));
+    }
+
+    @Test
+    void 모든_필드를_생략하면_변경_없이_서비스를_부른다() throws Exception {
+        when(userService.updateUser(eq(1L), eq(new UpdateUserCommand(null, null, null))))
+                .thenReturn(new UserResponse(1L, "user@test.com", "닉네임", LocalDateTime.of(2026, 1, 1, 0, 0)));
+
+        mockMvc.perform(put("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.nickname").value("닉네임"));
+    }
+
+    @Test
+    void 현재비밀번호만_있고_새비밀번호가_없으면_검증을_통과한다() throws Exception {
+        when(userService.updateUser(eq(1L), eq(new UpdateUserCommand("새닉네임", "current1!", null))))
+                .thenReturn(new UserResponse(1L, "user@test.com", "새닉네임", LocalDateTime.of(2026, 1, 1, 0, 0)));
+
+        mockMvc.perform(put("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nickname\":\"새닉네임\",\"currentPassword\":\"current1!\"}"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -158,5 +233,27 @@ class UserControllerTest {
                         .content("{\"reason\":\"사유\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void 탈퇴_비밀번호가_불일치하면_400_INVALID_CURRENT_PASSWORD를_반환한다() throws Exception {
+        doThrow(new InvalidCurrentPasswordException()).when(userService).withdraw(eq(1L), eq(new WithdrawCommand("wrong")));
+
+        mockMvc.perform(delete("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"wrong\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_CURRENT_PASSWORD"));
+    }
+
+    @Test
+    void 탈퇴_비밀번호_확인_잠금이면_429_PASSWORD_CONFIRM_LOCKED를_반환한다() throws Exception {
+        doThrow(new PasswordConfirmLockedException()).when(userService).withdraw(eq(1L), eq(new WithdrawCommand("correct")));
+
+        mockMvc.perform(delete("/api/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"correct\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("PASSWORD_CONFIRM_LOCKED"));
     }
 }
