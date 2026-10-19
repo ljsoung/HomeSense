@@ -92,8 +92,8 @@ public class UserService {
 
     /**
      * 로그인한 회원의 비밀번호 확인(비밀번호 변경·탈퇴 공용). 비교 전에 시도를 원자적으로 예약한다 — 잠겼으면 {@code matches()}를
-     * 부르지 않고 429. 예약한 시도는 이미 실패로 세어져 있어 틀리면 그대로 400, 맞으면 카운터 삭제. 동시 요청이 몇 개든 비교까지
-     * 가는 시도는 임계치(5회)를 넘지 않는다. null은 DTO 검증이 막는다(currentPassword는 @CurrentPasswordRequired, 탈퇴
+     * 부르지 않고 429. 예약한 시도는 성공·실패와 무관하게 세어져 틀리면 400, 맞아도 카운터를 지우지 않는다(잠금은 TTL로만
+     * 풀린다 — PasswordConfirmAttemptService 참고). 동시 요청이 몇 개든 비교까지 가는 시도는 임계치(5회)를 넘지 않는다. null은 DTO 검증이 막는다(currentPassword는 @CurrentPasswordRequired, 탈퇴
      * password는 @NotBlank) — 여기 null은 내부 호출에 대한 방어다.
      */
     private void confirmPassword(Long userId, String rawPassword, User user) {
@@ -103,7 +103,6 @@ public class UserService {
         if (rawPassword == null || !passwordEncoder.matches(rawPassword, user.getPassword())) {
             throw new InvalidCurrentPasswordException();
         }
-        passwordConfirmAttemptService.reset(userId);
     }
 
     private User findUser(Long userId) {

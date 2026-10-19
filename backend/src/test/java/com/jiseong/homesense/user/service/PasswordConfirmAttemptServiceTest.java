@@ -3,7 +3,6 @@ package com.jiseong.homesense.user.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -48,12 +47,5 @@ class PasswordConfirmAttemptServiceTest {
         when(redisTemplate.execute(any(RedisScript.class), any(List.class), any(), any())).thenReturn(0L);
 
         assertThat(service.tryAcquire(7L)).isFalse();
-    }
-
-    @Test
-    void 초기화하면_카운터_키를_삭제한다() {
-        service.reset(7L);
-
-        verify(redisTemplate).delete("password-confirm:fail:7");
     }
 }

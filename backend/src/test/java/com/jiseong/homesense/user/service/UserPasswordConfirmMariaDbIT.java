@@ -3,6 +3,7 @@ package com.jiseong.homesense.user.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -13,8 +14,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,6 +47,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jayway.jsonpath.JsonPath;
 import com.jiseong.homesense.common.security.AccessTokenEpochService;
+import com.jiseong.homesense.common.security.FailedAttemptPolicy;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.exception.InvalidCurrentPasswordException;
@@ -227,14 +232,18 @@ class UserPasswordConfirmMariaDbIT {
         assertThat(activeRefreshTokens()).isEqualTo(2);
     }
 
+    /** 성공해도 카운터를 지우지 않는다 — 성공한 시도도 센 채로 TTL(5분)을 다시 걸고, 잠금은 TTL 만료로만 풀린다. */
     @Test
-    void 탈퇴에_성공하면_공용_카운트를_지운다() throws Exception {
+    void 탈퇴에_성공해도_공용_카운트는_남고_TTL이_다시_걸린다() throws Exception {
         redis.opsForValue().set("password-confirm:fail:" + userId, "2");
 
         withdraw(PASSWORD).andExpect(status().isOk());
 
         assertThat(storedStatus()).isEqualTo("WITHDRAWN");
-        assertThat(failCount()).isNull();
+        assertThat(failCount()).isEqualTo("3");
+        assertThat(redis.getExpire("password-confirm:fail:" + userId, TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(FailedAttemptPolicy.LOCK_TTL.toMillis());
     }
 
     /**
@@ -277,6 +286,70 @@ class UserPasswordConfirmMariaDbIT {
         assertThat(failCount()).isEqualTo("5");
         assertThat(redis.getExpire("password-confirm:fail:" + userId)).isPositive();
         assertThat(storedStatus()).isEqualTo("ACTIVE");
+    }
+
+    /**
+     * 맞는 비밀번호를 비교하는 동안(BCrypt) 같은 회원의 틀린 시도 4건이 예약·실패해도, 성공이 카운터를 지우지 않으므로 4건이 그대로
+     * 남는다(성공한 시도까지 5) — 성공 시 초기화가 있던 때는 4건이 사라져 곧바로 5건을 더 비교할 수 있었다(코드리뷰 P2). 다음 시도는
+     * 비교 없이 429이고, 잠금은 TTL이 끝나야 풀린다.
+     */
+    @Test
+    void 맞는_비밀번호를_비교하는_동안_예약된_틀린_시도는_성공_뒤에도_남고_잠금은_TTL로만_풀린다() throws Exception {
+        CountDownLatch comparing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            comparing.countDown();
+            if (!release.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("맞는 비밀번호 비교가 풀리지 않았다");
+            }
+            return invocation.callRealMethod();
+        }).when(passwordEncoder).matches(eq(PASSWORD), any());
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> valid = pool.submit(() -> userService.withdraw(userId, new WithdrawCommand(PASSWORD)));
+            assertThat(comparing.await(10, TimeUnit.SECONDS)).isTrue();
+
+            for (int i = 0; i < 4; i++) {
+                assertThat(pool.submit(wrongWithdraw()).get(30, TimeUnit.SECONDS))
+                        .isEqualTo(InvalidCurrentPasswordException.class);
+            }
+            assertThat(failCount()).isEqualTo("5");
+
+            release.countDown();
+            valid.get(30, TimeUnit.SECONDS);
+
+            // 성공해도 틀린 시도 4건(과 성공한 시도)은 그대로다 — 다음 시도는 비교하지 않고 잠긴다.
+            assertThat(failCount()).isEqualTo("5");
+            assertThat(pool.submit(wrongWithdraw()).get(30, TimeUnit.SECONDS))
+                    .isEqualTo(PasswordConfirmLockedException.class);
+            verify(passwordEncoder, times(4)).matches(eq("Wrong123!"), any());
+
+            // TTL이 끝나면 풀린다(5분을 기다리는 대신 만료를 앞당긴다).
+            String key = "password-confirm:fail:" + userId;
+            redis.expire(key, Duration.ofMillis(1));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (Boolean.TRUE.equals(redis.hasKey(key)) && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            assertThat(pool.submit(wrongWithdraw()).get(30, TimeUnit.SECONDS))
+                    .isEqualTo(InvalidCurrentPasswordException.class);
+            assertThat(failCount()).isEqualTo("1");
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    private Callable<Class<?>> wrongWithdraw() {
+        return () -> {
+            try {
+                userService.withdraw(userId, new WithdrawCommand("Wrong123!"));
+                return null;
+            } catch (InvalidCurrentPasswordException | PasswordConfirmLockedException e) {
+                return e.getClass();
+            }
+        };
     }
 
     private org.springframework.test.web.servlet.ResultActions withdraw(String password) throws Exception {

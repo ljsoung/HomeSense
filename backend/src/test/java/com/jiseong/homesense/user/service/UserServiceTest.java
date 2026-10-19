@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -105,7 +106,7 @@ class UserServiceTest {
     }
 
     @Test
-    void updateUser_비밀번호만_바꾸면_재해시해_저장하고_모든_세션을_끝내고_실패_카운트를_지운다() {
+    void updateUser_비밀번호만_바꾸면_재해시해_저장하고_모든_세션을_끝내며_예약한_시도는_그대로_남긴다() {
         User user = User.createUser("user@test.com", "encoded-old", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
@@ -117,7 +118,9 @@ class UserServiceTest {
         assertThat(user.getPassword()).isEqualTo("encoded-new");
         assertThat(response.nickname()).isEqualTo("닉네임");
         verify(userSessionRevoker).revokeAllSessions(1L);
-        verify(passwordConfirmAttemptService).reset(1L);
+        // 성공해도 카운터를 지우지 않는다 — 잠금은 TTL로만 풀린다.
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
     }
 
     @Test
@@ -149,7 +152,7 @@ class UserServiceTest {
         assertThat(user.getNickname()).isEqualTo("이전닉네임");
         // 예약한 시도가 그대로 실패로 남는다 — 지우지 않는다.
         verify(passwordConfirmAttemptService).tryAcquire(1L);
-        verify(passwordConfirmAttemptService, never()).reset(anyLong());
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
         verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
     }
 
@@ -163,7 +166,6 @@ class UserServiceTest {
                 .isInstanceOf(PasswordConfirmLockedException.class);
 
         verify(passwordEncoder, never()).matches(any(), any());
-        verify(passwordConfirmAttemptService, never()).reset(anyLong());
         assertThat(user.getNickname()).isEqualTo("이전닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded-old");
     }
@@ -214,7 +216,7 @@ class UserServiceTest {
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         verify(passwordConfirmAttemptService).tryAcquire(1L);
-        verify(passwordConfirmAttemptService, never()).reset(anyLong());
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
         verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
         verify(userStatusCacheService, never()).setStatus(anyLong(), any());
     }
@@ -234,7 +236,7 @@ class UserServiceTest {
     }
 
     @Test
-    void withdraw_비밀번호가_일치하면_소프트삭제하고_토큰을_일괄_폐기한다() {
+    void withdraw_비밀번호가_일치하면_소프트삭제하고_토큰을_일괄_폐기하며_예약한_시도는_그대로_남긴다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordConfirmAttemptService.tryAcquire(1L)).thenReturn(true);
@@ -247,6 +249,8 @@ class UserServiceTest {
         assertThat(user.getWithdrawnAt()).isEqualTo(NOW);
         verify(refreshTokenRepository).revokeAllByUserId(eq(1L));
         verify(userStatusCacheService).setStatus(1L, UserStatus.WITHDRAWN);
-        verify(passwordConfirmAttemptService).reset(1L);
+        // 성공해도 카운터를 지우지 않는다 — 잠금은 TTL로만 풀린다.
+        verify(passwordConfirmAttemptService).tryAcquire(1L);
+        verifyNoMoreInteractions(passwordConfirmAttemptService);
     }
 }
