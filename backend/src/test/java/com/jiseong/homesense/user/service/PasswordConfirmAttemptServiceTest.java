@@ -17,24 +17,24 @@ import org.springframework.data.redis.core.ValueOperations;
 
 /** 키·임계치·TTL이 로그인 실패 잠금(LoginAttemptServiceTest)과 같은 값인지 본다. */
 @ExtendWith(MockitoExtension.class)
-class PasswordChangeAttemptServiceTest {
+class PasswordConfirmAttemptServiceTest {
 
     @Mock
     private StringRedisTemplate redisTemplate;
     @Mock
     private ValueOperations<String, String> valueOperations;
 
-    private PasswordChangeAttemptService service;
+    private PasswordConfirmAttemptService service;
 
     @BeforeEach
     void setUp() {
-        service = new PasswordChangeAttemptService(redisTemplate);
+        service = new PasswordConfirmAttemptService(redisTemplate);
     }
 
     @Test
     void 실패_카운트가_5_미만이면_잠기지_않는다() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("password-change:fail:7")).thenReturn("4");
+        when(valueOperations.get("password-confirm:fail:7")).thenReturn("4");
 
         assertThat(service.isLocked(7L)).isFalse();
     }
@@ -42,7 +42,7 @@ class PasswordChangeAttemptServiceTest {
     @Test
     void 실패_카운트가_5_이상이면_잠긴다() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("password-change:fail:7")).thenReturn("5");
+        when(valueOperations.get("password-confirm:fail:7")).thenReturn("5");
 
         assertThat(service.isLocked(7L)).isTrue();
     }
@@ -50,7 +50,7 @@ class PasswordChangeAttemptServiceTest {
     @Test
     void 카운트가_없으면_잠기지_않는다() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("password-change:fail:7")).thenReturn(null);
+        when(valueOperations.get("password-confirm:fail:7")).thenReturn(null);
 
         assertThat(service.isLocked(7L)).isFalse();
     }
@@ -61,14 +61,14 @@ class PasswordChangeAttemptServiceTest {
 
         service.recordFailure(7L);
 
-        verify(valueOperations).increment("password-change:fail:7");
-        verify(redisTemplate).expire(eq("password-change:fail:7"), eq(Duration.ofMinutes(5)));
+        verify(valueOperations).increment("password-confirm:fail:7");
+        verify(redisTemplate).expire(eq("password-confirm:fail:7"), eq(Duration.ofMinutes(5)));
     }
 
     @Test
     void 초기화하면_카운터_키를_삭제한다() {
         service.reset(7L);
 
-        verify(redisTemplate).delete("password-change:fail:7");
+        verify(redisTemplate).delete("password-confirm:fail:7");
     }
 }

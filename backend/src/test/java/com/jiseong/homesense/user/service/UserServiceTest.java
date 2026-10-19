@@ -24,7 +24,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
 import com.jiseong.homesense.auth.service.UserSessionRevoker;
 import com.jiseong.homesense.common.config.WithdrawalProperties;
-import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.user.dto.UpdateUserCommand;
 import com.jiseong.homesense.user.dto.UserResponse;
@@ -32,7 +31,7 @@ import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
 import com.jiseong.homesense.user.exception.InvalidCurrentPasswordException;
-import com.jiseong.homesense.user.exception.PasswordChangeLockedException;
+import com.jiseong.homesense.user.exception.PasswordConfirmLockedException;
 import com.jiseong.homesense.user.exception.UserNotFoundException;
 import com.jiseong.homesense.user.repository.UserRepository;
 
@@ -48,7 +47,7 @@ class UserServiceTest {
     @Mock
     private UserStatusCacheService userStatusCacheService;
     @Mock
-    private PasswordChangeAttemptService passwordChangeAttemptService;
+    private PasswordConfirmAttemptService passwordConfirmAttemptService;
     @Mock
     private UserSessionRevoker userSessionRevoker;
 
@@ -63,7 +62,7 @@ class UserServiceTest {
         WithdrawalPolicy withdrawalPolicy = new WithdrawalPolicy(fixedClock,
                 new WithdrawalProperties(7, new WithdrawalProperties.Purge(true, "0 0 5 * * *")));
         userService = new UserService(userRepository, refreshTokenRepository, passwordEncoder, withdrawalPolicy,
-                userStatusCacheService, passwordChangeAttemptService, userSessionRevoker);
+                userStatusCacheService, passwordConfirmAttemptService, userSessionRevoker);
     }
 
     @Test
@@ -101,7 +100,7 @@ class UserServiceTest {
 
         assertThat(response.nickname()).isEqualTo("새닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded");
-        verify(passwordChangeAttemptService, never()).isLocked(anyLong());
+        verify(passwordConfirmAttemptService, never()).isLocked(anyLong());
         verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
     }
 
@@ -117,8 +116,8 @@ class UserServiceTest {
         assertThat(user.getPassword()).isEqualTo("encoded-new");
         assertThat(response.nickname()).isEqualTo("닉네임");
         verify(userSessionRevoker).revokeAllSessions(1L);
-        verify(passwordChangeAttemptService).reset(1L);
-        verify(passwordChangeAttemptService, never()).recordFailure(anyLong());
+        verify(passwordConfirmAttemptService).reset(1L);
+        verify(passwordConfirmAttemptService, never()).recordFailure(anyLong());
     }
 
     @Test
@@ -146,8 +145,8 @@ class UserServiceTest {
 
         assertThat(user.getPassword()).isEqualTo("encoded-old");
         assertThat(user.getNickname()).isEqualTo("이전닉네임");
-        verify(passwordChangeAttemptService).recordFailure(1L);
-        verify(passwordChangeAttemptService, never()).reset(anyLong());
+        verify(passwordConfirmAttemptService).recordFailure(1L);
+        verify(passwordConfirmAttemptService, never()).reset(anyLong());
         verify(userSessionRevoker, never()).revokeAllSessions(anyLong());
     }
 
@@ -155,13 +154,13 @@ class UserServiceTest {
     void updateUser_실패_잠금_상태면_비밀번호를_확인하지_않고_429예외를_던진다() {
         User user = User.createUser("user@test.com", "encoded-old", "이전닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        when(passwordChangeAttemptService.isLocked(1L)).thenReturn(true);
+        when(passwordConfirmAttemptService.isLocked(1L)).thenReturn(true);
 
         assertThatThrownBy(() -> userService.updateUser(1L, new UpdateUserCommand("새닉네임", "current1!", "New1234!")))
-                .isInstanceOf(PasswordChangeLockedException.class);
+                .isInstanceOf(PasswordConfirmLockedException.class);
 
         verify(passwordEncoder, never()).matches(any(), any());
-        verify(passwordChangeAttemptService, never()).recordFailure(anyLong());
+        verify(passwordConfirmAttemptService, never()).recordFailure(anyLong());
         assertThat(user.getNickname()).isEqualTo("이전닉네임");
         assertThat(user.getPassword()).isEqualTo("encoded-old");
     }
@@ -199,17 +198,32 @@ class UserServiceTest {
     }
 
     @Test
-    void withdraw_비밀번호가_불일치하면_InvalidCredentialsException을_던지고_탈퇴처리하지_않는다() {
+    void withdraw_비밀번호가_불일치하면_400예외와_공용_카운트_증가_탈퇴처리하지_않는다() {
         User user = User.createUser("user@test.com", "encoded", "닉네임");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(passwordEncoder.matches("wrong", "encoded")).thenReturn(false);
 
         assertThatThrownBy(() -> userService.withdraw(1L, new WithdrawCommand("wrong")))
-                .isInstanceOf(InvalidCredentialsException.class);
+                .isInstanceOf(InvalidCurrentPasswordException.class);
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(passwordConfirmAttemptService).recordFailure(1L);
         verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
         verify(userStatusCacheService, never()).setStatus(anyLong(), any());
+    }
+
+    @Test
+    void withdraw_공용_실패_잠금_상태면_비밀번호를_확인하지_않고_429예외를_던진다() {
+        User user = User.createUser("user@test.com", "encoded", "닉네임");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(passwordConfirmAttemptService.isLocked(1L)).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.withdraw(1L, new WithdrawCommand("correct")))
+                .isInstanceOf(PasswordConfirmLockedException.class);
+
+        verify(passwordEncoder, never()).matches(any(), any());
+        assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(refreshTokenRepository, never()).revokeAllByUserId(anyLong());
     }
 
     @Test
@@ -225,5 +239,6 @@ class UserServiceTest {
         assertThat(user.getWithdrawnAt()).isEqualTo(NOW);
         verify(refreshTokenRepository).revokeAllByUserId(eq(1L));
         verify(userStatusCacheService).setStatus(1L, UserStatus.WITHDRAWN);
+        verify(passwordConfirmAttemptService).reset(1L);
     }
 }

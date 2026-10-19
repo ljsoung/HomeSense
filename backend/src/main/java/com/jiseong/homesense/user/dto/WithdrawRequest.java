@@ -9,6 +9,9 @@ import jakarta.validation.constraints.NotBlank;
  * <p>reason은 검증 대상이 아니고(자유 텍스트 또는 프론트 드롭다운 값 그대로 수용), 저장할 곳이 아직
  * 없어(User row는 물리 삭제되지 않고 남으므로 훗날 컬럼을 추가해 저장하는 확장은 가능) 현재는
  * {@link #toCommand()}에서 의도적으로 넘기지 않는다 — 받기만 하고 사용하지 않는다.
+ *
+ * <p>password가 틀리면 400 {@code INVALID_CURRENT_PASSWORD}, 비밀번호 확인 실패(비밀번호 변경과 합산)가 쌓이면 429
+ * {@code PASSWORD_CONFIRM_LOCKED}(UserService.withdraw).
  */
 public record WithdrawRequest(@NotBlank String password, String reason) {
 

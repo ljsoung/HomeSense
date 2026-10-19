@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -36,7 +38,7 @@ import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 
 /**
- * MY-05 비밀번호 변경(PUT /api/users/me)을 실제 필터 체인(MockMvc)·MariaDB·Redis로 검증한다. UserServiceTest(Mockito)는
+ * MY-05 비밀번호 변경(PUT /api/users/me)과 탈퇴(DELETE /api/users/me)의 비밀번호 확인(공용 실패 잠금)을 실제 필터 체인(MockMvc)·MariaDB·Redis로 검증한다. UserServiceTest(Mockito)는
  * 세션 종료 호출 여부만 증명하고, (1) 그 호출이 이 회원의 Refresh Token을 실제로 모두 폐기하고 기존 Access Token을
  * JwtAuthenticationFilter에서 401로 만드는지, (2) 실패하면 비밀번호·닉네임·토큰이 커밋되지 않는지는 증명하지 못한다.
  *
@@ -47,9 +49,9 @@ import com.jiseong.homesense.common.security.JwtTokenProvider;
 @AutoConfigureMockMvc
 @Testcontainers
 @Tag("integration")
-class UserPasswordChangeMariaDbIT {
+class UserPasswordConfirmMariaDbIT {
 
-    private static final String EMAIL = "password-change-it@test.com";
+    private static final String EMAIL = "password-confirm-it@test.com";
     private static final String PASSWORD = "Abcd1234!";
     private static final String NEW_PASSWORD = "Efgh5678!";
 
@@ -93,12 +95,19 @@ class UserPasswordChangeMariaDbIT {
         WithdrawalTestSeed seed = new WithdrawalTestSeed(jdbc);
         seed.wipeAll();
         userId = seed.user(EMAIL, passwordEncoder.encode(PASSWORD), "ACTIVE", null);
-        redis.delete(List.of("user:status:" + userId, "user:tokenEpochMs:" + userId, "password-change:fail:" + userId,
+        redis.delete(List.of("user:status:" + userId, "user:tokenEpochMs:" + userId, "password-confirm:fail:" + userId,
                 "login:fail:" + EMAIL));
         // 이 기기와 다른 기기의 세션 두 개. 이 IT는 폐기 여부만 세므로 저장값은 고유하기만 하면 된다.
-        seed.refreshToken(userId, "password-change-it-device-a", false);
-        seed.refreshToken(userId, "password-change-it-device-b", false);
+        seed.refreshToken(userId, "password-confirm-it-device-a", false);
+        seed.refreshToken(userId, "password-confirm-it-device-b", false);
         accessToken = jwtTokenProvider.createAccessToken(userId, "USER");
+    }
+
+    /** 로컬 Redis는 IT끼리 공유하고 userId가 컨테이너마다 1부터 시작한다 — 남긴 잠금 카운트가 다른 IT의 같은 userId를 막지 않게 지운다. */
+    @AfterEach
+    void cleanUpRedis() {
+        redis.delete(List.of("user:status:" + userId, "user:tokenEpochMs:" + userId, "password-confirm:fail:" + userId,
+                "login:fail:" + EMAIL));
     }
 
     @Test
@@ -132,19 +141,19 @@ class UserPasswordChangeMariaDbIT {
         assertThat(passwordEncoder.matches(PASSWORD, storedPassword())).isTrue();
         assertThat(storedNickname()).isEqualTo("닉네임");
         assertThat(activeRefreshTokens()).isEqualTo(2);
-        assertThat(redis.opsForValue().get("password-change:fail:" + userId)).isEqualTo("1");
+        assertThat(redis.opsForValue().get("password-confirm:fail:" + userId)).isEqualTo("1");
         expectMe(accessToken, 200);
     }
 
     @Test
     void 실패가_5회_쌓이면_맞는_비밀번호도_429로_막히고_아무것도_바뀌지_않는다() throws Exception {
-        redis.opsForValue().set("password-change:fail:" + userId, "5");
+        redis.opsForValue().set("password-confirm:fail:" + userId, "5");
 
         mockMvc.perform(put("/api/users/me").header("Authorization", "Bearer " + accessToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(null, PASSWORD, NEW_PASSWORD)))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.error.code").value("PASSWORD_CHANGE_LOCKED"));
+                .andExpect(jsonPath("$.error.code").value("PASSWORD_CONFIRM_LOCKED"));
 
         assertThat(passwordEncoder.matches(PASSWORD, storedPassword())).isTrue();
         assertThat(activeRefreshTokens()).isEqualTo(2);
@@ -163,6 +172,69 @@ class UserPasswordChangeMariaDbIT {
         assertThat(passwordEncoder.matches(PASSWORD, storedPassword())).isTrue();
         assertThat(storedNickname()).isEqualTo("닉네임");
         assertThat(activeRefreshTokens()).isEqualTo(2);
+    }
+
+    @Test
+    void 탈퇴_비밀번호가_틀리면_400이고_탈퇴되지_않으며_공용_카운트가_남는다() throws Exception {
+        withdraw("Wrong123!")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("INVALID_CURRENT_PASSWORD"));
+
+        assertThat(storedStatus()).isEqualTo("ACTIVE");
+        assertThat(activeRefreshTokens()).isEqualTo(2);
+        assertThat(failCount()).isEqualTo("1");
+        expectMe(accessToken, 200);
+    }
+
+    @Test
+    void 비밀번호_변경_실패와_탈퇴_실패가_합산돼_5회면_두_기능_모두_맞는_비밀번호도_429다() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(put("/api/users/me").header("Authorization", "Bearer " + accessToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body(null, "Wrong123!", NEW_PASSWORD)))
+                    .andExpect(status().isBadRequest());
+        }
+        for (int i = 0; i < 2; i++) {
+            withdraw("Wrong123!").andExpect(status().isBadRequest());
+        }
+        assertThat(failCount()).isEqualTo("5");
+
+        withdraw(PASSWORD)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("PASSWORD_CONFIRM_LOCKED"));
+        mockMvc.perform(put("/api/users/me").header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(null, PASSWORD, NEW_PASSWORD)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("PASSWORD_CONFIRM_LOCKED"));
+
+        assertThat(storedStatus()).isEqualTo("ACTIVE");
+        assertThat(passwordEncoder.matches(PASSWORD, storedPassword())).isTrue();
+        assertThat(activeRefreshTokens()).isEqualTo(2);
+    }
+
+    @Test
+    void 탈퇴에_성공하면_공용_카운트를_지운다() throws Exception {
+        redis.opsForValue().set("password-confirm:fail:" + userId, "2");
+
+        withdraw(PASSWORD).andExpect(status().isOk());
+
+        assertThat(storedStatus()).isEqualTo("WITHDRAWN");
+        assertThat(failCount()).isNull();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions withdraw(String password) throws Exception {
+        return mockMvc.perform(delete("/api/users/me").header("Authorization", "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"password\":\"" + password + "\"}"));
+    }
+
+    private String failCount() {
+        return redis.opsForValue().get("password-confirm:fail:" + userId);
+    }
+
+    private String storedStatus() {
+        return jdbc.queryForObject("SELECT status FROM user WHERE user_id = ?", String.class, userId);
     }
 
     private static String body(String nickname, String currentPassword, String newPassword) {
