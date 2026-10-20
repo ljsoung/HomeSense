@@ -9,6 +9,7 @@
 // 7. 섹션을 접으면 비밀번호 입력 초기화(D6)
 // 8. 비로그인 → 로그인 → MY-05 복귀
 // 9. 닉네임 저장 응답이 오기 전에 GNB·하단 탭으로 떠나면, 늦은 응답이 화면을 MY-01로 끌어오지 않는다(토스트는 보인다)
+// 10. 비밀번호 변경 응답이 화면을 떠난 뒤 도착해도 안내 토스트·로컬 토큰 삭제 — 공개 화면(홈)은 그대로 비로그인, 보호 화면(관심목록)은 로그인 화면
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -330,6 +331,35 @@ async function scenarioLeaveWhileSaving(label, viewport) {
   await context.close();
 }
 
+async function scenarioPasswordAfterLeave(label, viewport) {
+  for (const { name, link, expectedPath } of [
+    { name: '공개 화면(홈)', link: 'header a[href="/"]:visible', expectedPath: '/' },
+    { name: '보호 화면(관심목록)', link: 'a[href="/favorites"]:visible', expectedPath: '/login' },
+  ]) {
+    const { context, page, calls, db } = await open(viewport, { putMode: 'hold' });
+    await ready(page);
+    await fillPasswords(page, CURRENT, NEXT, NEXT);
+    await saveButton(page).click();
+    await page.waitForFunction(() => document.querySelector('button[aria-busy="true"]') !== null);
+    await page.locator(link).first().click();
+    const leftPath = name.startsWith('공개') ? '/' : '/favorites';
+    ok(`${label} 10 ${name}: 저장 중 이동`, await waitPath(page, leftPath));
+    db.release();
+    ok(`${label} 10 ${name}: 늦은 응답 뒤 안내 토스트`,
+      await page.getByText('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.').waitFor({ timeout: 5000 }).then(() => true, () => false));
+    ok(`${label} 10 ${name}: 로컬 토큰 삭제`,
+      await page.waitForFunction(() => localStorage.getItem('homesense.accessToken') === null && localStorage.getItem('homesense.refreshToken') === null, null, { timeout: 5000 }).then(() => true, () => false));
+    ok(`${label} 10 ${name}: 경로 ${expectedPath}`, await waitPath(page, expectedPath), page.url());
+    if (expectedPath === '/') {
+      await page.waitForTimeout(500);
+      ok(`${label} 10 ${name}: 홈에 머묾(MY-01·로그인 화면으로 끌려가지 않음)`, new URL(page.url()).pathname === '/', page.url());
+      ok(`${label} 10 ${name}: 헤더가 비로그인(로그인 링크)`, (await page.locator('header:visible a[href="/login"]').count()) >= 1);
+    }
+    ok(`${label} 10 ${name}: PUT 1회·로그아웃 API 미호출`, puts(calls).length === 1 && !calls.some((c) => c.path === '/api/auth/logout'));
+    await context.close();
+  }
+}
+
 const VIEWPORTS = [
   { label: '모바일', viewport: { width: 390, height: 844 }, layout: 'mobile' },
   { label: '태블릿', viewport: { width: 768, height: 1024 }, layout: 'tablet' },
@@ -345,6 +375,7 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioCollapse(label, viewport);
   await scenarioLogin(label, viewport);
   await scenarioLeaveWhileSaving(label, viewport);
+  await scenarioPasswordAfterLeave(label, viewport);
 }
 
 await browser.close();
