@@ -8,6 +8,7 @@
 // 6. 이탈 방지: dirty에서 취소·뒤로가기(앱 바/브레드크럼) → 다이얼로그 → 계속 수정은 머묾, 나가기는 MY-01. 변경 없으면 바로 나감. beforeunload
 // 7. 섹션을 접으면 비밀번호 입력 초기화(D6)
 // 8. 비로그인 → 로그인 → MY-05 복귀
+// 9. 닉네임 저장 응답이 오기 전에 GNB·하단 탭으로 떠나면, 늦은 응답이 화면을 MY-01로 끌어오지 않는다(토스트는 보인다)
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -24,7 +25,7 @@ const NEXT = 'Efgh5678!';
 const browser = await chromium.launch();
 
 /**
- * putMode: 'ok' | 'wrongPassword' | 'locked' | 'nicknameInvalid' | 'failOnce'.
+ * putMode: 'ok' | 'wrongPassword' | 'locked' | 'nicknameInvalid' | 'failOnce' | 'hold'(db.release()를 부를 때까지 응답 보류).
  */
 async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn = true } = {}) {
   const context = await browser.newContext({ viewport });
@@ -38,6 +39,9 @@ async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn =
     });
   }
   const db = { user: { userId: 7, email: 'jiseong@homesense.kr', nickname: '지성', createdAt: '2026-09-15T10:20:30' }, putFailures: putMode === 'failOnce' ? 1 : 0 };
+  let releasePut;
+  const putHeld = new Promise((resolve) => { releasePut = resolve; });
+  db.release = () => releasePut();
   const calls = [];
   await context.route('**/api/**', async (route) => {
     const request = route.request();
@@ -61,6 +65,7 @@ async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn =
           body: JSON.stringify({ success: false, error: { code: 'VALIDATION_FAILED', message: '입력값이 유효하지 않습니다', fieldErrors: [{ field: 'nickname', message: '서버가 거부한 닉네임입니다' }] }, timestamp: '2026-10-19T00:00:00' }),
         }).catch(() => {});
       }
+      if (putMode === 'hold') await putHeld;
       if (db.putFailures > 0) { db.putFailures--; return json(500, errBody('INTERNAL_SERVER_ERROR', '서버 오류가 발생했습니다')); }
       if (req.nickname !== undefined) db.user = { ...db.user, nickname: req.nickname };
       return json(200, okBody(db.user));
@@ -308,6 +313,23 @@ async function scenarioLogin(label, viewport) {
   await context.close();
 }
 
+async function scenarioLeaveWhileSaving(label, viewport) {
+  const { context, page, calls, db } = await open(viewport, { putMode: 'hold' });
+  await ready(page);
+  await field(page, '닉네임').fill('늦은닉네임');
+  await saveButton(page).click();
+  await page.waitForFunction(() => document.querySelector('button[aria-busy="true"]') !== null);
+  // GNB "관심목록"(md 이상)·하단 탭 "찜"(모바일) — 이 화면이 막지 못하는 이동(D7)
+  await page.locator('a[href="/favorites"]:visible').first().click();
+  ok(`${label} 9: 저장 중 관심목록으로 이동`, await waitPath(page, '/favorites'));
+  db.release();
+  ok(`${label} 9: 늦은 응답 뒤 토스트`, await page.getByText('회원정보가 저장되었습니다').waitFor({ timeout: 5000 }).then(() => true, () => false));
+  await page.waitForTimeout(500);
+  ok(`${label} 9: 늦은 응답이 MY-01로 끌어오지 않음`, new URL(page.url()).pathname === '/favorites', page.url());
+  ok(`${label} 9: PUT 1회`, puts(calls).length === 1);
+  await context.close();
+}
+
 const VIEWPORTS = [
   { label: '모바일', viewport: { width: 390, height: 844 }, layout: 'mobile' },
   { label: '태블릿', viewport: { width: 768, height: 1024 }, layout: 'tablet' },
@@ -322,6 +344,7 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioLeave(label, viewport, layout);
   await scenarioCollapse(label, viewport);
   await scenarioLogin(label, viewport);
+  await scenarioLeaveWhileSaving(label, viewport);
 }
 
 await browser.close();

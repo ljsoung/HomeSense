@@ -135,6 +135,17 @@ function ProfileEditForm({ baseline: initialBaseline }: { baseline: UserResponse
   const currentPasswordRef = useRef<HTMLInputElement>(null);
   const newPasswordRef = useRef<HTMLInputElement>(null);
   const focusCurrentOnOpen = useRef(false);
+  // GNB·하단 탭·브라우저 뒤로가기로는 저장 중에도 화면을 떠날 수 있다(D7 한계). 떠난 뒤 도착한 응답이 화면을 옮기면 안 된다.
+  // 언마운트만 보면 부족하다 — 라우터 이동은 전환(transition)이라 주소가 바뀐 뒤 새 화면이 커밋되기 전까지 이 폼이 남아 있다.
+  // 그래서 지금 주소가 아직 이 화면인지도 함께 본다.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const isStillHere = () => mountedRef.current && window.location.pathname === MY_ROUTES.profileEdit;
 
   const save = evaluateSave(baseline.nickname, form, saving);
   const ids = { nickname: useId(), email: useId(), current: useId(), next: useId(), confirm: useId(), body: useId(), notice: useId() };
@@ -202,11 +213,13 @@ function ProfileEditForm({ baseline: initialBaseline }: { baseline: UserResponse
         endSession({ redirectTo: '/login' });
         return;
       }
-      // D5 — 헤더의 사용자 정보를 바로 바꾸고, 변경 없음 상태로 되돌린 뒤 MY-01로.
+      // D5 — 헤더의 사용자 정보를 바로 바꾸고, 변경 없음 상태로 되돌린 뒤 MY-01로. 응답 전에 사용자가 다른 화면으로 갔으면
+      // 저장 결과(헤더 닉네임·토스트)만 반영하고 이동하지 않는다 — 사용자가 고른 화면을 늦은 응답이 덮지 않게.
       applyUserUpdate(updated);
+      showToast(SAVED_TOAST, 'success');
+      if (!isStillHere()) return;
       setBaseline(updated);
       setForm(initialForm(updated.nickname));
-      showToast(SAVED_TOAST, 'success');
       navigate(MY_ROUTES.home);
     } catch (error) {
       const apiError = axios.isAxiosError<ApiErrorResponse>(error) ? error.response?.data?.error : undefined;
