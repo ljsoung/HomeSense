@@ -14,6 +14,7 @@ import { FieldHint } from '../../components/ui/FieldHint';
 import { CONFIRM_DANGER_BUTTON_CLASS, CONFIRM_FOOTER_ROW_CLASS, CONFIRM_SECONDARY_BUTTON_CLASS, Modal } from '../../components/ui/Modal';
 import { PasswordChecklist } from '../../components/ui/PasswordChecklist';
 import { useToast } from '../../components/ui/useToast';
+import { currentSessionGeneration } from '../../features/auth/session';
 import { useAuth } from '../../features/auth/useAuth';
 import { getMe, updateMe } from '../../features/user/api';
 import type { UserResponse } from '../../features/user/types';
@@ -204,8 +205,13 @@ function ProfileEditForm({ baseline: initialBaseline }: { baseline: UserResponse
     const changingPassword = body.newPassword !== undefined;
     setSaving(true);
     setBannerError(null);
+    // 이 저장을 보낸 세션. 응답 전에 세션이 바뀌었으면(로그아웃·다른 계정 로그인·세션 만료·다른 탭의 계정 변경 — 모두 세대를
+    // 올린다) 늦은 응답은 지금 세션과 무관하다. 특히 비밀번호 변경의 endSession은 저장소를 비우므로, 그대로 부르면 그사이
+    // 로그인한 다른 계정의 토큰을 지우고 로그아웃시킨다. 토스트도 띄우지 않는다(지금 화면의 계정에 대한 결과가 아니다).
+    const generation = currentSessionGeneration();
     try {
       const updated = await updateMe(body);
+      if (currentSessionGeneration() !== generation) return;
       if (changingPassword) {
         // D4 — 서버가 이 회원의 모든 세션을 끝냈다. 로그아웃 API를 부르지 않고 로컬 세션만 정리하고, 이동은 보호 라우트
         // 가드가 한다(로그인 화면, 복귀 목적지 없음).

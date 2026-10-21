@@ -10,6 +10,7 @@
 // 8. 비로그인 → 로그인 → MY-05 복귀
 // 9. 닉네임 저장 응답이 오기 전에 GNB·하단 탭으로 떠나면, 늦은 응답이 화면을 MY-01로 끌어오지 않는다(토스트는 보인다)
 // 10. 비밀번호 변경 응답이 화면을 떠난 뒤 도착해도 안내 토스트·로컬 토큰 삭제 — 공개 화면(홈)은 그대로 비로그인, 보호 화면(관심목록)은 로그인 화면
+// 11. 비밀번호 변경 응답 전에 로그아웃하고 다른 계정(B)으로 로그인하면, 늦은 응답은 B의 토큰·로그인 상태를 건드리지 않고 토스트도 없다
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -22,6 +23,8 @@ function ok(name, cond, detail = '') {
 
 const CURRENT = 'Abcd1234!';
 const NEXT = 'Efgh5678!';
+
+const OTHER_USER = { userId: 8, email: 'other@homesense.kr', nickname: '다른계정', createdAt: '2026-09-20T09:00:00' };
 
 const browser = await chromium.launch();
 
@@ -54,7 +57,11 @@ async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn =
     const json = (status, payload) => route.fulfill({ status, contentType: 'application/json', body: payload }).catch(() => {});
     if (p === '/api/auth/login') return json(200, okBody({ accessToken: 'A2', refreshToken: 'R2', expiresIn: 1800 }));
     if (p === '/api/auth/logout') return json(200, okBody(null));
-    if (p === '/api/users/me' && method === 'GET') return json(200, okBody(db.user));
+    if (p === '/api/users/me' && method === 'GET') {
+      // 로그인 응답의 토큰(A2)은 다른 계정(B)이다 — 시나리오 11
+      if (request.headers().authorization === 'Bearer A2') return json(200, okBody(OTHER_USER));
+      return json(200, okBody(db.user));
+    }
     if (p === '/api/users/me' && method === 'PUT') {
       const req = JSON.parse(body);
       if (putMode === 'wrongPassword') return json(400, errBody('INVALID_CURRENT_PASSWORD', '현재 비밀번호가 일치하지 않습니다'));
@@ -360,6 +367,37 @@ async function scenarioPasswordAfterLeave(label, viewport) {
   }
 }
 
+async function scenarioPasswordAfterAccountSwitch(label, viewport) {
+  const { context, page, calls, db } = await open(viewport, { putMode: 'hold' });
+  await ready(page);
+  await fillPasswords(page, CURRENT, NEXT, NEXT);
+  await saveButton(page).click();
+  await page.waitForFunction(() => document.querySelector('button[aria-busy="true"]') !== null);
+  await page.evaluate(() => { window.__sameDocument = true; });
+  await page.locator('header a[href="/"]:visible').first().click();
+  await waitPath(page, '/');
+  await page.locator('header:visible').getByRole('button', { name: /계정 메뉴/ }).click();
+  await page.getByRole('menuitem', { name: '로그아웃' }).click();
+  // 앱 안 링크로 이동한다 — page.goto는 새로고침이라 보류 중인 PUT과 그 뒤처리가 함께 사라진다.
+  await page.locator('header:visible a[href="/login"]').first().click();
+  await waitPath(page, '/login');
+  await page.getByLabel('이메일').fill(OTHER_USER.email);
+  await page.getByLabel('비밀번호', { exact: true }).fill('Other123!');
+  await page.locator('button[type="submit"]').click();
+  ok(`${label} 11: B로 로그인 → 홈`, await waitPath(page, '/'));
+  await page.locator('header:visible').getByRole('button', { name: /다른계정 계정 메뉴/ }).waitFor({ timeout: 5000 }).catch(() => {});
+  ok(`${label} 11: 응답 보류 중(새로고침 없이 같은 문서)`, puts(calls).length === 1 && await page.evaluate(() => window.__sameDocument === true));
+  db.release();
+  await page.waitForTimeout(800);
+  ok(`${label} 11: 늦은 응답 뒤에도 B의 토큰 유지`,
+    await page.evaluate(() => localStorage.getItem('homesense.accessToken') === 'A2' && localStorage.getItem('homesense.refreshToken') === 'R2'));
+  ok(`${label} 11: 헤더가 B로 로그인된 채`, (await page.locator('header:visible').getByRole('button', { name: /다른계정 계정 메뉴/ }).count()) === 1);
+  ok(`${label} 11: 비밀번호 변경 안내 토스트 없음`, (await page.getByText('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.').count()) === 0);
+  ok(`${label} 11: 홈에 머묾`, new URL(page.url()).pathname === '/', page.url());
+  ok(`${label} 11: PUT 1회`, puts(calls).length === 1);
+  await context.close();
+}
+
 const VIEWPORTS = [
   { label: '모바일', viewport: { width: 390, height: 844 }, layout: 'mobile' },
   { label: '태블릿', viewport: { width: 768, height: 1024 }, layout: 'tablet' },
@@ -376,6 +414,7 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioLogin(label, viewport);
   await scenarioLeaveWhileSaving(label, viewport);
   await scenarioPasswordAfterLeave(label, viewport);
+  await scenarioPasswordAfterAccountSwitch(label, viewport);
 }
 
 await browser.close();
