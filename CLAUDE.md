@@ -301,7 +301,7 @@ boolean만으로 SecurityContext 설정 여부 결정), `UserServiceTest`(withdr
 
 | 항목 | 설계서 상태 | 실제 구현 | 근거 |
 | --- | --- | --- | --- |
-| 로그인 실패 잠금(5회/5분) | "신규 제안, 반영 전 검토 필요"로 미확정 표시 | 사용자 확인 후 구현 확정. Redis 키(`login:fail:{email}`)의 TTL을 **실패마다 5분으로 다시 건다** — 첫 실패 시점 고정 만료가 아니라 마지막 실패로부터 5분 뒤 잠금이 풀리는 슬라이딩 윈도우 | 설계서 문구("약 5분 TTL로 잠금")가 고정/슬라이딩 여부를 명시하지 않아, 마지막 시도 기준으로 5분을 보장하는 쪽이 사용자에게 더 예측 가능하다고 판단해 슬라이딩으로 결정(`LoginAttemptService.recordFailure()`) |
+| 로그인 실패 잠금(5회/5분) | "신규 제안, 반영 전 검토 필요"로 미확정 표시 | **[2026-10-21 변경]** 회원 조회·비밀번호 비교 **전에** `login:fail:{email}`에 시도를 원자적으로 예약하고(`AttemptLimiter`, Lua 한 번), 첫 시도부터 5분 안에 5회를 넘으면 비교 없이 429. TTL은 첫 예약 때만 건다(고정 창). 성공은 자기 예약 하나만 되돌린다 — 아래 "SVC-AUTH-01 로그인 실패 잠금 원자화" 절. 처음 구현(2026-09)은 실패마다 TTL을 다시 거는 슬라이딩 윈도우였다 | 슬라이딩 + 성공 시 키 삭제는 확인·비교·기록이 따로라 동시 요청이 5회를 넘게 평가됐고, 원자성을 지키며 동시 예약을 보존하려면 초기화 대신 자기 예약만 되돌려야 해 바꿨다 |
 | `logout()` 소유자 검증 | 설계서 3.1절에 세부 로직 없음(시그니처만 `logout(Long userId, String refreshTokenValue)`) | 조회된 Refresh Token의 소유자(`user_id`)가 인자로 받은 `userId`와 다르면 `InvalidRefreshTokenException` | 시그니처가 굳이 `userId`를 받는 이유가 이 검증 외엔 없고, FAV 도메인 등 다른 프로그램의 "소유자 검증 후 삭제" 패턴과 일관됨(`AuthService.logout()`) |
 
 ### SVC-AUTH-01 Refresh Token Rotation + 재사용 탐지 (2026-09-22)
@@ -1107,13 +1107,12 @@ DTO에는 `@class`가 붙지만(단건 DTO인 `complexDetailV2`는 정상), `Str
 리스트 캐시 3건과 엔트리 2건이 실패하고 단지 상세만 통과한다(버그 범위와 일치). `./gradlew test`,
 `./gradlew integrationTest` 전부 통과.
 
-**백로그(테스트 격리) — 통합 테스트가 개발용 로컬 Redis(`homesense-redis`, localhost:6379)에 값을 쓴다.**
-MariaDB는 Testcontainers로 테스트마다 격리되지만 Redis는 그런 장치가 없어, IT가 개발 중인 로컬 Redis에 직접
-쓴다 — 예: `ComplexSearchRegionKeywordMariaDbIT`가 `region:prefix-map:version`을 덮어쓰고(2026-09-27 확인),
-로그인 실패 카운터·`user:status`·캐시 키도 같은 인스턴스에 남는다. 개발자의 로컬 상태를 오염시키고, 로컬 Redis가
-없으면 IT가 실패한다. Redis도 Testcontainers로 띄워 IT 컨텍스트에 연결하는 방향으로 고친다(아직 착수 안 함).** 수정 방향: 반환 리스트를 `new ArrayList<>(…)`로
-감싸거나, 직렬화기의 타이핑 범위를 바꾼다. 어느 쪽이든 캐시 히트 경로를 실제 Redis로 검증하는 테스트를
-함께 둔다.
+**[처리완료 2026-10-21, `fix/backend/login-attempt-atomic`] ~~백로그(테스트 격리) — 통합 테스트가 개발용 로컬 Redis에 값을 쓴다.~~**
+`src/test/java/.../support/RedisContainerSupport`가 JVM당 Testcontainers Redis(`redis:7-alpine`) 하나를 띄우고
+`@DynamicPropertySource`로 `spring.data.redis.host/port`를 넣으며, IT 클래스가 시작할 때마다 `FLUSHALL`로 비운다(MariaDB
+컨테이너마다 userId가 1부터 시작해 앞 클래스의 키가 새지 않게). `@SpringBootTest` IT는 전부 이 클래스를 상속한다 — **새 IT도
+상속하라.** 같은 클래스 안의 테스트끼리는 여전히 각 테스트가 자기 키를 정리한다. 로컬 Redis를 멈춘 상태에서 `integrationTest`
+전체 통과를 확인했다.
 
 **영향받는 프론트 호출부(이번에 수정하지 않음):**
 - `pages/home/HeroSection.tsx` `runSearch()` — `/search?housingType=..&dealType=..&keyword=원문`으로 이동한다.
@@ -1191,6 +1190,7 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 - **테이블정의서 3.5절 `price_change_threshold_pct`: 허용 범위 0~20 정수(API 검증, 컬럼은 DECIMAL(4,1) 그대로)(2026-10-07).**
 - 3.3절 SVC-CPX-01 `searchInBounds()`·API-CPX-01 `GET /map`: 필터가 `/search`와 같은 이름·같은 조건 코드, 응답 `{items, truncated, limit}`, 항목 필드는 `ComplexSummaryResponse`와 같은 이름 + latitude·longitude·locationPrecision·precisionBadge, 정렬 complex_id 해시 순(결정적), 상한 설정값(기본 500), bounds 범위 검증(위도 ±90·경도 ±180·남서 ≤ 북동)(2026-10-13, "MAP-01 백엔드 보강" 절).
 - **UI정의서 MAP-01 "카카오맵 REST API(좌표·클러스터링)": 클러스터링은 REST가 아니라 JS SDK clusterer가 한다(2026-10-13).**
+- 3.1절 SVC-AUTH-01 `login()`·`reactivate()` 처리 로직·예외표: 회원 조회 전 `login:fail:{email}` 원자 예약(첫 시도부터 5분 안에 5회 초과면 비교 없이 429), 없는 이메일도 카운트·더미 BCrypt 비교 후 401, 성공 시 초기화 대신 자기 예약 하나만 되돌림(이전 실패는 TTL까지 남음), 비활성 계정·철회 불가는 실패로 셈(2026-10-21, "SVC-AUTH-01 로그인 실패 잠금 원자화" 절).
 - 3.2절 SVC-USER-01 `updateUser()`·`withdraw()`: 비밀번호 불일치 400 `INVALID_CURRENT_PASSWORD`(`InvalidCredentialsException` 401 아님), 두 기능 공용 확인 실패 잠금(5회·5분, 429 `PASSWORD_CONFIRM_LOCKED`), newPassword가 있으면 currentPassword 필수(400 필드 오류), 비밀번호 변경 성공 시 Refresh Token 전체 폐기 + Access Token 컷오프, 하단 메모 "MY-01 회원정보 수정은 인라인 편집/모달" 정정(UI정의서 v2.1은 MY-05 독립 화면)(2026-10-19, "SVC-USER-01 회원정보 수정 보강" 절).
 - 3.8절 SVC-NTF-01 `getNotifications()`: 정렬 고정(`created_at DESC, notification_id DESC`, 요청 정렬 무시)·페이지 크기 50건까지·조회 기간 창(발생 후 6개월, `homesense.notification.history.retention-months`), 응답 `ApiResponse<List<NotificationResponse>>`+`pageMeta`(딥링크 3종·`createdAt`·`isRead`)(2026-10-15, "MY-04 백엔드 보강" 절).
 - 3.3절 SVC-CPX-01 `search()`·`getPopular()`·`getDetail()` 응답과 UI정의서 4.9절 UIC-09: `precisionBadge`(PRECISE/APPROXIMATE, SIMILAR 또는 근사 좌표면 근사) 추가, 캐시 이름 `complexDetailV4`·`popularComplexesV4`(2026-10-13).
@@ -1315,13 +1315,24 @@ SCR-MY-05(회원정보 수정) 프론트 착수 전 선행 작업이다. `PUT /a
 
 검증: `UserServiceTest`(닉네임만·비밀번호만·둘 다·불일치 400(카운트 증가·닉네임 미저장·세션 유지)·잠금 429(`matches()` 미호출)·성공해도 예약 외 호출 없음(카운트를 지우지 않음)·currentPassword 없음, 탈퇴 불일치 400·카운트 증가·탈퇴 잠금 429·탈퇴 성공해도 예약 외 호출 없음), `PasswordConfirmAttemptServiceTest`(키·임계치 5·TTL 5분), `UserControllerTest`(수정·탈퇴 각각 400 `INVALID_CURRENT_PASSWORD`·429 `PASSWORD_CONFIRM_LOCKED`, currentPassword 누락/빈 문자열 400 필드 오류·newPassword 정책·빈 닉네임·null 선택 필드 통과), `AuthServiceTest`(재설정 경로 회귀 — 실제 `UserSessionRevoker`에 목 리포지토리). **`UserPasswordConfirmMariaDbIT`**(신규, MockMvc+MariaDB+로컬 Redis, 7건 — 변경 후 Refresh Token 전부 폐기·기존 Access Token 401·새 비밀번호 로그인, 불일치 400·전부 그대로·카운트 1·기존 토큰 200, 카운트 5면 맞는 비밀번호도 429, 컷오프 실패 시 비밀번호·닉네임·토큰 모두 롤백, 탈퇴 불일치 400·카운트 1·탈퇴 안 됨, 변경 실패 3회+탈퇴 실패 2회면 두 기능 모두 맞는 비밀번호도 429, 탈퇴에 성공해도 카운트가 남고 TTL이 다시 걸림, 동시 오답 8건 중 비교 5회, 맞는 비밀번호 비교 중 예약된 오답 4건이 성공 뒤에도 남아 다음 시도 429·만료 뒤 풀림). 변형 검증: 세션 종료 호출을 빼면 IT 2건, 탈퇴를 잠금 없는 확인으로 되돌리면 탈퇴 IT 3건이 실패한다, 성공 시 카운터 삭제를 되살리면 IT 2건(탈퇴 성공 뒤 카운트·비교 중 예약된 오답 보존)이 실패한다. **IT의 Redis 격리:** 로컬 Redis를 IT끼리 공유하고 userId가 컨테이너마다 1부터 시작해, 이 IT가 남긴 잠금 카운트가 `UserServiceMariaDbIT`의 탈퇴를 429로 막았다(실제로 재현) — 이 IT는 `@AfterEach`로 자기 키를 지우고, `UserServiceMariaDbIT`는 탈퇴 전에 키를 지운다. `./gradlew test` 837건, `./gradlew integrationTest` 132건(23개 클래스, 건너뜀 0) 통과(2026-10-20, 성공 시 초기화 제거 후).
 
-**완결 필요(백엔드 첫 배포 전 필수) — 로그인 잠금(`login:fail:{email}`)의 확인→비교→기록 경쟁 조건.** `AuthService.authenticate()`(login·reactivate 공용)는 아직 `LoginAttemptService.isLocked()` → 회원 조회 → BCrypt 비교 → `recordFailure()` 순서라, 위 D3가 고친 것과 같은 경쟁으로 같은 이메일의 동시 요청이 5회를 넘는 추측을 평가할 수 있다. 토큰 없이 부를 수 있어 노출은 더 크다. 또 `LoginAttemptService.recordFailure()`가 `increment()`와 `expire()`를 따로 보내, 그 사이에 실패하면 TTL 없는 카운터가 남아 해당 이메일이 영구 잠길 수 있다 — 공용 Lua 스크립트로 옮기면 함께 해결된다. 이 PR 머지 후 별도 브랜치 `fix/backend/login-attempt-atomic`에서 처리한다:
-- `PasswordConfirmAttemptService`의 Lua 예약 스크립트를 `common.security` 공용 컴포넌트로 추출해 두 잠금이 함께 쓴다. 공용 스크립트는 초기화 없는 예약 방식(카운트 < 5면 INCR + PEXPIRE, 아니면 거절)이고, 로그인의 성공 시 초기화 여부는 그 브랜치에서 결정한다(로그인 성공은 세션을 만들어 비밀번호 확인과 사정이 다르다 — 초기화를 남기면 위 D3의 성공·실패 경쟁도 함께 다룬다).
-- 예약은 회원 조회보다 먼저 실행해, 존재하지 않는 이메일도 같은 카운트·잠금을 받게 한다(잠금 여부로 가입 여부가 드러나지 않게). 2026-10-19 코드 기준으로는 없는 이메일이 `recordFailure()` 전에 `InvalidCredentialsException`으로 끝나 카운트가 쌓이지 않는다 — 그래서 지금은 5회 실패 뒤 429가 나오는지로 가입 여부를 알 수 있다.
-- `/api/auth/reactivate`가 같은 로그인 잠금을 거치는지 확인하고, 없으면 적용한다. 2026-10-19 코드 기준으로는 `reactivate()`가 `authenticate()`를 공유해 이미 거친다 — 추출 뒤에도 그대로인지 확인한다.
-- 로그인 동시성 IT를 추가한다(같은 이메일 동시 오답 요청에서 비교 횟수 상한 검증 — `UserPasswordConfirmMariaDbIT`의 동시 요청 테스트와 같은 방식).
+**[처리완료 2026-10-21] ~~완결 필요(백엔드 첫 배포 전 필수) — 로그인 잠금(`login:fail:{email}`)의 확인→비교→기록 경쟁 조건.~~** 아래 "SVC-AUTH-01 로그인 실패 잠금 원자화" 절.
 
 **완결 필요 — 이메일 변경(소유 확인 플로우) 미구현.** UI정의서 MY-05는 이메일 변경을 허용하되 재인증 플로우를 "백엔드 설계 시 확정"으로 남겼다. 새 주소로 확인 링크를 보내 소유를 확인하는 별도 도메인 작업(AUTH-03과 같은 규모)이 필요하다. 그 전까지 MY-05에서 이메일은 읽기 전용이다.
+
+### SVC-AUTH-01 로그인 실패 잠금 원자화 (2026-10-21, `fix/backend/login-attempt-atomic`)
+
+백엔드 첫 배포 전 필수 항목이었다. 고친 문제 세 가지: (1) `isLocked()` → 회원 조회 → BCrypt 비교 → `recordFailure()`가 따로라, BCrypt 비교 동안 같은 이메일의 동시 요청이 모두 카운트 4를 읽고 통과해 5회를 넘는 추측이 평가됐다. (2) `recordFailure()`의 INCR과 EXPIRE가 따로라 그 사이에 실패하면 TTL 없는 카운터가 남아 그 이메일이 영구 잠겼다. (3) 없는 이메일은 카운트가 오르지 않고 BCrypt 비교도 건너뛰어, 5회 뒤 429가 나오는지와 응답 시간으로 가입 여부가 드러났다. 확인 문서: `docs/specs/`가 없어 작업 지시에 옮긴 프로그램설계서 3.1절 `login()` 원문.
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| 공용 제한기 `AttemptLimiter`(`common.security`) | `reserve(key, limit, ttl)`: Lua 한 번으로 INCR → 결과가 1이거나 PTTL < 0이면 PEXPIRE → 카운트 ≤ limit이면 true. 결과가 없으면 false(잠김으로 본다). `release(key)`: Lua 한 번으로 값이 0보다 클 때만 DECR(TTL 유지, 키가 없으면 아무것도 안 함). 로그인(`LoginAttemptService`)과 MY-05 비밀번호 확인(`PasswordConfirmAttemptService`)이 같이 쓴다. 임계치·TTL은 `FailedAttemptPolicy`(5회·5분) | MY-05가 같은 문제를 Lua 예약으로 먼저 고쳤다("SVC-USER-01 회원정보 수정 보강" 절 D3). PTTL 음수 처리로 옛 코드가 남긴 TTL 없는 키도 다음 예약에서 스스로 풀린다 | 다중 인스턴스가 서로 다른 Redis를 쓰게 되는 경우(카운터가 인스턴스마다 따로라 임계치가 늘어난다) |
+| `authenticate()` 순서(login·reactivate 공용) | 이메일 정규화 → 예약(5회 초과면 비교 없이 429 `AccountLockedException`) → 회원 조회 → 없으면 `DummyPasswordHash.compare()`(기동 시 같은 인코더로 한 번 만든 무작위 BCrypt 해시와 비교) 뒤 401 → 비밀번호 불일치 401. 비밀번호 → 상태 순서는 그대로다 | 예약을 조회보다 먼저 해야 없는 이메일도 같은 카운트·잠금을 받는다. 더미 비교는 응답 시간 차이를 없앤다 | — |
+| 되돌리기 | 토큰을 실제로 발급한 경우에만 `release()`로 자기 예약 하나를 되돌린다 — login 성공, reactivate 성공. 비활성 계정(403), reactivate의 409·410, 비밀번호 불일치·없는 이메일은 예약을 유지한다(실패로 센다). **키를 지우지 않는다** — 지우면 동시에 비교 중인 다른 요청의 예약까지 사라진다(MY-05 P2와 같은 문제). 비밀번호 재설정 성공의 `reset()`(키 삭제)은 그대로 둔다 — 메일로 받은 토큰을 소비한 것이 계정 소유 증명이다 | 작업 지시 | — |
+| **설계 이탈 — 잠금 의미** | "연속 5회 실패(성공 시 초기화, 실패마다 TTL 다시 걸기)"에서 "**첫 시도부터 5분 안에 시도 5회 초과**"로 바뀐다. 성공해도 이전 실패는 TTL까지 남는다. 잠긴 뒤의 시도도 카운트에 남지만 TTL은 늘지 않아 잠금이 연장되지 않는다(공격자가 피해자 계정을 계속 잠가 둘 수 없다) | 원자성을 지키면서 동시 예약을 보존하려면 초기화 대신 자기 예약만 되돌려야 한다 | 다중 인스턴스가 서로 다른 Redis를 쓰는 경우, IP 단위 제한을 도입하는 경우 |
+| **설계 이탈 — 없는 이메일도 카운트** | 없는 이메일도 `login:fail:{email}`에 예약이 쌓여 5회 초과면 429다 | 가입 여부 비노출(AUTH-01 예외 처리 원칙의 연장) | 같은 무효화 조건 |
+| MY-05 비밀번호 확인 잠금의 동작 변화 | 공용 제한기로 옮기며 (1) TTL을 첫 예약 때만 건다(예전: 예약마다 다시 걸기), (2) 잠긴 뒤의 시도도 카운트가 는다(예전: 그대로). 성공 시 초기화 없음·TTL 만료로만 해제는 그대로다. `UserPasswordConfirmMariaDbIT` 동시 요청 테스트의 "잠긴 뒤 카운트 5" 단언을 "카운트 8, TTL ≤ 5분"으로 바꿨다 | 로그인과 같은 규칙을 쓴다 | 성공 후에도 세션이 유지되는 비밀번호 확인 기능이 생기는 경우(D3 조건 그대로) |
+
+검증: `AttemptLimiterTest`(키·TTL 밀리초, 카운트 5 허용·6 거부, 결과 없음 거부, release는 키 삭제 없음), `LoginAttemptServiceTest`, `PasswordConfirmAttemptServiceTest`, `AuthServiceTest`(잠기면 조회·비교 없음, 없는 이메일도 예약 유지·더미 비교, 성공은 `release`만·`reset` 없음, 비활성·410은 `release` 없음). **`AuthServiceLoginAttemptMariaDbIT`**(신규, Testcontainers Redis·MariaDB, `PasswordEncoder` 스파이): 틀린 비밀번호 동시 20건 → BCrypt 평가 정확히 5회·429 15건, 없는 이메일 동시 20건 → 더미 비교 5회, TTL 없는 `login:fail` 키가 예약 뒤 TTL을 받음, 성공은 자기 예약만 되돌리고 이전 실패는 남음, `release`는 0 아래로 내려가지 않고 없는 키를 만들지 않음. 변형 검증: 더미 비교를 빼면 없는 이메일 테스트가 실패한다. `AuthServiceReactivateMariaDbIT`는 `LoginAttemptService` 목을 지우고 실제 Redis를 쓴다. `./gradlew test` 839건, `./gradlew integrationTest` 24개 클래스 137건 통과(로컬 Redis 정지 상태, 2026-10-21).
 
 ### BAT-NTF-01 관심대상 조건평가·알림 생성 (2026-10-06, `feature/backend/notification-trigger`)
 
@@ -3254,7 +3265,7 @@ text/html`(index.html 본문)을 돌려주면 `pageerror`가 정확히 재현된
 # 백엔드 (Spring Boot, Gradle) — backend/
 ./gradlew bootRun          # 로컬 실행 (8080)
 ./gradlew test             # 단위 테스트
-./gradlew integrationTest  # Testcontainers 기반 IT (@Tag("integration"), Docker 필요)
+./gradlew integrationTest  # Testcontainers 기반 IT (@Tag("integration"), Docker 필요 — MariaDB·Redis 모두 컨테이너, 로컬 Redis 불필요)
 ./gradlew build            # 빌드
 
 # 프론트엔드 (Vite + React + TS) — frontend/homesense/ (frontend/ 바로 아래가 아니라 한 단계
