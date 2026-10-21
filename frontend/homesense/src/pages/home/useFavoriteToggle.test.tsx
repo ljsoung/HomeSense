@@ -56,7 +56,9 @@ function renderWithStatus(initial: AuthStatus) {
     signup: async () => {},
     logout: async () => {},
     endSession: () => {},
+    applyUserUpdate: () => {},
     signedOutByUser: false,
+    signedOutRedirectTo: '/',
   });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter>

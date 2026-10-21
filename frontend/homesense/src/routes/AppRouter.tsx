@@ -8,8 +8,8 @@ import { FavoritesPage } from '../pages/favorites/FavoritesPage';
 import { HomePage } from '../pages/home/HomePage';
 import { PrivacyPolicyPage } from '../pages/legal/PrivacyPolicyPage';
 import { MyPage, MyPageSkeleton } from '../pages/my/MyPage';
-import { MyPreparingPage } from '../pages/my/MyPreparingPage';
 import { NotificationHistoryPage } from '../pages/notifications/NotificationHistoryPage';
+import { ProfileEditPage } from '../pages/profileEdit/ProfileEditPage';
 import { NotificationSettingsPage } from '../pages/notificationSettings/NotificationSettingsPage';
 import { SearchResultsPage } from '../pages/search/SearchResultsPage';
 import { MY_ROUTES } from './paths';
@@ -70,7 +70,7 @@ export function AppRouter() {
           path={MY_ROUTES.profileEdit}
           element={
             <RequireAuth>
-              <MyPreparingPage programId="MY-05" title="회원정보 수정" />
+              <ProfileEditPage />
             </RequireAuth>
           }
         />

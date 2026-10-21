@@ -73,8 +73,9 @@ export function sentAccessTokenOf(config: InternalAxiosRequestConfig | undefined
 /**
  * 재발급할 401인지 판별한다. 네 조건을 모두 만족할 때만 요청이 보낸 Access Token을 돌려준다.
  * - 응답 코드가 `UNAUTHORIZED`다 — Spring Security가 인증 없는 보호 엔드포인트 요청을 막을 때
- *   `RestAuthenticationEntryPoint`가 내는 코드다. 비즈니스 401(`INVALID_CREDENTIALS`: 로그인 실패·현재
- *   비밀번호 불일치, `INVALID_REFRESH_TOKEN`)은 토큰 만료가 아니므로 재발급하지 않는다.
+ *   `RestAuthenticationEntryPoint`가 내는 코드다. 비즈니스 401(`INVALID_CREDENTIALS`: 로그인·재활성화 실패,
+ *   `INVALID_REFRESH_TOKEN`)은 토큰 만료가 아니므로 재발급하지 않는다. 회원정보 수정·탈퇴의 비밀번호 불일치는 2026-10-19부터
+ *   400 `INVALID_CURRENT_PASSWORD`다(예전엔 401 `INVALID_CREDENTIALS`).
  * - Access Token을 실어 보낸 요청이다(토큰 없이 받은 401은 재발급할 세션이 없다).
  * - 인증 엔드포인트 요청이 아니다.
  * - 아직 재시도하지 않은 요청이다.

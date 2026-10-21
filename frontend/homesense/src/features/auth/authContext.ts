@@ -28,16 +28,27 @@ export interface AuthContextValue {
   /** 서버의 Refresh Token 폐기를 시도한 뒤(실패해도) 로컬 토큰을 지우고 비로그인으로 바꾼다. */
   logout: () => Promise<void>;
   /**
-   * 서버 호출 없이 이 브라우저의 세션만 정리한다 — 회원탈퇴 성공 직후처럼 서버가 이미 이 사용자의 토큰을 전부
-   * 폐기한 경우에 쓴다(`/logout`을 다시 부르지 않는다). logout()의 로컬 정리와 같은 단계다.
+   * 서버 호출 없이 이 브라우저의 세션만 정리한다 — 회원탈퇴·비밀번호 변경 성공 직후처럼 서버가 이미 이 사용자의 토큰을
+   * 전부 폐기한 경우에 쓴다(`/logout`을 다시 부르지 않는다). logout()의 로컬 정리와 같은 단계다.
+   * `redirectTo`는 보호 화면의 가드가 보낼 곳이다(기본 HOME-01, `signedOutRedirectTo`). 화면은 직접 이동하지 않는다.
    */
-  endSession: () => void;
+  endSession: (options?: { redirectTo?: string }) => void;
+  /**
+   * 서버가 돌려준 내 정보로 `user`를 바꾼다(MY-05 닉네임 저장 뒤 헤더 갱신). 로그인 상태가 아니거나 다른 회원의 응답이면
+   * 무시한다.
+   */
+  applyUserUpdate: (next: UserResponse) => void;
   /**
    * 지금의 비로그인 상태가 사용자가 직접 끝낸 결과(로그아웃·탈퇴)인지. 보호 라우트 가드가 그 화면에서 로그아웃한
    * 경우를 세션 만료와 구분해, 로그인 화면이 아니라 HOME-01로 보내는 데 쓴다(RequireAuth). 로그인·가입·다시
    * 확인·세션 만료 때 false로 돌아간다.
    */
   signedOutByUser: boolean;
+  /**
+   * `signedOutByUser`일 때 보호 라우트 가드가 보낼 곳. 로그아웃·탈퇴는 HOME-01('/'), 비밀번호 변경(MY-05)은 로그인 화면
+   * ('/login', 복귀 목적지 없음 — 로그인 뒤 HOME-01로 간다)이다.
+   */
+  signedOutRedirectTo: string;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

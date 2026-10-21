@@ -30,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [user, setUser] = useState<UserResponse | null>(null);
   const [signedOutByUser, setSignedOutByUser] = useState(false);
+  const [signedOutRedirectTo, setSignedOutRedirectTo] = useState('/');
   // 다시 확인할 때마다 올린다 — 이미 'checking'인 상태에서 다시 확인이 시작돼도 복원 effect가 다시 돈다.
   const [checkRound, setCheckRound] = useState(0);
   // 진행 중인 로그아웃 수. 로그아웃은 서버 폐기를 최대 5초 기다린 뒤 비로그인으로 바뀌는데, 그사이 다른 경로가 먼저
@@ -149,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     pendingLogouts.current += 1;
     advanceSessionGeneration();
+    setSignedOutRedirectTo('/');
     try {
       await revokeSessionWithinDeadline();
     } finally {
@@ -161,11 +163,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 회원탈퇴 성공 직후 — 서버가 이 사용자의 Refresh Token을 전부 폐기했고(UserService.withdraw) 상태 캐시도
   // WITHDRAWN이라 기존 Access Token도 거부된다. 그래서 /logout을 부르지 않고 logout()의 로컬 정리 단계만 한다.
   // 세대를 먼저 올려, 진행 중이던 복원·재발급 결과가 정리된 세션을 되살리지 않게 한다.
-  const endSession = useCallback(() => {
-    advanceSessionGeneration();
-    tokenStorage.clearTokens();
-    becomeAnonymous(true);
-  }, [becomeAnonymous]);
+  // 비밀번호 변경(MY-05) 성공 직후도 같다 — 서버가 Refresh Token을 전부 폐기하고 컷오프를 걸었다. 그때는 가드가 로그인
+  // 화면으로 보내도록 목적지를 함께 기록한다(화면에서 navigate와 세션 정리를 같이 부르면 라우터의 전환 갱신보다 인증 상태
+  // 갱신이 먼저 그려져 가드가 HOME-01로 보낼 수 있다 — 가드 한 곳에서 이동하게 한다).
+  const endSession = useCallback(
+    (options?: { redirectTo?: string }) => {
+      advanceSessionGeneration();
+      tokenStorage.clearTokens();
+      setSignedOutRedirectTo(options?.redirectTo ?? '/');
+      becomeAnonymous(true);
+    },
+    [becomeAnonymous],
+  );
+
+  const applyUserUpdate = useCallback((next: UserResponse) => {
+    setUser((previous) => (previous !== null && previous.userId !== next.userId ? previous : next));
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -175,9 +188,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signup,
       logout,
       endSession,
+      applyUserUpdate,
       signedOutByUser,
+      signedOutRedirectTo,
     }),
-    [status, user, login, signup, logout, endSession, signedOutByUser],
+    [status, user, login, signup, logout, endSession, applyUserUpdate, signedOutByUser, signedOutRedirectTo],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

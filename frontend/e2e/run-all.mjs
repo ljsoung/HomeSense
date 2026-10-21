@@ -54,6 +54,7 @@ const SCRIPTS = [
   'my03-notification-settings-check',
   // MY-04 알림 이력 — 읽음·딥링크·비대기 이동·chip 전환·번호형/무한 스크롤·빈 상태·오류·로그인 복귀(390/768/1280). 백엔드 불필요.
   'my04-notifications-check',
+  'my05-profile-edit-check',
   // MAP-01 지도 — 가짜 카카오 SDK(fakeKakaoSdk.js)로 목록·팝업·잘림·API 실패·SDK 차단·모바일 시트·로그인 복귀·DTL-01 진입. 백엔드 불필요.
   'map01-check',
 ];

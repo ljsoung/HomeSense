@@ -81,8 +81,9 @@ async function open(viewport, { loggedIn = true, api: apiOverrides = {} } = {}) 
       return json(200, okBody(USER));
     }
     if (path === '/api/users/me' && request.method() === 'DELETE') {
-      // 실제 백엔드 응답과 같다: UserService.withdraw() → InvalidCredentialsException(401 INVALID_CREDENTIALS).
-      if (api.withdraw === 'fail') return json(401, errBody('INVALID_CREDENTIALS', '비밀번호가 일치하지 않습니다'));
+      // 실제 백엔드 응답과 같다: UserService.withdraw() → InvalidCurrentPasswordException(400) / 공용 확인 잠금이면 429(2026-10-19).
+      if (api.withdraw === 'fail') return json(400, errBody('INVALID_CURRENT_PASSWORD', '현재 비밀번호가 일치하지 않습니다'));
+      if (api.withdraw === 'locked') return json(429, errBody('PASSWORD_CONFIRM_LOCKED', '비밀번호 확인에 여러 번 실패했습니다. 잠시 후 다시 시도해주세요'));
       return json(200, okBody(null));
     }
     if (path === '/api/favorites/properties') {
@@ -307,11 +308,17 @@ async function scenarioWithdraw(label, viewport) {
   await dialog.getByText('안내 사항을 확인했습니다').click();
   ok(`${label} 6: 체크하면 활성`, await submit.isEnabled());
   await submit.click();
-  ok(`${label} 6: 실패 시 다이얼로그 안 서버 메시지`, await dialog.getByText('비밀번호가 일치하지 않습니다').waitFor({ timeout: 5000 }).then(() => true, () => false));
+  ok(`${label} 6: 실패(400) 시 다이얼로그 안 서버 메시지`, await dialog.getByText('현재 비밀번호가 일치하지 않습니다').waitFor({ timeout: 5000 }).then(() => true, () => false));
   ok(`${label} 6: 실패 시 /my에 머묾·토큰 유지`, path(page) === '/my' && (await tokens(page)).every((t) => t !== null));
-  ok(`${label} 6: 실패 시 토큰 재발급 0회(비즈니스 401)`, !calls.some((c) => c.path === '/api/auth/refresh'));
+  ok(`${label} 6: 실패 시 토큰 재발급 0회`, !calls.some((c) => c.path === '/api/auth/refresh'));
   ok(`${label} 6: 실패 시 헤더는 여전히 로그인 상태`, await page.locator('header:visible').first().getByRole('button', { name: /계정 메뉴/ }).isVisible());
   ok(`${label} 6: 실패 후 비밀번호 칸으로 포커스`,await dialog.getByLabel('비밀번호 확인').evaluate((el) => el === document.activeElement));
+
+  api.withdraw = 'locked';
+  await dialog.getByLabel('비밀번호 확인').fill('Passw0rd!');
+  await submit.click();
+  ok(`${label} 6: 확인 잠금(429) 시 다이얼로그 안 서버 메시지·머묾`, await dialog.getByText('비밀번호 확인에 여러 번 실패했습니다. 잠시 후 다시 시도해주세요')
+    .waitFor({ timeout: 5000 }).then(() => true, () => false) && path(page) === '/my' && (await tokens(page)).every((t) => t !== null));
 
   api.withdraw = 'ok';
   await dialog.getByLabel('비밀번호 확인').fill('Passw0rd!');
@@ -377,13 +384,12 @@ async function scenarioKeyboard(label, viewport) {
 
 async function scenarioPlaceholders(label, viewport) {
   const { context, page } = await open(viewport);
-  // MY-02(/favorites)는 2026-10-02, MY-03(/notifications/settings)은 2026-10-07, MY-04(/notifications)는 2026-10-15 구현됐다 —
-  // my02·my03·my04 e2e가 검증한다.
-  for (const [to, id] of [['/my/profile', 'MY-05']]) {
-    await page.goto(`${BASE}${to}`);
-    ok(`${label} 5절: ${to} 준비 중(${id})`, await page.getByText(id, { exact: true }).waitFor({ timeout: 5000 }).then(() => true, () => false)
-      && (await page.getByText('준비 중인 화면입니다.').isVisible()));
-  }
+  // 마이페이지 하위 화면은 모두 구현됐다(MY-02 2026-10-02, MY-03 2026-10-07, MY-04 2026-10-15, MY-05 2026-10-19) — 각 e2e가 검증한다.
+  // 여기서는 MY-01 "회원정보 수정"의 목적지(/my/profile)가 준비 중 화면이 아니라 MY-05인지만 본다.
+  await page.goto(`${BASE}/my/profile`);
+  ok(`${label} 5절: /my/profile → MY-05 회원정보 수정`,
+    await page.getByRole('heading', { name: '회원정보 수정', level: 1 }).waitFor({ timeout: 5000 }).then(() => true, () => false)
+      && (await page.getByText('준비 중인 화면입니다.').count()) === 0);
   await context.close();
   const anon = await open(viewport, { loggedIn: false });
   await anon.page.goto(`${BASE}/my/profile`);
