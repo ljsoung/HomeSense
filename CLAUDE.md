@@ -1190,9 +1190,9 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 - **테이블정의서 3.5절 `price_change_threshold_pct`: 허용 범위 0~20 정수(API 검증, 컬럼은 DECIMAL(4,1) 그대로)(2026-10-07).**
 - 3.3절 SVC-CPX-01 `searchInBounds()`·API-CPX-01 `GET /map`: 필터가 `/search`와 같은 이름·같은 조건 코드, 응답 `{items, truncated, limit}`, 항목 필드는 `ComplexSummaryResponse`와 같은 이름 + latitude·longitude·locationPrecision·precisionBadge, 정렬 complex_id 해시 순(결정적), 상한 설정값(기본 500), bounds 범위 검증(위도 ±90·경도 ±180·남서 ≤ 북동)(2026-10-13, "MAP-01 백엔드 보강" 절).
 - **UI정의서 MAP-01 "카카오맵 REST API(좌표·클러스터링)": 클러스터링은 REST가 아니라 JS SDK clusterer가 한다(2026-10-13).**
-- 5.1절 COM-SEC-01 `JwtAuthenticationFilter`·`RestAuthenticationEntryPoint`: Redis 장애 시 인증을 채우지 않고 비로그인으로 넘김(요청 속성 `AUTH_DEGRADED`, DB 폴백 없음), 이 요청이 인증 필요 API에 닿으면 401 대신 503 `AUTH_TEMPORARILY_UNAVAILABLE`(2026-10-21, "Redis 장애 시 강등과 막힌 쪽 실패" 절).
-- 5.4절 COM-CACHE-01: 캐시 조회 실패는 미스로 원본 조회, 저장·삭제·비우기 실패는 WARN 후 무시(`CacheErrorHandler`), 장애 중 evict 실패 시 복구 뒤 TTL까지 이전 값 노출 한계(2026-10-21).
-- 5.3절 COM-EXC-01: Redis 인프라 예외는 500 대신 503 `SERVICE_TEMPORARILY_UNAVAILABLE`(고정 문구) — 예외표에 추가(2026-10-21).
+- COM-SEC-01 `JwtAuthenticationFilter`·`RestAuthenticationEntryPoint`: Redis 장애 시 인증을 채우지 않고 비로그인으로 넘김(요청 속성 `AUTH_DEGRADED`, DB 폴백 없음), 이 요청이 인증 필요 API에 닿으면 401 대신 503 `AUTH_TEMPORARILY_UNAVAILABLE`(2026-10-21, "Redis 장애 시 강등과 막힌 쪽 실패" 절).
+- COM-CACHE-01: 캐시 조회 실패는 미스로 원본 조회, 저장·삭제·비우기 실패는 WARN 후 무시(`CacheErrorHandler`), 장애 중 evict 실패 시 복구 뒤 TTL까지 이전 값 노출 한계(2026-10-21).
+- COM-EXC-01: Redis 인프라 예외는 500 대신 503 `SERVICE_TEMPORARILY_UNAVAILABLE`(고정 문구) — 예외표에 추가(2026-10-21).
 - 3.1절 SVC-AUTH-01 `login()`·`reactivate()` 처리 로직·예외표: 회원 조회 전 `login:fail:{email}` 원자 예약(첫 시도부터 5분 안에 5회 초과면 비교 없이 429), 없는 이메일도 카운트·더미 BCrypt 비교 후 401, 성공 시 초기화 대신 자기 예약 하나만 되돌림(이전 실패는 TTL까지 남음), 비활성 계정·철회 불가는 실패로 셈(2026-10-21, "SVC-AUTH-01 로그인 실패 잠금 원자화" 절).
 - 3.2절 SVC-USER-01 `updateUser()`·`withdraw()`: 비밀번호 불일치 400 `INVALID_CURRENT_PASSWORD`(`InvalidCredentialsException` 401 아님), 두 기능 공용 확인 실패 잠금(5회·5분, 429 `PASSWORD_CONFIRM_LOCKED`), newPassword가 있으면 currentPassword 필수(400 필드 오류), 비밀번호 변경 성공 시 Refresh Token 전체 폐기 + Access Token 컷오프, 하단 메모 "MY-01 회원정보 수정은 인라인 편집/모달" 정정(UI정의서 v2.1은 MY-05 독립 화면)(2026-10-19, "SVC-USER-01 회원정보 수정 보강" 절).
 - 3.8절 SVC-NTF-01 `getNotifications()`: 정렬 고정(`created_at DESC, notification_id DESC`, 요청 정렬 무시)·페이지 크기 50건까지·조회 기간 창(발생 후 6개월, `homesense.notification.history.retention-months`), 응답 `ApiResponse<List<NotificationResponse>>`+`pageMeta`(딥링크 3종·`createdAt`·`isRead`)(2026-10-15, "MY-04 백엔드 보강" 절).
