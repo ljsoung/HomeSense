@@ -21,6 +21,7 @@ import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * TradeChunkLoaderTest의 upsert 반환값 테스트는 TradeRepository#upsert를 목킹해 "정확한 인자로
@@ -49,7 +50,7 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class TradeChunkLoaderMariaDbIT {
+class TradeChunkLoaderMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

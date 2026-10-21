@@ -33,6 +33,7 @@ import com.jiseong.homesense.auth.exception.ReactivationPeriodExpiredException;
 import com.jiseong.homesense.common.exception.InvalidCredentialsException;
 import com.jiseong.homesense.user.service.WithdrawalTestSeed;
 import com.jiseong.homesense.user.service.WithdrawnUserPurgeService;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * SVC-AUTH-01.reactivate()를 실제 MariaDB 위에서 끝까지 태운다. Mockito 단위 테스트(AuthServiceTest)는 "조건부
@@ -47,7 +48,7 @@ import com.jiseong.homesense.user.service.WithdrawnUserPurgeService;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class AuthServiceReactivateMariaDbIT {
+class AuthServiceReactivateMariaDbIT extends RedisContainerSupport {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 5, 0, 0);

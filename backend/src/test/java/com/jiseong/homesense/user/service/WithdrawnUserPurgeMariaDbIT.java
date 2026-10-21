@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jiseong.homesense.batch.scheduler.WithdrawnUserPurgeScheduler;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * BAT-USR-01 — 실제 MariaDB 위에서 "조건부 DELETE 1문 + DB CASCADE" 파기가 의도대로 동작하는지 검증한다. 이 검증은
@@ -46,7 +47,7 @@ import com.jiseong.homesense.user.repository.UserRepository;
 @Testcontainers
 @Tag("integration")
 @ExtendWith(OutputCaptureExtension.class)
-class WithdrawnUserPurgeMariaDbIT {
+class WithdrawnUserPurgeMariaDbIT extends RedisContainerSupport {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 21, 5, 0, 0);

@@ -37,21 +37,22 @@ import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * COM-CACHE-01 캐시 히트 경로를 실제 Redis로 검증한다. 리스트를 캐싱하는 세 캐시가 첫 호출은 200인데 캐시
  * 히트부터 {@code SerializationException}으로 500을 냈다(2026-09-23 발견) — Mockito·WebMvc 슬라이스는 Redis
  * 읽기를 거치지 않아 잡지 못했다. 같은 요청을 두 번 보내 두 번째가 캐시에서 읽혀도 같은 응답인지 본다.
  *
- * <p>Redis는 Testcontainers가 아니라 로컬 Redis(localhost:6379)를 쓴다 — 다른 IT와 같은 알려진 격리 한계다
- * (CLAUDE.md 백로그). 그래서 이 네 캐시를 테스트 앞뒤로 비운다.
+ * <p>Redis는 Testcontainers Redis({@link RedisContainerSupport} — 클래스마다 비운다)를 쓴다. 같은 클래스의
+ * 테스트끼리 엔트리가 섞이지 않게 이 네 캐시를 테스트 앞뒤로 비운다.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
 @Transactional
 @Tag("integration")
-class CacheHitMariaDbIT {
+class CacheHitMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

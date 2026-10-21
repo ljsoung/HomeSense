@@ -43,6 +43,7 @@ import com.jiseong.homesense.trade.entity.DealCategory;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.user.service.WithdrawalTestSeed;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * BAT-NTF-01 — 실제 MariaDB 위에서 평가 쿼리(설정 ⨝ 관심 매물/지역 ⨝ 회원, created_at 기준 신규 거래, 기준 평균
@@ -63,7 +64,7 @@ import com.jiseong.homesense.user.service.WithdrawalTestSeed;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class WatchConditionEvaluatorMariaDbIT {
+class WatchConditionEvaluatorMariaDbIT extends RedisContainerSupport {
 
     private static final LocalDateTime RUN = LocalDateTime.of(2026, 10, 6, 3, 0, 0);
     private static final LocalDate RUN_DATE = LocalDate.of(2026, 10, 6);

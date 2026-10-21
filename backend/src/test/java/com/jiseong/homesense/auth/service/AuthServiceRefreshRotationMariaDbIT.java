@@ -28,6 +28,7 @@ import com.jiseong.homesense.auth.exception.InvalidRefreshTokenException;
 import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.service.WithdrawalTestSeed;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * SVC-AUTH-01.refreshAccessToken() Rotation의 동시성 전제와, Rotation+logout()이 얽히는 재사용 탐지
@@ -53,7 +54,7 @@ import com.jiseong.homesense.user.service.WithdrawalTestSeed;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class AuthServiceRefreshRotationMariaDbIT {
+class AuthServiceRefreshRotationMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

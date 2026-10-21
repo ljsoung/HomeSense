@@ -46,6 +46,7 @@ import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.trade.entity.RentType;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * API-CPX-01 GET /api/complexes/map을 실제 MariaDB로 검증한다 — 좌표 BETWEEN 경계, 좌표 NULL 제외, SRCH-01과 같은
@@ -60,7 +61,7 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
 @Testcontainers
 @Transactional
 @Tag("integration")
-class ComplexMapSearchMariaDbIT {
+class ComplexMapSearchMariaDbIT extends RedisContainerSupport {
 
     static final int LIMIT = 2;
 

@@ -41,6 +41,7 @@ import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.RentType;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * API-CPX-01 regionCode 계층 검색·keyword 필터·전세/월세 구분과 API-SEARCH-01 기록 분리를 실제 MariaDB로
@@ -55,7 +56,7 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
 @Testcontainers
 @Transactional
 @Tag("integration")
-class ComplexSearchRegionKeywordMariaDbIT {
+class ComplexSearchRegionKeywordMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

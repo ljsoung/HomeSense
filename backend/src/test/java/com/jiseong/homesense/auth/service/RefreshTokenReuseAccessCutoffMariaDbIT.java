@@ -43,6 +43,7 @@ import com.jiseong.homesense.common.security.AccessTokenEpochService;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.service.WithdrawalTestSeed;
 import com.jayway.jsonpath.JsonPath;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * 재사용 탐지 시 이미 발급된 Access Token도 즉시 무효화되는지를 실제 필터 체인(MockMvc)·MariaDB·Redis로
@@ -58,15 +59,15 @@ import com.jayway.jsonpath.JsonPath;
  * 이 IT는 {@code Thread.sleep(1100)}으로 초 경계를 넘겨 그 결함을 가리고 있었다(코드리뷰 P1). 같은 초에
  * 발급되게 맞추고, 그렇지 못한 실행은 건너뜀으로 표시한다({@code assumeSameSecond}).
  *
- * <p>Redis는 로컬 Redis(localhost:6379)를 쓴다(다른 IT와 같은 알려진 격리 한계, CLAUDE.md 백로그). 다른
- * IT가 같은 userId로 남긴 {@code user:status}/{@code user:tokenEpoch}/{@code login:fail} 키가 결과를
+ * <p>Redis는 Testcontainers Redis({@link RedisContainerSupport} — 클래스마다 비운다)를 쓴다. 같은 클래스의
+ * 다른 테스트가 같은 userId로 남긴 {@code user:status}/{@code user:tokenEpoch}/{@code login:fail} 키가 결과를
  * 바꾸지 않도록 매 테스트 전에 지운다.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
 @Tag("integration")
-class RefreshTokenReuseAccessCutoffMariaDbIT {
+class RefreshTokenReuseAccessCutoffMariaDbIT extends RedisContainerSupport {
 
     private static final String EMAIL = "reuse-cutoff@test.com";
     private static final String PASSWORD = "Abcd1234!";

@@ -32,6 +32,7 @@ import com.jiseong.homesense.common.security.JwtAuthenticationFilter;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * {@code AuthServiceTest.resetPassword_성공하면_...}은 UserRepository/RefreshTokenRepository를 전부
@@ -49,14 +50,14 @@ import com.jiseong.homesense.user.repository.UserRepository;
  *
  * <p>Redis 연결은 LoginAttemptService/UserStatusCacheService가 이미 요구하던 인프라라 이 IT로 새로
  * 추가되는 테스트 인프라 요구사항은 없다(CLAUDE.md COM-SEC-01/02 절 참고) — {@link PasswordResetTokenService}도
- * 같은 로컬 Redis(localhost:6379)를 그대로 쓴다.
+ * 같은 Redis(Testcontainers, {@link RedisContainerSupport})를 그대로 쓴다.
  *
  * <p>Docker가 필요해 기본 `./gradlew test`에서는 제외되고 `./gradlew integrationTest`로만 실행된다.
  */
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class AuthServicePasswordResetMariaDbIT {
+class AuthServicePasswordResetMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

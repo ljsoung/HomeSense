@@ -26,6 +26,7 @@ import com.jiseong.homesense.auth.dto.SignupCommand;
 import com.jiseong.homesense.auth.exception.DuplicateEmailException;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * AuthServiceTest의 "동시_가입_경쟁" 테스트는 {@code userRepository.save()}를 목킹해
@@ -52,7 +53,7 @@ import com.jiseong.homesense.user.repository.UserRepository;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class AuthServiceMariaDbIT {
+class AuthServiceMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

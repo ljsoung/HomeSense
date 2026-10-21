@@ -29,20 +29,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.jiseong.homesense.batch.geocoding.ComplexGeocodingService.StopReason;
 import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.complex.repository.ComplexRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * BAT-GEO-01 좌표 쓰기를 실제 MariaDB로 검증한다 — 조건부 네이티브 UPDATE({@code latitude IS NULL})가 이미 좌표가 있는
  * 단지를 덮지 않는지, 중단 후 다시 실행하면 남은 단지부터 이어지는지는 Mockito로 증명할 수 없다.
  *
- * <p>카카오 클라이언트와 Redis 상태({@link GeocodingRedisState})는 목으로 둔다. 이 IT는 개발용 로컬 Redis를 쓰게 되는데
- * (CLAUDE.md 백로그의 알려진 격리 한계), 실제 Redis 상태를 쓰면 오늘 호출 카운터(geo:calls)가 늘어 실제 쿼터 계산을
- * 흐린다. Redis 동작은 GeocodingRedisStateTest가 맡는다.
+ * <p>카카오 클라이언트와 Redis 상태({@link GeocodingRedisState})는 목으로 둔다. Redis 상태(호출 카운터·
+ * 못 찾음 표시)는 이 IT의 대상이 아니다 — Redis 동작은 GeocodingRedisStateTest가 맡는다.
  */
 @SpringBootTest
 @Testcontainers
 @Transactional
 @Tag("integration")
-class ComplexGeocodingMariaDbIT {
+class ComplexGeocodingMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

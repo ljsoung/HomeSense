@@ -38,6 +38,7 @@ import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * NotificationService.updateSettings()의 최초 구현은 "조회 → 있으면 UPDATE, 없으면 INSERT"를
@@ -64,7 +65,7 @@ import com.jiseong.homesense.user.repository.UserRepository;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class NotificationServiceMariaDbIT {
+class NotificationServiceMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")
