@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,6 +19,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -119,8 +122,52 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.success").value(false));
     }
 
+    @Test
+    void Redis_연결_실패는_503_SERVICE_TEMPORARILY_UNAVAILABLE이고_내부_메시지를_노출하지_않는다() throws Exception {
+        mockMvc.perform(get("/test/redis-down"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("SERVICE_TEMPORARILY_UNAVAILABLE"))
+                .andExpect(jsonPath("$.error.message").value(not(containsString("6379"))));
+
+        verify(auditLogger, never()).logBatchFailure(any(), any());
+    }
+
+    @Test
+    void Redis_명령_타임아웃도_503이다() throws Exception {
+        mockMvc.perform(get("/test/redis-timeout"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error.code").value("SERVICE_TEMPORARILY_UNAVAILABLE"));
+    }
+
+    @Test
+    void Redis가_아닌_DataAccessException은_그대로_500이다() throws Exception {
+        mockMvc.perform(get("/test/db-timeout"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error.code").value("INTERNAL_SERVER_ERROR"));
+
+        verify(auditLogger).logBatchFailure(eq("COM-EXC-01"), any(QueryTimeoutException.class));
+    }
+
     @RestController
     static class TestController {
+
+        @GetMapping("/test/redis-down")
+        void throwRedisDown() {
+            throw new RedisConnectionFailureException("Unable to connect to localhost:6379");
+        }
+
+        @GetMapping("/test/redis-timeout")
+        void throwRedisTimeout() {
+            throw new QueryTimeoutException("Redis command timed out",
+                    new io.lettuce.core.RedisCommandTimeoutException("Command timed out after 1 second(s)"));
+        }
+
+        @GetMapping("/test/db-timeout")
+        void throwDbTimeout() {
+            // JDBC 쿼리 타임아웃 — 원인이 Lettuce가 아니라 Redis 장애가 아니다.
+            throw new QueryTimeoutException("Statement cancelled due to timeout", new java.sql.SQLTimeoutException());
+        }
 
         @GetMapping("/test/business-exception")
         void throwBusiness() {
