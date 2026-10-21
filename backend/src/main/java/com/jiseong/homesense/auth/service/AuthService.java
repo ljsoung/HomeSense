@@ -60,6 +60,7 @@ public class AuthService {
     private final PasswordResetTokenService passwordResetTokenService;
     private final PasswordResetNotifier passwordResetNotifier;
     private final UserSessionRevoker userSessionRevoker;
+    private final DummyPasswordHash dummyPasswordHash;
 
     public SignupResponse signup(SignupCommand cmd) {
         if (userRepository.existsByEmail(cmd.email())) {
@@ -93,11 +94,13 @@ public class AuthService {
     public LoginResponse login(LoginCommand cmd) {
         User user = authenticate(cmd.email(), cmd.password());
 
+        // 비활성 계정은 토큰을 발급하지 않으므로 예약을 되돌리지 않는다(실패로 센다).
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new AccountNotActiveException(user.getStatus());
         }
 
         IssuedTokens tokens = loginInternal(user);
+        loginAttemptService.release(User.normalizeEmail(cmd.email()));
         return new LoginResponse(tokens.accessToken(), tokens.refreshToken(), tokens.expiresIn());
     }
 
@@ -130,6 +133,7 @@ public class AuthService {
         // 벌크 UPDATE가 영속성 컨텍스트를 비웠으므로(clearAutomatically) 갱신된 행을 다시 읽는다.
         User reactivated = userRepository.findById(user.getUserId()).orElseThrow(ReactivationPeriodExpiredException::new);
         IssuedTokens tokens = loginInternal(reactivated);
+        loginAttemptService.release(User.normalizeEmail(cmd.email()));
 
         log.atInfo()
                 .addKeyValue("auditEvent", "ACCOUNT_REACTIVATED")
@@ -139,26 +143,30 @@ public class AuthService {
     }
 
     /**
-     * login()·reactivate()가 공유하는 자격 증명 검증: 잠금 확인 → 정규화한 이메일로 조회 → BCrypt 매칭 →
-     * 실패 카운트 증가/초기화. 존재하지 않는 이메일과 비밀번호 불일치는 같은 {@link InvalidCredentialsException}
-     * (동일 문구)이라 둘을 구분할 수 없다. 계정 status는 여기서 보지 않는다 — 호출자가 비밀번호 검증 이후에
-     * 판단한다.
+     * login()·reactivate()가 공유하는 자격 증명 검증: 시도 예약 → 정규화한 이메일로 조회 → BCrypt 비교. 존재하지 않는 이메일과
+     * 비밀번호 불일치는 같은 {@link InvalidCredentialsException}(동일 문구)이다. 계정 status는 여기서 보지 않는다 — 호출자가
+     * 비밀번호 검증 이후에 판단한다.
+     *
+     * <p>예약은 회원 조회보다 먼저다 — 없는 이메일도 같은 카운트·잠금을 받아 429 여부로 가입 여부를 알 수 없다. 없는 이메일도
+     * 더미 해시와 한 번 비교해 응답 시간도 맞춘다. 예약은 여기서 되돌리지 않는다 — 호출자가 토큰을 실제로 발급한 뒤에만
+     * {@link LoginAttemptService#release}로 되돌린다(실패·비활성 계정·철회 불가는 실패로 센다).
      */
     private User authenticate(String rawEmail, String password) {
         String normalizedEmail = User.normalizeEmail(rawEmail);
 
-        if (loginAttemptService.isLocked(normalizedEmail)) {
+        if (!loginAttemptService.tryReserve(normalizedEmail)) {
             throw new AccountLockedException();
         }
 
-        User user = userRepository.findByEmail(rawEmail).orElseThrow(InvalidCredentialsException::new);
-
-        if (!passwordEncoder.matches(password, user.getPassword())) {
-            loginAttemptService.recordFailure(normalizedEmail);
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+        if (user == null) {
+            dummyPasswordHash.compare(password);
             throw new InvalidCredentialsException();
         }
 
-        loginAttemptService.reset(normalizedEmail);
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new InvalidCredentialsException();
+        }
         return user;
     }
 

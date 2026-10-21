@@ -20,7 +20,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -42,8 +41,7 @@ import com.jiseong.homesense.support.RedisContainerSupport;
  * (3) 탈퇴 시 폐기된 refresh_token은 폐기 상태 그대로 남고 새 토큰이 추가되고, (4) 관심 매물·알림 설정 같은
  * 소유 데이터가 그대로 복구되는지를 커밋된 DB 상태로 확인한다.
  *
- * <p>{@link LoginAttemptService}(Redis)는 목으로 대체해 이 IT가 Redis 없이도 자기완결적으로 돌게 한다 —
- * package-private 클래스라 이 테스트가 같은 패키지에 있다.
+ * <p>로그인 시도 예약({@link LoginAttemptService})은 실제 Testcontainers Redis를 쓴다({@link RedisContainerSupport}).
  */
 @SpringBootTest
 @Testcontainers
@@ -81,8 +79,6 @@ class AuthServiceReactivateMariaDbIT extends RedisContainerSupport {
         }
     }
 
-    @MockitoBean
-    private LoginAttemptService loginAttemptService;
 
     @Autowired
     private AuthService authService;
