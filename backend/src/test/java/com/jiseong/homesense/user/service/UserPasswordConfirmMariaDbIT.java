@@ -233,9 +233,12 @@ class UserPasswordConfirmMariaDbIT extends RedisContainerSupport {
         assertThat(activeRefreshTokens()).isEqualTo(2);
     }
 
-    /** 성공해도 카운터를 지우지 않는다 — 성공한 시도도 센 채로 TTL(5분)을 다시 걸고, 잠금은 TTL 만료로만 풀린다. */
+    /**
+     * 성공해도 카운터를 지우지 않는다 — 성공한 시도도 센 채로 남고, 잠금은 TTL 만료로만 풀린다. 미리 심은 키에는 TTL이 없다 — 예약이
+     * TTL 없는 키에 TTL(5분)을 걸어 영구 잠금이 생기지 않는다(AttemptLimiter).
+     */
     @Test
-    void 탈퇴에_성공해도_공용_카운트는_남고_TTL이_다시_걸린다() throws Exception {
+    void 탈퇴에_성공해도_공용_카운트는_남고_TTL_없던_키도_TTL을_받는다() throws Exception {
         redis.opsForValue().set("password-confirm:fail:" + userId, "2");
 
         withdraw(PASSWORD).andExpect(status().isOk());
@@ -283,9 +286,11 @@ class UserPasswordConfirmMariaDbIT extends RedisContainerSupport {
             pool.shutdownNow();
         }
 
-        // 잠긴 뒤의 시도는 카운트를 늘리지 않는다. TTL은 걸려 있다.
-        assertThat(failCount()).isEqualTo("5");
-        assertThat(redis.getExpire("password-confirm:fail:" + userId)).isPositive();
+        // 거부된 시도도 카운트에 남는다(공용 제한기 — 예전엔 잠긴 뒤 늘지 않았다). TTL은 첫 예약 때 건 것 그대로라 잠금이 연장되지 않는다.
+        assertThat(failCount()).isEqualTo(String.valueOf(threads));
+        assertThat(redis.getExpire("password-confirm:fail:" + userId, TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(FailedAttemptPolicy.LOCK_TTL.toMillis());
         assertThat(storedStatus()).isEqualTo("ACTIVE");
     }
 
