@@ -32,6 +32,7 @@ import com.jiseong.homesense.common.security.JwtAuthenticationFilter;
 import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * {@code AuthServiceTest.resetPassword_성공하면_...}은 UserRepository/RefreshTokenRepository를 전부
@@ -49,14 +50,14 @@ import com.jiseong.homesense.user.repository.UserRepository;
  *
  * <p>Redis 연결은 LoginAttemptService/UserStatusCacheService가 이미 요구하던 인프라라 이 IT로 새로
  * 추가되는 테스트 인프라 요구사항은 없다(CLAUDE.md COM-SEC-01/02 절 참고) — {@link PasswordResetTokenService}도
- * 같은 로컬 Redis(localhost:6379)를 그대로 쓴다.
+ * 같은 Redis(Testcontainers, {@link RedisContainerSupport})를 그대로 쓴다.
  *
  * <p>Docker가 필요해 기본 `./gradlew test`에서는 제외되고 `./gradlew integrationTest`로만 실행된다.
  */
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class AuthServicePasswordResetMariaDbIT {
+class AuthServicePasswordResetMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")
@@ -226,7 +227,7 @@ class AuthServicePasswordResetMariaDbIT {
      * Redis 카운터가 그대로 남아있어 새 비밀번호로 곧바로 로그인해도 TTL(5분)이 지날 때까지 잠금에
      * 계속 막혔다. 이 IT는 실제 Redis 위에서 잠금→재설정→잠금해제 전체 흐름을 재현한다 — Mockito로는
      * "resetPassword()가 loginAttemptService.reset()을 호출했다"까지만 증명하고, 그 호출이 실제로
-     * isLocked()의 판정을 뒤집는지는(같은 키를 참조하는지, TTL이 아니라 값 자체가 지워지는지 등) 증명할
+     * 잠금 판정을 뒤집는지는(같은 키를 참조하는지, TTL이 아니라 값 자체가 지워지는지 등) 증명할
      * 수 없다.
      */
     @Test
@@ -237,12 +238,12 @@ class AuthServicePasswordResetMariaDbIT {
         String rawToken = passwordResetTokenService.issueToken(user.getUserId());
 
         for (int i = 0; i < 5; i++) {
-            loginAttemptService.recordFailure(email);
+            assertThat(loginAttemptService.tryReserve(email)).isTrue();
         }
-        assertThat(loginAttemptService.isLocked(email)).isTrue();
+        assertThat(loginAttemptService.tryReserve(email)).isFalse(); // 6번째는 잠김
 
         authService.resetPassword(rawToken, "NewAbcd1234!");
 
-        assertThat(loginAttemptService.isLocked(email)).isFalse();
+        assertThat(loginAttemptService.tryReserve(email)).isTrue();
     }
 }

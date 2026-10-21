@@ -22,6 +22,7 @@ import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * UserServiceTest의 withdraw() 성공 테스트는 UserRepository/RefreshTokenRepository를 전부 Mockito로
@@ -46,7 +47,7 @@ import com.jiseong.homesense.user.repository.UserRepository;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class UserServiceMariaDbIT {
+class UserServiceMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")
@@ -83,8 +84,8 @@ class UserServiceMariaDbIT {
         RefreshToken token = refreshTokenRepository.saveAndFlush(
                 RefreshToken.issue(user, "token-hash", LocalDateTime.now().plusDays(1)));
 
-        // 탈퇴도 공용 비밀번호 확인 잠금(password-confirm:fail:{userId})을 본다. IT끼리 로컬 Redis를 공유하고 userId가 컨테이너마다
-        // 1부터 시작하므로, 다른 IT가 같은 userId로 남긴 카운트가 이 탈퇴를 429로 막지 않게 먼저 지운다(CLAUDE.md 백로그 — Redis 격리).
+        // 탈퇴도 공용 비밀번호 확인 잠금(password-confirm:fail:{userId})을 본다. Redis는 클래스마다 비워지지만(RedisContainerSupport)
+        // 같은 클래스의 다른 테스트가 같은 userId로 카운트를 남겼을 수 있어 먼저 지운다.
         redis.delete("password-confirm:fail:" + user.getUserId());
         userService.withdraw(user.getUserId(), new WithdrawCommand("Abcd1234!"));
 

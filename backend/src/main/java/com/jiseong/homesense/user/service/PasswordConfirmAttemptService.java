@@ -1,12 +1,8 @@
 package com.jiseong.homesense.user.service;
 
-import java.util.List;
-
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
+import com.jiseong.homesense.common.security.AttemptLimiter;
 import com.jiseong.homesense.common.security.FailedAttemptPolicy;
 
 /**
@@ -16,8 +12,8 @@ import com.jiseong.homesense.common.security.FailedAttemptPolicy;
  * /api/auth/reactivate)로 계정을 가져갈 수 있다. 임계치·TTL은 로그인 실패 잠금과 같다({@link FailedAttemptPolicy}).
  * 카운터는 트랜잭션과 무관하게 남는다 — 실패 응답으로 롤백돼도 증가한 횟수는 유지돼야 한다.
  *
- * <p>시도는 비밀번호를 비교하기 <b>전에</b> {@link #tryAcquire}로 한 번에 확인·예약한다(Lua 스크립트 하나 — 조회와 증가 사이에
- * 다른 요청이 끼지 못한다). "잠금 확인 → BCrypt 비교 → 실패 기록"으로 나눠 두면 BCrypt 비교 시간 동안 같은 회원의 동시 요청이 모두
+ * <p>시도는 비밀번호를 비교하기 <b>전에</b> {@link #tryAcquire}로 한 번에 예약한다({@link AttemptLimiter} — Lua 스크립트 하나라
+ * 증가와 판정 사이에 다른 요청이 끼지 못한다). "잠금 확인 → BCrypt 비교 → 실패 기록"으로 나눠 두면 BCrypt 비교 시간 동안 같은 회원의 동시 요청이 모두
  * 잠금 확인을 통과해, 임계치(5회)를 넘는 추측이 동시에 평가됐다(코드리뷰 P2).
  *
  * <p>예약한 시도는 성공·실패와 무관하게 센다 — 성공해도 카운터를 지우지 않고, 잠금은 TTL 만료로만 풀린다. 비밀번호 확인 성공은
@@ -30,36 +26,17 @@ class PasswordConfirmAttemptService {
 
     private static final String KEY_PREFIX = "password-confirm:fail:";
 
-    /** 카운트가 임계치 미만이면 1 증가시키고 TTL을 다시 건 뒤 1, 이미 임계치 이상이면 아무것도 바꾸지 않고 0. */
-    private static final RedisScript<Long> ACQUIRE_SCRIPT = new DefaultRedisScript<>("""
-            local count = tonumber(redis.call('GET', KEYS[1]) or '0')
-            if count >= tonumber(ARGV[1]) then
-              return 0
-            end
-            redis.call('INCR', KEYS[1])
-            redis.call('PEXPIRE', KEYS[1], ARGV[2])
-            return 1
-            """, Long.class);
+    private final AttemptLimiter attemptLimiter;
 
-    private final StringRedisTemplate redisTemplate;
-
-    PasswordConfirmAttemptService(StringRedisTemplate redisTemplate) {
-        this.redisTemplate = redisTemplate;
+    PasswordConfirmAttemptService(AttemptLimiter attemptLimiter) {
+        this.attemptLimiter = attemptLimiter;
     }
 
     /**
-     * 시도 하나를 예약한다. 잠겨 있으면(TTL 안에 예약된 시도가 이미 {@link FailedAttemptPolicy#MAX_ATTEMPTS}회) false이고 카운터·TTL은
-     * 그대로다(잠긴 뒤의 시도가 잠금을 늘리지 않는다 — 예전 동작과 같다). true면 이 시도가 카운트에 들어가고 TTL이
-     * {@link FailedAttemptPolicy#LOCK_TTL}로 다시 걸린다.
+     * 시도 하나를 예약한다. 예약 뒤 TTL 안의 시도가 {@link FailedAttemptPolicy#MAX_ATTEMPTS}회를 넘으면 false(잠김 — 비교하지
+     * 않는다)이고, 거부된 시도도 카운트에 남지만 TTL은 늘지 않는다. TTL은 첫 시도 때 {@link FailedAttemptPolicy#LOCK_TTL}로 걸린다.
      */
     boolean tryAcquire(Long userId) {
-        Long acquired = redisTemplate.execute(ACQUIRE_SCRIPT, List.of(key(userId)),
-                String.valueOf(FailedAttemptPolicy.MAX_ATTEMPTS),
-                String.valueOf(FailedAttemptPolicy.LOCK_TTL.toMillis()));
-        return acquired != null && acquired == 1L;
-    }
-
-    private String key(Long userId) {
-        return KEY_PREFIX + userId;
+        return attemptLimiter.reserve(KEY_PREFIX + userId, FailedAttemptPolicy.MAX_ATTEMPTS, FailedAttemptPolicy.LOCK_TTL);
     }
 }

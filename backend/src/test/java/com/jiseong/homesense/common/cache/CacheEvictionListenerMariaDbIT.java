@@ -34,6 +34,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jiseong.homesense.batch.matcher.LegalDistrictCodeLoader;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * CacheEvictionListener.onLegalDistrictCodeReloaded()를 {@code @EventListener}에서
@@ -59,7 +60,7 @@ import com.jiseong.homesense.batch.matcher.LegalDistrictCodeLoader;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class CacheEvictionListenerMariaDbIT {
+class CacheEvictionListenerMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

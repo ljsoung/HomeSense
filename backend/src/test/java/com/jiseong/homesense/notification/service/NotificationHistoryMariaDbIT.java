@@ -32,6 +32,7 @@ import com.jiseong.homesense.notification.entity.NotificationType;
 import com.jiseong.homesense.notification.exception.AccessDeniedException;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * SVC-NTF-01 알림 이력 조회(MY-04)를 실제 MariaDB로 확인한다 — 정렬 고정·보조 정렬(같은 created_at이 페이지 경계를 넘을 때
@@ -44,7 +45,7 @@ import com.jiseong.homesense.user.repository.UserRepository;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class NotificationHistoryMariaDbIT {
+class NotificationHistoryMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

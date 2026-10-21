@@ -52,20 +52,21 @@ import com.jiseong.homesense.common.security.JwtTokenProvider;
 import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.exception.InvalidCurrentPasswordException;
 import com.jiseong.homesense.user.exception.PasswordConfirmLockedException;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * MY-05 비밀번호 변경(PUT /api/users/me)과 탈퇴(DELETE /api/users/me)의 비밀번호 확인(공용 실패 잠금)을 실제 필터 체인(MockMvc)·MariaDB·Redis로 검증한다. UserServiceTest(Mockito)는
  * 세션 종료 호출 여부만 증명하고, (1) 그 호출이 이 회원의 Refresh Token을 실제로 모두 폐기하고 기존 Access Token을
  * JwtAuthenticationFilter에서 401로 만드는지, (2) 실패하면 비밀번호·닉네임·토큰이 커밋되지 않는지는 증명하지 못한다.
  *
- * <p>Redis는 로컬 Redis(localhost:6379)를 쓴다(다른 IT와 같은 알려진 격리 한계, CLAUDE.md 백로그). 매 테스트 전에 이
- * 회원의 키를 지운다.
+ * <p>Redis는 Testcontainers Redis({@link RedisContainerSupport} — 클래스마다 비운다)를 쓴다. 같은 클래스의 테스트끼리
+ * 섞이지 않게 매 테스트 전후로 이 회원의 키를 지운다.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
 @Tag("integration")
-class UserPasswordConfirmMariaDbIT {
+class UserPasswordConfirmMariaDbIT extends RedisContainerSupport {
 
     private static final String EMAIL = "password-confirm-it@test.com";
     private static final String PASSWORD = "Abcd1234!";
@@ -122,7 +123,7 @@ class UserPasswordConfirmMariaDbIT {
         accessToken = jwtTokenProvider.createAccessToken(userId, "USER");
     }
 
-    /** 로컬 Redis는 IT끼리 공유하고 userId가 컨테이너마다 1부터 시작한다 — 남긴 잠금 카운트가 다른 IT의 같은 userId를 막지 않게 지운다. */
+    /** 남긴 잠금 카운트가 같은 클래스의 다음 테스트를 막지 않게 지운다(다른 IT 클래스와는 RedisContainerSupport가 클래스마다 비워 격리된다). */
     @AfterEach
     void cleanUpRedis() {
         redis.delete(List.of("user:status:" + userId, "user:tokenEpochMs:" + userId, "password-confirm:fail:" + userId,
@@ -232,9 +233,12 @@ class UserPasswordConfirmMariaDbIT {
         assertThat(activeRefreshTokens()).isEqualTo(2);
     }
 
-    /** 성공해도 카운터를 지우지 않는다 — 성공한 시도도 센 채로 TTL(5분)을 다시 걸고, 잠금은 TTL 만료로만 풀린다. */
+    /**
+     * 성공해도 카운터를 지우지 않는다 — 성공한 시도도 센 채로 남고, 잠금은 TTL 만료로만 풀린다. 미리 심은 키에는 TTL이 없다 — 예약이
+     * TTL 없는 키에 TTL(5분)을 걸어 영구 잠금이 생기지 않는다(AttemptLimiter).
+     */
     @Test
-    void 탈퇴에_성공해도_공용_카운트는_남고_TTL이_다시_걸린다() throws Exception {
+    void 탈퇴에_성공해도_공용_카운트는_남고_TTL_없던_키도_TTL을_받는다() throws Exception {
         redis.opsForValue().set("password-confirm:fail:" + userId, "2");
 
         withdraw(PASSWORD).andExpect(status().isOk());
@@ -282,9 +286,12 @@ class UserPasswordConfirmMariaDbIT {
             pool.shutdownNow();
         }
 
-        // 잠긴 뒤의 시도는 카운트를 늘리지 않는다. TTL은 걸려 있다.
-        assertThat(failCount()).isEqualTo("5");
-        assertThat(redis.getExpire("password-confirm:fail:" + userId)).isPositive();
+        // 잠금이 유지된다(임계치 초과). 정확한 카운트는 동시 요청 수에 따른 구현 세부라 보지 않는다 — 동작은 위의 비교 횟수로 확인했다.
+        // TTL은 첫 예약 때 건 것 그대로라 잠금이 연장되지 않는다.
+        assertThat(Long.parseLong(failCount())).isGreaterThan(FailedAttemptPolicy.MAX_ATTEMPTS);
+        assertThat(redis.getExpire("password-confirm:fail:" + userId, TimeUnit.MILLISECONDS))
+                .isPositive()
+                .isLessThanOrEqualTo(FailedAttemptPolicy.LOCK_TTL.toMillis());
         assertThat(storedStatus()).isEqualTo("ACTIVE");
     }
 

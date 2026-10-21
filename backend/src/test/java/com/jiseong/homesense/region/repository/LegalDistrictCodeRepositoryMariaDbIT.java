@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jiseong.homesense.region.entity.LegalDistrictCode;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * SVC-RGN-01.autocomplete() 전용 검증 — {@code searchByNameContaining()}이 시도/시군구 대표행
@@ -38,7 +39,7 @@ import com.jiseong.homesense.region.entity.LegalDistrictCode;
 @Testcontainers
 @Transactional
 @Tag("integration")
-class LegalDistrictCodeRepositoryMariaDbIT {
+class LegalDistrictCodeRepositoryMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

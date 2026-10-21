@@ -38,6 +38,7 @@ import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
 import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.repository.UserRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * FavoriteServiceTest의 "save시점에_UNIQUE_위반이_발생하면..." 두 테스트는 각 Repository.save()가
@@ -60,7 +61,7 @@ import com.jiseong.homesense.user.repository.UserRepository;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
-class FavoriteServiceMariaDbIT {
+class FavoriteServiceMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

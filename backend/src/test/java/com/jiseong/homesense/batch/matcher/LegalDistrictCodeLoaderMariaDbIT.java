@@ -34,6 +34,7 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * 2026년 법정동코드 참조자료 노후화 대응(화성시 일반구 신설, 인천 행정체제 개편, 전남광주통합특별시
@@ -67,7 +68,7 @@ import jakarta.persistence.PersistenceContext;
 @Testcontainers
 @Transactional
 @Tag("integration")
-class LegalDistrictCodeLoaderMariaDbIT {
+class LegalDistrictCodeLoaderMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")

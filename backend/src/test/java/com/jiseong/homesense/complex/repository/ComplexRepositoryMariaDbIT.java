@@ -32,6 +32,7 @@ import com.jiseong.homesense.trade.entity.HousingType;
 import com.jiseong.homesense.trade.entity.MatchMethod;
 import com.jiseong.homesense.trade.entity.Trade;
 import com.jiseong.homesense.trade.repository.TradeRepository;
+import com.jiseong.homesense.support.RedisContainerSupport;
 
 /**
  * ComplexServiceTest는 ComplexRepository 자체를 목킹해 "Service가 Repository를 올바르게 호출하는지"만
@@ -56,7 +57,7 @@ import com.jiseong.homesense.trade.repository.TradeRepository;
 @Testcontainers
 @Transactional
 @Tag("integration")
-class ComplexRepositoryMariaDbIT {
+class ComplexRepositoryMariaDbIT extends RedisContainerSupport {
 
     @Container
     static final MariaDBContainer<?> MARIADB = new MariaDBContainer<>("mariadb:10.11")
