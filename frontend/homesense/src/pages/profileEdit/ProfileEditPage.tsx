@@ -19,6 +19,7 @@ import { useAuth } from '../../features/auth/useAuth';
 import { getMe, updateMe } from '../../features/user/api';
 import type { UserResponse } from '../../features/user/types';
 import { getErrorMessage } from '../../lib/apiError';
+import { tokenStorage } from '../../lib/tokenStorage';
 import { MEDIA_XL_UP, useMediaQuery } from '../../lib/useMediaQuery';
 import { MY_ROUTES } from '../../routes/paths';
 import type { ApiErrorResponse } from '../../types/api';
@@ -206,12 +207,19 @@ function ProfileEditForm({ baseline: initialBaseline }: { baseline: UserResponse
     setSaving(true);
     setBannerError(null);
     // 이 저장을 보낸 세션. 응답 전에 세션이 바뀌었으면(로그아웃·다른 계정 로그인·세션 만료·다른 탭의 계정 변경 — 모두 세대를
-    // 올린다) 늦은 응답은 지금 세션과 무관하다. 특히 비밀번호 변경의 endSession은 저장소를 비우므로, 그대로 부르면 그사이
-    // 로그인한 다른 계정의 토큰을 지우고 로그아웃시킨다. 토스트도 띄우지 않는다(지금 화면의 계정에 대한 결과가 아니다).
+    // 올린다. 같은 계정의 토큰 재발급은 올리지 않는다) 늦은 응답은 지금 세션과 무관하다. 특히 비밀번호 변경의 endSession은
+    // 저장소를 비우므로, 그대로 부르면 그사이 로그인한 다른 계정의 토큰을 지우고 로그아웃시킨다. 성공·실패 모두 같다.
     const generation = currentSessionGeneration();
+    const sessionChanged = () => currentSessionGeneration() !== generation;
     try {
       const updated = await updateMe(body);
-      if (currentSessionGeneration() !== generation) return;
+      if (sessionChanged()) {
+        // 아무도 로그인해 있지 않으면(로그아웃·세션 만료) 비밀번호가 바뀌었다는 사실만 알린다 — 모르면 옛 비밀번호로
+        // 로그인하다 막힌다. 정리할 세션이 없어 endSession·이동은 하지 않는다. 다른 계정이 로그인해 있으면 그 계정에 대한
+        // 결과가 아니라 아무것도 알리지 않는다.
+        if (changingPassword && tokenStorage.getAccessToken() === null) showToast(PASSWORD_CHANGED_TOAST, 'success');
+        return;
+      }
       if (changingPassword) {
         // D4 — 서버가 이 회원의 모든 세션을 끝냈다. 로그아웃 API를 부르지 않고 로컬 세션만 정리하고, 이동은 보호 라우트
         // 가드가 한다(로그인 화면, 복귀 목적지 없음).
@@ -228,6 +236,7 @@ function ProfileEditForm({ baseline: initialBaseline }: { baseline: UserResponse
       setForm(initialForm(updated.nickname));
       navigate(MY_ROUTES.home);
     } catch (error) {
+      if (sessionChanged()) return;
       const apiError = axios.isAxiosError<ApiErrorResponse>(error) ? error.response?.data?.error : undefined;
       const { target, message } = resolveSaveError(apiError ?? undefined);
       if (target === 'banner') {

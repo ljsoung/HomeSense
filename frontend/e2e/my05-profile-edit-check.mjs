@@ -10,7 +10,9 @@
 // 8. 비로그인 → 로그인 → MY-05 복귀
 // 9. 닉네임 저장 응답이 오기 전에 GNB·하단 탭으로 떠나면, 늦은 응답이 화면을 MY-01로 끌어오지 않는다(토스트는 보인다)
 // 10. 비밀번호 변경 응답이 화면을 떠난 뒤 도착해도 안내 토스트·로컬 토큰 삭제 — 공개 화면(홈)은 그대로 비로그인, 보호 화면(관심목록)은 로그인 화면
-// 11. 비밀번호 변경 응답 전에 로그아웃하고 다른 계정(B)으로 로그인하면, 늦은 응답은 B의 토큰·로그인 상태를 건드리지 않고 토스트도 없다
+// 11. 비밀번호 변경 응답 전에 로그아웃하고 다른 계정(B)으로 로그인하면, 늦은 응답(성공·401·400·500)은 B의 토큰·로그인 상태를
+//     건드리지 않고 토스트·오류도 없다. 401이면 인터셉터가 B 토큰으로 재시도·재발급하지 않는다
+// 12. 비밀번호 변경 응답 전에 로그아웃하고 비로그인으로 남으면 늦은 성공 응답에 안내 토스트만 보인다
 import { chromium } from 'playwright';
 import { BASE } from './base.mjs';
 import { errBody, okBody } from './mockApi.mjs';
@@ -24,28 +26,34 @@ function ok(name, cond, detail = '') {
 const CURRENT = 'Abcd1234!';
 const NEXT = 'Efgh5678!';
 
+// 실제 백엔드처럼 JWT 모양(서명은 검증하지 않는다) — 401 인터셉터가 sub로 계정을 비교하므로 문자열 토큰이면 그 비교가 빠진다.
+const fakeJwt = (sub, tag) => `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.${Buffer.from(JSON.stringify({ sub: String(sub), tag })).toString('base64url')}.sig`;
+const TOKEN_A = fakeJwt(7, 'a');
+const TOKEN_B = fakeJwt(8, 'b');
+
 const OTHER_USER = { userId: 8, email: 'other@homesense.kr', nickname: '다른계정', createdAt: '2026-09-20T09:00:00' };
 
 const browser = await chromium.launch();
 
 /**
  * putMode: 'ok' | 'wrongPassword' | 'locked' | 'nicknameInvalid' | 'failOnce' | 'hold'(db.release()를 부를 때까지 응답 보류).
+ * db.release(kind): kind 'ok'(기본) | 'unauthorized'(401 UNAUTHORIZED) | 'wrongPassword'(400) | 'serverError'(500).
  */
 async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn = true } = {}) {
   const context = await browser.newContext({ viewport });
   if (loggedIn) {
-    await context.addInitScript(() => {
+    await context.addInitScript((tokenA) => {
       if (!sessionStorage.getItem('__seeded')) {
-        localStorage.setItem('homesense.accessToken', 'A');
+        localStorage.setItem('homesense.accessToken', tokenA);
         localStorage.setItem('homesense.refreshToken', 'R');
         sessionStorage.setItem('__seeded', '1');
       }
-    });
+    }, TOKEN_A);
   }
   const db = { user: { userId: 7, email: 'jiseong@homesense.kr', nickname: '지성', createdAt: '2026-09-15T10:20:30' }, putFailures: putMode === 'failOnce' ? 1 : 0 };
   let releasePut;
   const putHeld = new Promise((resolve) => { releasePut = resolve; });
-  db.release = () => releasePut();
+  db.release = (kind = 'ok') => releasePut(kind);
   const calls = [];
   await context.route('**/api/**', async (route) => {
     const request = route.request();
@@ -55,11 +63,11 @@ async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn =
     const body = request.postData();
     calls.push({ method, path: p, body: body ? JSON.parse(body) : null });
     const json = (status, payload) => route.fulfill({ status, contentType: 'application/json', body: payload }).catch(() => {});
-    if (p === '/api/auth/login') return json(200, okBody({ accessToken: 'A2', refreshToken: 'R2', expiresIn: 1800 }));
+    if (p === '/api/auth/login') return json(200, okBody({ accessToken: TOKEN_B, refreshToken: 'R2', expiresIn: 1800 }));
     if (p === '/api/auth/logout') return json(200, okBody(null));
     if (p === '/api/users/me' && method === 'GET') {
-      // 로그인 응답의 토큰(A2)은 다른 계정(B)이다 — 시나리오 11
-      if (request.headers().authorization === 'Bearer A2') return json(200, okBody(OTHER_USER));
+      // 로그인 응답의 토큰은 다른 계정(B)이다 — 시나리오 11
+      if (request.headers().authorization === `Bearer ${TOKEN_B}`) return json(200, okBody(OTHER_USER));
       return json(200, okBody(db.user));
     }
     if (p === '/api/users/me' && method === 'PUT') {
@@ -73,7 +81,12 @@ async function open(viewport, { path = '/my/profile', putMode = 'ok', loggedIn =
           body: JSON.stringify({ success: false, error: { code: 'VALIDATION_FAILED', message: '입력값이 유효하지 않습니다', fieldErrors: [{ field: 'nickname', message: '서버가 거부한 닉네임입니다' }] }, timestamp: '2026-10-19T00:00:00' }),
         }).catch(() => {});
       }
-      if (putMode === 'hold') await putHeld;
+      if (putMode === 'hold') {
+        const kind = await putHeld;
+        if (kind === 'unauthorized') return json(401, errBody('UNAUTHORIZED', '인증이 필요합니다'));
+        if (kind === 'wrongPassword') return json(400, errBody('INVALID_CURRENT_PASSWORD', '현재 비밀번호가 일치하지 않습니다'));
+        if (kind === 'serverError') return json(500, errBody('INTERNAL_SERVER_ERROR', '서버 오류가 발생했습니다'));
+      }
       if (db.putFailures > 0) { db.putFailures--; return json(500, errBody('INTERNAL_SERVER_ERROR', '서버 오류가 발생했습니다')); }
       if (req.nickname !== undefined) db.user = { ...db.user, nickname: req.nickname };
       return json(200, okBody(db.user));
@@ -367,7 +380,18 @@ async function scenarioPasswordAfterLeave(label, viewport) {
   }
 }
 
-async function scenarioPasswordAfterAccountSwitch(label, viewport) {
+async function logOutFromHome(page) {
+  await page.locator('header a[href="/"]:visible').first().click();
+  await waitPath(page, '/');
+  await page.locator('header:visible').getByRole('button', { name: /계정 메뉴/ }).click();
+  await page.getByRole('menuitem', { name: '로그아웃' }).click();
+  await page.locator('header:visible a[href="/login"]').first().waitFor({ timeout: 5000 });
+}
+
+// release: 늦게 도착하는 응답 — 'ok'(성공), 'unauthorized'(401 — 인터셉터가 B 토큰으로 재시도·재발급하지 않아야 한다),
+// 'wrongPassword'(400), 'serverError'(500)
+async function scenarioPasswordAfterAccountSwitch(label, viewport, release = 'ok') {
+  label = `${label} 11[${release}]`;
   const { context, page, calls, db } = await open(viewport, { putMode: 'hold' });
   await ready(page);
   await fillPasswords(page, CURRENT, NEXT, NEXT);
@@ -384,17 +408,37 @@ async function scenarioPasswordAfterAccountSwitch(label, viewport) {
   await page.getByLabel('이메일').fill(OTHER_USER.email);
   await page.getByLabel('비밀번호', { exact: true }).fill('Other123!');
   await page.locator('button[type="submit"]').click();
-  ok(`${label} 11: B로 로그인 → 홈`, await waitPath(page, '/'));
+  ok(`${label}: B로 로그인 → 홈`, await waitPath(page, '/'));
   await page.locator('header:visible').getByRole('button', { name: /다른계정 계정 메뉴/ }).waitFor({ timeout: 5000 }).catch(() => {});
-  ok(`${label} 11: 응답 보류 중(새로고침 없이 같은 문서)`, puts(calls).length === 1 && await page.evaluate(() => window.__sameDocument === true));
-  db.release();
+  ok(`${label}: 응답 보류 중(새로고침 없이 같은 문서)`, puts(calls).length === 1 && await page.evaluate(() => window.__sameDocument === true));
+  db.release(release);
   await page.waitForTimeout(800);
-  ok(`${label} 11: 늦은 응답 뒤에도 B의 토큰 유지`,
-    await page.evaluate(() => localStorage.getItem('homesense.accessToken') === 'A2' && localStorage.getItem('homesense.refreshToken') === 'R2'));
-  ok(`${label} 11: 헤더가 B로 로그인된 채`, (await page.locator('header:visible').getByRole('button', { name: /다른계정 계정 메뉴/ }).count()) === 1);
-  ok(`${label} 11: 비밀번호 변경 안내 토스트 없음`, (await page.getByText('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.').count()) === 0);
-  ok(`${label} 11: 홈에 머묾`, new URL(page.url()).pathname === '/', page.url());
-  ok(`${label} 11: PUT 1회`, puts(calls).length === 1);
+  ok(`${label}: 늦은 응답 뒤에도 B의 토큰 유지`,
+    await page.evaluate((tokenB) => localStorage.getItem('homesense.accessToken') === tokenB && localStorage.getItem('homesense.refreshToken') === 'R2', TOKEN_B));
+  ok(`${label}: 헤더가 B로 로그인된 채`, (await page.locator('header:visible').getByRole('button', { name: /다른계정 계정 메뉴/ }).count()) === 1);
+  ok(`${label}: 비밀번호 변경 안내 토스트 없음`, (await page.getByText('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.').count()) === 0);
+  ok(`${label}: 홈에 머묾`, new URL(page.url()).pathname === '/', page.url());
+  ok(`${label}: PUT 1회(B 토큰으로 재시도 없음)`, puts(calls).length === 1);
+  ok(`${label}: 토큰 재발급 요청 없음`, calls.every((c) => c.path !== '/api/auth/refresh'));
+  ok(`${label}: 오류 토스트·배너 없음`, (await page.getByText(/일치하지 않습니다|서버 오류|일시적인 오류|인증이 필요합니다/).count()) === 0);
+  await context.close();
+}
+
+// 12. 비밀번호 변경 응답 전에 로그아웃하고 비로그인으로 남으면, 늦은 성공 응답에 안내 토스트만 보인다(세션 정리·이동 없음)
+async function scenarioPasswordAfterLogout(label, viewport) {
+  const { context, page, calls, db } = await open(viewport, { putMode: 'hold' });
+  await ready(page);
+  await fillPasswords(page, CURRENT, NEXT, NEXT);
+  await saveButton(page).click();
+  await page.waitForFunction(() => document.querySelector('button[aria-busy="true"]') !== null);
+  await logOutFromHome(page);
+  const logoutCalls = calls.filter((c) => c.path === '/api/auth/logout').length;
+  db.release();
+  const toast = page.getByText('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.');
+  ok(`${label} 12: 로그아웃 상태로 남으면 안내 토스트 표시`, await toast.waitFor({ timeout: 3000 }).then(() => true, () => false));
+  ok(`${label} 12: 홈에 머묾`, new URL(page.url()).pathname === '/', page.url());
+  ok(`${label} 12: 토큰 없음`, await page.evaluate(() => localStorage.getItem('homesense.accessToken') === null));
+  ok(`${label} 12: 로그아웃 API 추가 호출 없음`, calls.filter((c) => c.path === '/api/auth/logout').length === logoutCalls);
   await context.close();
 }
 
@@ -414,7 +458,10 @@ for (const { label, viewport, layout } of VIEWPORTS.filter((v) => only.length ==
   await scenarioLogin(label, viewport);
   await scenarioLeaveWhileSaving(label, viewport);
   await scenarioPasswordAfterLeave(label, viewport);
-  await scenarioPasswordAfterAccountSwitch(label, viewport);
+  for (const release of ['ok', 'unauthorized', 'wrongPassword', 'serverError']) {
+    await scenarioPasswordAfterAccountSwitch(label, viewport, release);
+  }
+  await scenarioPasswordAfterLogout(label, viewport);
 }
 
 await browser.close();
