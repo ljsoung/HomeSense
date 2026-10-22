@@ -3,6 +3,8 @@ package com.jiseong.homesense.common.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -32,6 +34,21 @@ class CorsPropertiesTest {
                 .run(context -> assertThat(context).hasFailed());
         contextRunner.withPropertyValues("homesense.cors.allowed-origins=https://hmss.site/")
                 .run(context -> assertThat(context).hasFailed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"hmss.site", "//hmss.site", "https://hmss.site/app", "https://hmss.site?x=1",
+            "https://hmss.site#a", "ftp://hmss.site", "https://user@hmss.site", "https://", "https://hmss site"})
+    void 오리진_형식이_아니면_기동에_실패한다(String origin) {
+        contextRunner.withPropertyValues("homesense.cors.required=true",
+                        "homesense.cors.allowed-origins=https://www.hmss.site," + origin)
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void 포트가_있는_http_오리진은_받는다() {
+        contextRunner.withPropertyValues("homesense.cors.allowed-origins=http://localhost:5173,https://hmss.site:8443")
+                .run(context -> assertThat(context).hasNotFailed());
     }
 
     @Test
