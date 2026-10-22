@@ -2,6 +2,7 @@ package com.jiseong.homesense.common.exception;
 
 import java.util.List;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -16,6 +17,7 @@ import com.jiseong.homesense.common.logging.AuditLogger;
 import com.jiseong.homesense.common.response.ApiResponse;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * COM-EXC-01. 모든 Controller의 예외를 가로채 COM-RES-01 표준 에러 포맷으로 변환하는 단일 지점.
@@ -29,12 +31,14 @@ import lombok.RequiredArgsConstructor;
  * 핸들러를 우선 선택), handleExceptionInternal()만 오버라이드해 본문을 COM-RES-01 포맷으로
  * 바꾸면 상태 코드는 그대로 유지된다.
  */
+@Slf4j
 @RestControllerAdvice
 @RequiredArgsConstructor
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final String CODE_VALIDATION_FAILED = "VALIDATION_FAILED";
     private static final String CODE_INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR";
+    private static final String CODE_SERVICE_TEMPORARILY_UNAVAILABLE = "SERVICE_TEMPORARILY_UNAVAILABLE";
 
     private final AuditLogger auditLogger;
 
@@ -69,6 +73,23 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         String code = resolved != null ? resolved.name() : String.valueOf(status.value());
         String message = e.getMessage() != null ? e.getMessage() : code;
         return ResponseEntity.status(status).body(ApiResponse.error(code, message));
+    }
+
+    /**
+     * Redis 인프라 장애({@link RedisUnavailability})는 500이 아니라 503 {@code SERVICE_TEMPORARILY_UNAVAILABLE}(고정 문구)이다.
+     * 보안 판단에 Redis가 필요한 곳(로그인·비밀번호 확인 잠금, 재설정 토큰·쿨다운, 컷오프 기록 등)은 Redis 없이 진행하지 않고
+     * 예외를 그대로 던지므로 여기서 503이 된다 — 막힌 쪽 실패. 장애는 운영 문제라 CRITICAL 감사 로그(logBatchFailure) 대신 WARN
+     * 한 줄만 남긴다(내부 메시지는 응답에 넣지 않는다). Redis가 아닌 DataAccessException은 예상치 못한 예외와 같다.
+     */
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataAccess(DataAccessException e) {
+        if (!RedisUnavailability.isRedisUnavailable(e)) {
+            return handleUnexpected(e);
+        }
+        log.warn("COM-EXC-01 Redis 장애로 요청을 처리하지 못했다(503): {}", e.getClass().getSimpleName());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(CODE_SERVICE_TEMPORARILY_UNAVAILABLE,
+                        "일시적으로 서비스를 이용할 수 없습니다. 잠시 후 다시 시도해주세요."));
     }
 
     /** 예상치 못한 예외 — 상세 메시지는 노출하지 않고 스택트레이스만 남긴다. */

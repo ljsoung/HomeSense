@@ -1,6 +1,7 @@
 package com.jiseong.homesense.common.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -14,6 +15,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -162,5 +166,74 @@ class JwtAuthenticationFilterTest {
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         verify(jwtTokenProvider, never()).validateToken(any());
+    }
+
+    // --- Redis 장애 시 강등(2026-10-21) ---
+
+    private MockHttpServletRequest bearer(String token) {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/users/me");
+        request.addHeader("Authorization", "Bearer " + token);
+        return request;
+    }
+
+    private void givenValidAccessToken() {
+        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.isAccessToken("valid-token")).thenReturn(true);
+        when(jwtTokenProvider.getUserId("valid-token")).thenReturn(1L);
+    }
+
+    @Test
+    void 상태_확인에서_Redis_연결이_실패하면_인증_없이_통과시키고_강등_속성을_남긴다() throws Exception {
+        givenValidAccessToken();
+        when(userStatusResolver.isActive(1L)).thenThrow(new RedisConnectionFailureException("redis down"));
+        MockHttpServletRequest request = bearer("valid-token");
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(chain.getRequest()).isNotNull();
+        assertThat(request.getAttribute(JwtAuthenticationFilter.AUTH_DEGRADED_ATTRIBUTE)).isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
+    void 컷오프_확인에서_Redis_명령이_타임아웃되면_인증_없이_통과시키고_강등_속성을_남긴다() throws Exception {
+        givenValidAccessToken();
+        when(userStatusResolver.isActive(1L)).thenReturn(true);
+        Instant issuedAt = Instant.now();
+        when(jwtTokenProvider.getIssuedAt("valid-token")).thenReturn(issuedAt);
+        when(accessTokenEpochService.isIssuedAfterCutoff(1L, issuedAt)).thenThrow(new QueryTimeoutException(
+                "timeout", new io.lettuce.core.RedisCommandTimeoutException("Command timed out")));
+        MockHttpServletRequest request = bearer("valid-token");
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(chain.getRequest()).isNotNull();
+        assertThat(request.getAttribute(JwtAuthenticationFilter.AUTH_DEGRADED_ATTRIBUTE)).isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
+    void Redis가_아닌_예외는_강등하지_않고_그대로_던진다() {
+        givenValidAccessToken();
+        when(userStatusResolver.isActive(1L)).thenThrow(new DataAccessResourceFailureException("db down"));
+        MockHttpServletRequest request = bearer("valid-token");
+
+        assertThatThrownBy(() -> filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain()))
+                .isInstanceOf(DataAccessResourceFailureException.class);
+        assertThat(request.getAttribute(JwtAuthenticationFilter.AUTH_DEGRADED_ATTRIBUTE)).isNull();
+    }
+
+    @Test
+    void 위조된_토큰은_Redis를_보지_않아_강등_속성이_없다() throws Exception {
+        when(jwtTokenProvider.validateToken("forged-token")).thenReturn(false);
+        MockHttpServletRequest request = bearer("forged-token");
+
+        filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(request.getAttribute(JwtAuthenticationFilter.AUTH_DEGRADED_ATTRIBUTE)).isNull();
+        verify(userStatusResolver, never()).isActive(any());
     }
 }

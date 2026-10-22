@@ -1,6 +1,7 @@
 package com.jiseong.homesense.common.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -16,6 +17,10 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.cache.Cache;
+import org.springframework.cache.concurrent.ConcurrentMapCache;
+import org.springframework.cache.interceptor.CacheErrorHandler;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 
 import com.jiseong.homesense.complex.dto.ComplexDetailResponse;
@@ -133,5 +138,21 @@ class CacheConfigTest {
 
     private static Duration ttl(RedisCacheConfiguration config) {
         return config.getTtlFunction().getTimeToLive("any-key", "any-value");
+    }
+
+    /*
+     * Redis 장애 시 강등(COM-CACHE-01): 캐시 조회·저장·삭제·비우기 실패는 WARN 로그만 남기고 삼킨다. 조회 실패를 삼키면 Spring이
+     * 캐시 미스로 보고 원본 메서드를 실행한다 — 실제 Redis 장애 경로는 RedisOutageDegradationMariaDbIT(공개 조회 200)가 본다.
+     */
+    @Test
+    void 캐시_오류_처리기는_조회_저장_삭제_비우기_실패를_모두_삼킨다() {
+        CacheErrorHandler handler = cacheConfig.errorHandler();
+        Cache cache = new ConcurrentMapCache(CacheNames.COMPLEX_DETAIL);
+        RuntimeException redisDown = new RedisConnectionFailureException("redis down");
+
+        assertThatCode(() -> handler.handleCacheGetError(redisDown, cache, 1L)).doesNotThrowAnyException();
+        assertThatCode(() -> handler.handleCachePutError(redisDown, cache, 1L, "value")).doesNotThrowAnyException();
+        assertThatCode(() -> handler.handleCacheEvictError(redisDown, cache, 1L)).doesNotThrowAnyException();
+        assertThatCode(() -> handler.handleCacheClearError(redisDown, cache)).doesNotThrowAnyException();
     }
 }
