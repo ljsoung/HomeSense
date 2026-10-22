@@ -12,7 +12,9 @@ import org.springframework.cache.interceptor.LoggingCacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.cache.BatchStrategies;
 import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.serializer.JacksonJsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext.SerializationPair;
@@ -111,9 +113,18 @@ public class CacheConfig implements CachingConfigurer {
                         .entryTtl(POPULAR_KEYWORDS_TTL));
     }
 
+    /** {@code invalidate()}/{@code clear()}가 키를 찾을 때 한 번에 훑는 개수. */
+    static final int SCAN_BATCH_SIZE = 1000;
+
+    /**
+     * 캐시 일괄 삭제({@code invalidate()} — 적재 뒤 인기 단지·자동완성 비우기, 백필 러너)는 기본 전략이 {@code KEYS}라 키 전체를
+     * 훑는 동안 Redis를 막는다. {@code SCAN}(1000개씩)으로 바꿔 다른 요청을 막지 않게 한다(2026-10-22, 운영 배포 전).
+     */
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory redisConnectionFactory) {
-        return RedisCacheManager.builder(redisConnectionFactory)
+        RedisCacheWriter writer = RedisCacheWriter.nonLockingRedisCacheWriter(redisConnectionFactory,
+                BatchStrategies.scan(SCAN_BATCH_SIZE));
+        return RedisCacheManager.builder(writer)
                 .cacheDefaults(redisCacheConfiguration())
                 .withInitialCacheConfigurations(cacheConfigurations())
                 .disableCreateOnMissingCache()
