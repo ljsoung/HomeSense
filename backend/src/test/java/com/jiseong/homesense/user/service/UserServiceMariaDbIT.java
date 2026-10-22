@@ -1,6 +1,10 @@
 package com.jiseong.homesense.user.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 
 import java.time.LocalDateTime;
 
@@ -8,16 +12,19 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.MariaDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.jiseong.homesense.auth.entity.RefreshToken;
 import com.jiseong.homesense.auth.repository.RefreshTokenRepository;
+import com.jiseong.homesense.common.security.UserStatusCacheService;
 import com.jiseong.homesense.user.dto.WithdrawCommand;
 import com.jiseong.homesense.user.entity.User;
 import com.jiseong.homesense.user.entity.UserStatus;
@@ -76,6 +83,8 @@ class UserServiceMariaDbIT extends RedisContainerSupport {
     private PasswordEncoder passwordEncoder;
     @Autowired
     private StringRedisTemplate redis;
+    @MockitoSpyBean
+    private UserStatusCacheService userStatusCacheService;
 
     @Test
     void 탈퇴하면_커밋_이후_재조회에서도_회원_상태와_토큰_폐기가_모두_반영돼_있다() {
@@ -99,5 +108,30 @@ class UserServiceMariaDbIT extends RedisContainerSupport {
 
         RefreshToken reloadedToken = refreshTokenRepository.findById(token.getRefreshTokenId()).orElseThrow();
         assertThat(reloadedToken.isUsable()).isFalse();
+    }
+
+    /**
+     * WITHDRAWN 캐시 쓰기는 탈퇴 트랜잭션 안(커밋 전)에 있다. 그래서 그 쓰기가 Redis 장애로 실패하면 탈퇴 전체가 롤백돼야 한다 —
+     * DB에서는 탈퇴됐는데 사용자는 503을 받는 상태가 생기지 않는다(CLAUDE.md "Redis 장애 시 강등과 막힌 쪽 실패" 절 분류표).
+     * revokeAllByUserId()의 flushAutomatically가 User 변경을 먼저 flush하지만 커밋 전이라 함께 롤백된다.
+     */
+    @Test
+    void WITHDRAWN_캐시_쓰기가_Redis_장애로_실패하면_탈퇴와_토큰_폐기가_모두_롤백된다() {
+        User user = userRepository.saveAndFlush(
+                User.createUser("withdraw-redis-down@test.com", passwordEncoder.encode("Abcd1234!"), "닉네임"));
+        RefreshToken token = refreshTokenRepository.saveAndFlush(
+                RefreshToken.issue(user, "token-hash-redis-down", LocalDateTime.now().plusDays(1)));
+        redis.delete("password-confirm:fail:" + user.getUserId());
+        doThrow(new RedisConnectionFailureException("redis down"))
+                .when(userStatusCacheService).setStatus(eq(user.getUserId()), any());
+
+        assertThatThrownBy(() -> userService.withdraw(user.getUserId(), new WithdrawCommand("Abcd1234!")))
+                .isInstanceOf(RedisConnectionFailureException.class);
+
+        User reloadedUser = userRepository.findById(user.getUserId()).orElseThrow();
+        assertThat(reloadedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(reloadedUser.getWithdrawnAt()).isNull();
+        assertThat(refreshTokenRepository.findById(token.getRefreshTokenId()).orElseThrow().isUsable()).isTrue();
+        assertThat(redis.hasKey("user:status:" + user.getUserId())).isFalse();
     }
 }

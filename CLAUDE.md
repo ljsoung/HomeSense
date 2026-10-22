@@ -1363,7 +1363,7 @@ SCR-MY-05(회원정보 수정) 프론트 착수 전 선행 작업이다. `PUT /a
 | 막힌 쪽 실패 | `PasswordConfirmAttemptService`(비밀번호 변경·탈퇴 잠금) | 503 |
 | 막힌 쪽 실패 | `PasswordResetTokenService`(재설정 토큰 발급·조회·GETDEL, 재전송 쿨다운 SETNX), `LoginAttemptService.reset`(재설정 성공 시) | 503 |
 | 막힌 쪽 실패 | `AccessTokenEpochService.invalidateTokensIssuedBefore`(재사용 탐지·비밀번호 변경·재설정 컷오프 기록) | 503(재설정·변경은 같은 트랜잭션이 롤백, 재사용 탐지는 Refresh Token 폐기 커밋 뒤 예외 — 기존 결정) |
-| 막힌 쪽 실패 | `UserStatusCacheService.setStatus`(탈퇴 시 WITHDRAWN) | 503, 탈퇴 롤백(그 전에 비밀번호 확인 잠금에서 먼저 503) |
+| 막힌 쪽 실패 | `UserStatusCacheService.setStatus`(탈퇴 시 WITHDRAWN) | 503, 탈퇴 롤백 — 쓰기가 `UserService.withdraw()` 트랜잭션 안(커밋 전)이라 실패하면 회원 상태·withdrawn_at·Refresh Token 폐기가 함께 롤백된다(`UserServiceMariaDbIT`, 커밋 후 쓰기로 바꾸면 실패). 보통은 그 전에 비밀번호 확인 잠금에서 먼저 503 |
 | 막힌 쪽 실패(배치) | `GeocodingRedisState`(일일 호출 카운터·못 찾음 표시) | 그 실행을 멈춤(기존 — 쿼터를 셀 수 없는 상태로 호출하지 않는다) |
 
 검색 로그(`POST /api/search/logs`)·최근 조회 기록은 DB라 Redis와 무관하다. 장애 중에도 그대로 되는 인증 경로: 회원가입(Redis를 쓰지 않음), 정상 재발급(`/api/auth/refresh` — 재사용 탐지가 아니면 DB만).
