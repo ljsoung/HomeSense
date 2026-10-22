@@ -44,8 +44,12 @@
 
 - 새 버전 JAR을 빌드한다: `cd backend && ./gradlew bootJar` → `backend/build/libs/<artifact>.jar`
 - 러너는 운영 애플리케이션과 **같은 환경변수**로 실행한다. `prod` 프로필이 요구하는 값은 전부 필요하다
-  (`DB_HOST`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `DATA_GO_KR_SERVICE_KEY`, SES 관련 값, Redis
-  접속 정보 등). 기동 시 `@Validated` 설정 검증을 통과해야 하기 때문이다.
+  (`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `DATA_GO_KR_SERVICE_KEY`, SES 관련 값, Redis
+  접속 정보 등 — 전체 목록은 CLAUDE.md "배포 설정" 절). 기동 시 `@Validated` 설정 검증을 통과해야 하기 때문이다.
+- 아래 `mysql`/`mysqldump` 명령의 포트는 애플리케이션과 같은 `DB_PORT`를 쓰고, 없으면 3306이다
+  (`application-prod.properties`의 `${DB_PORT:3306}`과 같은 기본값). 로컬 Docker DB(3307)에 쓸 때는 `DB_PORT=3307`을 둔다.
+- `schema_all.sql`로 새로 만든 DB에는 2절(인덱스 13건)과 10절 0단계(`location_precision` VARCHAR(12))가 이미 들어 있다 —
+  두 스크립트는 재실행 안전이라 실행해도 되지만 필요는 없다(CLAUDE.md "배포 설정" 절 "스키마 기준").
 - 러너 프로필 `backfill-complex-legal-dong`은 다음 성질을 가진다
   (`application-backfill-complex-legal-dong.properties`).
   - 웹 서버를 띄우지 않는다(`spring.main.web-application-type=none`). 포트 충돌이 없다.
@@ -56,11 +60,11 @@
 
 ```bash
 # complex 테이블만 백업하면 된다(백필이 쓰는 테이블은 complex 하나뿐).
-mysqldump -h "$DB_HOST" -P 3307 -u "$DB_USERNAME" -p --single-transaction homesense complex \
+mysqldump -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USERNAME" -p --single-transaction homesense complex \
   > complex_before_legal_dong_backfill_$(date +%Y%m%d_%H%M).sql
 
 # 사전 상태 기록
-mysql -h "$DB_HOST" -P 3307 -u "$DB_USERNAME" -p homesense -e \
+mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USERNAME" -p homesense -e \
   "SELECT COUNT(*) total, COUNT(legal_dong_cd) filled FROM complex;"
 ```
 
@@ -81,7 +85,7 @@ mysql -h "$DB_HOST" -P 3307 -u "$DB_USERNAME" -p homesense -e \
   행이 전부 끝난 것처럼 보여도 재시도가 진행 중일 수 있다. 시간대 기준(02:30~07:00 회피)을 우선한다.
 
 ```bash
-mysql -h "$DB_HOST" -P 3307 -u "$DB_USERNAME" -p homesense   < backend/src/main/resources/schema/indexes_v2_1.sql
+mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USERNAME" -p homesense   < backend/src/main/resources/schema/indexes_v2_1.sql
 ```
 
 - 소요 시간 참고(로컬): `trade` 204,520행에 2컬럼 인덱스를 온라인으로 만드는 데 0.27s였다.
@@ -247,7 +251,7 @@ NULL로 되돌린 뒤 실행한다.
 
 0. **`location_precision`을 VARCHAR(12)로 넓힌다**(키워드 보완 좌표 'APPROXIMATE'를 저장하려면 필요, 재실행 안전).
    ```bash
-   mysql -h "$DB_HOST" -P 3307 -u "$DB_USER" -p homesense < backend/src/main/resources/schema/location_precision_varchar12.sql
+   mysql -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USERNAME" -p homesense < backend/src/main/resources/schema/location_precision_varchar12.sql
    ```
 1. 카카오 개발자 콘솔 [통계] > [쿼터]에서 일일 한도와 오늘 사용량을 확인하고, 그보다 낮게 `GEOCODING_DAILY_LIMIT`을
    정한다(기본 10000). 이 상한은 러너와 03:00 정기 런이 Redis 카운터 `geo:calls:{yyyyMMdd}` 하나로 같이 센다.

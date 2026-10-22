@@ -92,6 +92,8 @@ tasks.register('integrationTest', Test) {
     }
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
+    // SchemaAllValidateMariaDbIT가 저장소 루트의 schema_all.sql을 읽는다 — 이 파일만 바뀌어도 다시 돌게 입력으로 둔다.
+    inputs.file('../schema_all.sql')
     shouldRunAfter test
 }
 

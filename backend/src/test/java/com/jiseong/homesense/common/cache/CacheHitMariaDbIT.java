@@ -9,6 +9,9 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.cache.CacheManager;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -175,6 +180,51 @@ class CacheHitMariaDbIT extends RedisContainerSupport {
         mockMvc.perform(get("/api/search/popular?limit=5"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].keyword").value("수원"));
+    }
+
+    @Test
+    void invalidate는_KEYS_대신_SCAN으로_그_캐시의_키를_모두_지운다() {
+        // SCAN 묶음(1000)보다 많이 넣어 커서를 여러 번 돌게 한다. 다른 캐시의 키는 남아야 한다. Cache.put()은 Lettuce에서
+        // 비동기로 나가(evict·clear와 같은 경로) 곧바로 세면 덜 들어가 있으므로, 같은 키 형식으로 Redis에 직접 쓴다.
+        int entries = CacheConfig.SCAN_BATCH_SIZE * 2 + 500;
+        var cache = cacheManager.getCache(CacheNames.POPULAR_KEYWORDS);
+        for (int i = 1; i <= entries; i++) {
+            redisTemplate.opsForValue().set(CacheNames.POPULAR_KEYWORDS + "::" + i, "[{\"keyword\":\"k" + i + "\"}]");
+        }
+        redisTemplate.opsForValue().set(CacheNames.REGION_AUTOCOMPLETE + "::남김", "[]");
+        assertThat(countKeys(CacheNames.POPULAR_KEYWORDS + "::*")).isEqualTo(entries);
+        long keysBefore = commandCalls("keys");
+        long scanBefore = commandCalls("scan");
+
+        cache.invalidate();
+
+        assertThat(countKeys(CacheNames.POPULAR_KEYWORDS + "::*")).isZero();
+        assertThat(redisTemplate.hasKey(CacheNames.REGION_AUTOCOMPLETE + "::남김")).isTrue();
+        assertThat(commandCalls("keys")).isEqualTo(keysBefore);
+        assertThat(commandCalls("scan")).isGreaterThan(scanBefore + 1);
+    }
+
+    private long countKeys(String pattern) {
+        long count = 0;
+        try (var cursor = redisTemplate.scan(ScanOptions.scanOptions().match(pattern).count(1000).build())) {
+            while (cursor.hasNext()) {
+                cursor.next();
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Redis INFO commandstats의 호출 수(cmdstat_keys:calls=N,…). 없으면 0. */
+    private long commandCalls(String command) {
+        Properties stats = redisTemplate.execute((RedisCallback<Properties>) connection ->
+                connection.serverCommands().info("commandstats"));
+        String line = stats.getProperty("cmdstat_" + command);
+        if (line == null) {
+            return 0;
+        }
+        Matcher m = Pattern.compile("calls=([0-9]+)").matcher(line);
+        return m.find() ? Long.parseLong(m.group(1)) : 0;
     }
 
     private String getTwiceAndCompare(String url) throws Exception {
