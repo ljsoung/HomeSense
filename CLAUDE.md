@@ -64,6 +64,7 @@ HomeSense는 국토교통부 실거래가 Open API를 배치로 수집·적재�
 12. **MAP-01 반응형 경계에서 지도 재마운트 — 근본 해결(모바일·데스크톱 레이아웃을 하나의 트리로 합쳐 지도 인스턴스 유지)은 백로그(2026-10-15 등록).** 지금은 재마운트 때 마지막 뷰포트로 다시 시작하게 맞춘다("SCR-MAP-01" 절 "반응형 경계를 넘을 때 지도 위치 유지" 행) — 지도 객체·핀·클러스터를 다시 만드는 비용은 그대로 남는다(SDK 스크립트는 싱글턴이라 다시 받지 않는다).
 13. **URL 갱신 헬퍼를 호출 시점의 window.location.search 기준으로 다음 URL을 만들도록 바꾼다(2026-10-15 등록).** 현재 코드에는 두 갱신이 겹치는 경로가 없음(2026-10-15 확인). 변형 검증에서 complexId·필터 제거가 다음 위치 알림에 덮여 잡히지 않음("SCR-MAP-01" 절 "반응형 경계를 넘을 때 지도 위치 유지" 행). 대상: MAP-01 `MapPage.replaceUrl`.
 14. **지오코딩 진행 중 768px 경계를 넘으면 새 지도에서 그 검색이 'stale'로 버려져 URL·라벨과 지도 위치가 어긋난다(2026-10-15 등록, Codex).** 백로그 12(레이아웃 단일 트리화)로 함께 해결된다 — 지도 인스턴스가 유지되면 진행 중 검색이 그대로 끝난다.
+15. **(낮음) 탈퇴 트랜잭션이 롤백되면 `user:status:{userId}` 키를 지운다(2026-10-22 등록).** `UserService.withdraw()`가 WITHDRAWN 캐시를 쓴 뒤 DB 커밋이 실패하면 캐시는 WITHDRAWN, DB는 ACTIVE로 남아 TTL(최대 30분) 동안 그 회원의 인증 요청이 모두 막힌다(COM-SEC-01 절 "차단은 즉시, 해제는 다음 확인 때" 단락). 방향: 쓰기 직후 `TransactionSynchronization.afterCompletion(STATUS_ROLLED_BACK)`에서 키를 삭제한다. 캐시 쓰기를 커밋 후로 옮기는 방식은 쓰지 않는다 — `UserServiceMariaDbIT`가 막는다(커밋 후면 Redis 실패 시 DB는 탈퇴됐는데 503).
 
 ## 기술 스택
 
@@ -162,7 +163,7 @@ com.homesense
 | 쓰기 지점 | **[2026-09-22, 같은 날 두 번째 P1 코드리뷰로 변경]** `UserService.withdraw()` 성공 시 `WITHDRAWN`으로 SETEX하는 것 **하나뿐**이다. `AuthService.loginInternal()`(login/signup/reactivate 공유)과 `refreshAccessToken()`은 더 이상 `ACTIVE`를 캐시에 쓰지 않는다 — 아래 "ACTIVE 쓰기 지점 제거" 단락 참고. `ACTIVE` 캐시는 이제 오직 `UserStatusResolver`의 캐시미스 복구 경로에서만 채워진다. |
 | 필터 동작 | `JwtAuthenticationFilter`가 `validateToken()`+`isAccessToken()` 통과 후 `UserStatusResolver.isActive(userId)`를 확인 — `false`면 SecurityContext 설정을 건너뛰고 필터 체인만 계속 진행한다(401을 직접 던지지 않음, 기존 만료 토큰 처리와 동일 패턴). |
 | **무효화 조건** | `JwtProperties.accessTokenValidity` 값 자체가 바뀌면 `UserStatusCacheService`의 TTL도 같은 값을 참조하는 생성자 로직이므로 자동으로 함께 바뀐다 — 다만 TTL을 이 값과 별도로 관리하도록 리팩터링하면 그 즉시 동기화가 깨지니 재검토하라. |
-| **완결 필요 — `SUSPENDED` 쓰기 지점 없음** | 이 캐시에 `SUSPENDED`를 실제로 쓰는 코드가 아직 없다 — ADM 도메인(5단계 선택 범위, `AdminService.updateUserStatus()`)이 구현되지 않았기 때문이다. ADM-01 구현 시 정지 처리 지점에서 `userStatusCacheService.setStatus(userId, SUSPENDED)`를 반드시 추가하라 — 이 항목이 빠지면 관리자가 계정을 정지시켜도 캐시가 TTL(최대 30분) 동안 옛 `ACTIVE` 값을 계속 반환해 정지가 즉시 반영되지 않는다. **이 쓰기는 아래 "ACTIVE 쓰기 지점 제거" 단락이 설명하는 레이스와 무관하게 안전하다** — WITHDRAWN과 같은 "더 제한적인 방향" 쓰기라, `AdminService`가 읽은 상태가 그 사이 낡아져도 최악의 경우 과잉 차단일 뿐이고 다음 요청에서 `UserStatusResolver`가 스스로 바로잡는다. |
+| **완결 필요 — `SUSPENDED` 쓰기 지점 없음** | 이 캐시에 `SUSPENDED`를 실제로 쓰는 코드가 아직 없다 — ADM 도메인(5단계 선택 범위, `AdminService.updateUserStatus()`)이 구현되지 않았기 때문이다. ADM-01 구현 시 정지 처리 지점에서 `userStatusCacheService.setStatus(userId, SUSPENDED)`를 반드시 추가하라 — 이 항목이 빠지면 관리자가 계정을 정지시켜도 캐시가 TTL(최대 30분) 동안 옛 `ACTIVE` 값을 계속 반환해 정지가 즉시 반영되지 않는다. **이 쓰기는 아래 "ACTIVE 쓰기 지점 제거" 단락이 설명하는 레이스와 무관하게 안전하다** — WITHDRAWN과 같은 "더 제한적인 방향" 쓰기라, `AdminService`가 읽은 상태가 그 사이 낡아져도 최악의 경우 과잉 차단일 뿐이다. 다만 캐시 쓰기 후 DB 커밋이 실패하면 TTL(최대 30분) 동안 그 회원의 인증 요청이 모두 막힌다 — 막히는 방향이라 허용하고, TTL 만료로 바로잡힌다(아래 비대칭 단락). |
 | BAT-USR-01 파기(purge)와의 관계 | `WithdrawnUserPurgeService.purgeOne()`(사용자 행 물리 삭제)은 캐시를 evict하지 않는다 — 파기는 탈퇴 후 유예기간(기본 7일)이 지나야 실행되는데, 그 시점엔 탈퇴 시점에 SETEX한 `WITHDRAWN` 캐시가 TTL(최대 30분)로 이미 자연 만료된 지 오래라 별도 evict가 실질적 의미를 갖지 않는다 — 위 "BAT-USR-01" 절 체크리스트의 "purge에서도 키를 갱신/삭제" 항목은 이 분석에 따라 처리 불필요로 재확인됐다. |
 
 **[처리완료 2026-09-22, 같은 날 코드리뷰 P1로 뒤집힘] "DB 폴백은 두지 않는다"는 최초 결정이 실제로는
@@ -207,8 +208,12 @@ setStatus(userId, ACTIVE)`를 무조건 실행하는 코드는 그대로 남아 
 오는 바로 다음 인증 요청은 캐시가 비어 있을 것이므로 `UserStatusResolver`가 그 시점에 DB를 다시 읽어
 캐시를 채운다. `UserService.withdraw()`의 `WITHDRAWN` 쓰기는 그대로 두었다 — **"차단은 즉시, 해제는
 다음 확인 때"라는 의도적 비대칭이 이 설계의 핵심이다.** 더 제한적인 상태(WITHDRAWN)를 먼저 반영해도
-최악의 경우 과잉 차단인데, 이는 다음 정상 요청에서 `UserStatusResolver`가 최신 값을 다시 읽으며 스스로
-바로잡힌다 — 반대로 더 허용적인 상태(ACTIVE)를 먼저 반영하면 과소 차단(보안 구멍)이 되고, 그 구멍은
+최악의 경우 과잉 차단이다. **[2026-10-22 정정] 이 과잉 차단은 "다음 요청에서 바로잡히지" 않는다** — 캐시 히트면
+`UserStatusResolver`가 DB를 다시 읽지 않기 때문이다. 캐시 쓰기 후 DB 커밋이 실패하면 TTL(최대 30분) 동안 그 회원의
+인증 요청이 모두 막힌다(탈퇴를 다시 시도할 수도 없고, 다시 로그인해도 로그인은 DB를 보고 토큰을 발급하지만 필터가
+캐시의 WITHDRAWN을 보고 인증을 채우지 않는다). 막히는 방향이라 허용하고, TTL 만료로 바로잡힌다. 쓰기가 커밋 전에
+있는 덕에 반대 경우(캐시 쓰기 실패)는 탈퇴 전체가 롤백된다(`UserServiceMariaDbIT`). 롤백 시 키를 지우는 개선은
+백로그 15번 — 반대로 더 허용적인 상태(ACTIVE)를 먼저 반영하면 과소 차단(보안 구멍)이 되고, 그 구멍은
 캐시 TTL(최대 30분) 동안 자연히 닫히지 않는다. 이 비대칭 때문에 ADM 도메인이 나중에 `SUSPENDED`를
 쓰게 되더라도(위 "완결 필요" 행) 그 쓰기는 안전하다 — WITHDRAWN과 마찬가지로 "더 제한적인" 방향이기
 때문이다.
