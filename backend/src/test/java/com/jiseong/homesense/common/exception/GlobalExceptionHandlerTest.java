@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +28,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.ResultMatcher;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+
+import com.jiseong.homesense.common.response.ApiResponse;
+import com.jiseong.homesense.trade.entity.DealCategory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -149,8 +161,138 @@ class GlobalExceptionHandlerTest {
         verify(auditLogger).logBatchFailure(eq("COM-EXC-01"), any(QueryTimeoutException.class));
     }
 
+    // ---- 오류 응답에 내부 정보를 노출하지 않는다(2026-10-22) ----
+
+    /** 응답 본문에 클래스·패키지명, 원문 예외 메시지, Jackson, 입력값이 없어야 한다. */
+    private static ResultMatcher noInternalDetails(String... inputs) {
+        return result -> {
+            String body = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(body).doesNotContain("com.", "org.", "java.", "Exception", "exception", "Jackson", "JSON parse",
+                    "Failed to convert", "Required request");
+            for (String input : inputs) {
+                assertThat(body).doesNotContain(input);
+            }
+        };
+    }
+
+    private ResultActions expectError(ResultActions actions, String code, String message) throws Exception {
+        return actions.andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value(code))
+                .andExpect(jsonPath("$.error.message").value(message));
+    }
+
+    @Test
+    void 잘못된_JSON은_INVALID_REQUEST_BODY_고정_문구다() throws Exception {
+        expectError(mockMvc.perform(post("/test/validate").contentType(MediaType.APPLICATION_JSON).content("{bad"))
+                .andExpect(status().isBadRequest()), "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다")
+                .andExpect(noInternalDetails("bad"));
+    }
+
+    @Test
+    void 필드_타입이_맞지_않는_JSON도_INVALID_REQUEST_BODY다() throws Exception {
+        expectError(mockMvc.perform(post("/test/typed").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"flag\":\"secret-xyz\"}"))
+                .andExpect(status().isBadRequest()), "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다")
+                .andExpect(noInternalDetails("secret-xyz", "Boolean"));
+    }
+
+    @Test
+    void 본문이_없으면_컨트롤러_시그니처를_노출하지_않고_INVALID_REQUEST_BODY다() throws Exception {
+        expectError(mockMvc.perform(post("/test/validate").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest()), "INVALID_REQUEST_BODY", "요청 형식이 올바르지 않습니다")
+                .andExpect(noInternalDetails("TestController", "TestRequest"));
+    }
+
+    @Test
+    void 경로_변수_타입_불일치는_파라미터_이름만_붙인_INVALID_PARAMETER다() throws Exception {
+        expectError(mockMvc.perform(get("/test/items/secret-xyz")).andExpect(status().isBadRequest()),
+                "INVALID_PARAMETER", "요청 값의 형식이 올바르지 않습니다: id")
+                .andExpect(noInternalDetails("secret-xyz", "Long"));
+    }
+
+    @Test
+    void 쿼리_파라미터_타입_불일치는_INVALID_PARAMETER다() throws Exception {
+        expectError(mockMvc.perform(get("/test/query").param("count", "secret-xyz")).andExpect(status().isBadRequest()),
+                "INVALID_PARAMETER", "요청 값의 형식이 올바르지 않습니다: count")
+                .andExpect(noInternalDetails("secret-xyz"));
+    }
+
+    @Test
+    void 필수_파라미터_누락은_MISSING_PARAMETER다() throws Exception {
+        expectError(mockMvc.perform(get("/test/query")).andExpect(status().isBadRequest()),
+                "MISSING_PARAMETER", "필수 요청 값이 없습니다: count")
+                .andExpect(noInternalDetails());
+    }
+
+    @Test
+    void ModelAttribute_바인딩_실패는_필드는_남기고_메시지는_고정_문구다() throws Exception {
+        mockMvc.perform(get("/test/filter").param("size", "secret-xyz").param("category", "SECRET_ENUM"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.fieldErrors.length()").value(2))
+                .andExpect(jsonPath("$.error.fieldErrors[0].message").value(GlobalExceptionHandler.MESSAGE_FIELD_TYPE_MISMATCH))
+                .andExpect(jsonPath("$.error.fieldErrors[1].message").value(GlobalExceptionHandler.MESSAGE_FIELD_TYPE_MISMATCH))
+                .andExpect(noInternalDetails("secret-xyz", "SECRET_ENUM", "DealCategory", "Integer"));
+    }
+
+    @Test
+    void 검증_실패_메시지에_거부된_입력값이_들어가지_않는다() throws Exception {
+        mockMvc.perform(post("/test/validate").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"ok\",\"memo\":\"secret-input-0123456789\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("memo"))
+                .andExpect(noInternalDetails("secret-input-0123456789"));
+    }
+
+    @Test
+    void 지원하지_않는_메서드는_405_고정_문구이고_Allow_헤더를_유지한다() throws Exception {
+        expectError(mockMvc.perform(delete("/test/business-exception")).andExpect(status().isMethodNotAllowed()),
+                "METHOD_NOT_ALLOWED", "지원하지 않는 요청 방식입니다")
+                .andExpect(result -> assertThat(result.getResponse().getHeader("Allow")).contains("GET"))
+                .andExpect(noInternalDetails("DELETE"));
+    }
+
+    @Test
+    void 지원하지_않는_Content_Type은_415_고정_문구다() throws Exception {
+        expectError(mockMvc.perform(post("/test/validate").contentType(MediaType.TEXT_PLAIN).content("x"))
+                .andExpect(status().isUnsupportedMediaType()), "UNSUPPORTED_MEDIA_TYPE", "지원하지 않는 요청 본문 형식입니다")
+                .andExpect(noInternalDetails("text/plain"));
+    }
+
+    @Test
+    void 없는_경로는_500이_아니라_404_고정_문구다() throws Exception {
+        expectError(mockMvc.perform(get("/test/no-such-path")).andExpect(status().isNotFound()),
+                "NOT_FOUND", "요청한 경로를 찾을 수 없습니다")
+                .andExpect(noInternalDetails("no-such-path", "static resource"));
+    }
+
+    @Test
+    void 업로드_크기_초과는_413_고정_문구다() {
+        ApiResponse<Void> body = GlobalExceptionHandler.clientError(new MaxUploadSizeExceededException(1024),
+                HttpStatus.PAYLOAD_TOO_LARGE);
+
+        assertThat(body.error().code()).isEqualTo("CONTENT_TOO_LARGE");
+        assertThat(body.error().message()).isEqualTo("요청 크기가 너무 큽니다");
+    }
+
     @RestController
     static class TestController {
+
+        @GetMapping("/test/items/{id}")
+        void item(@PathVariable Long id) {
+        }
+
+        @GetMapping("/test/query")
+        void query(@RequestParam int count) {
+        }
+
+        @GetMapping("/test/filter")
+        void filter(@ModelAttribute TestFilter filter) {
+        }
+
+        @PostMapping("/test/typed")
+        void typed(@RequestBody TypedRequest request) {
+        }
 
         @GetMapping("/test/redis-down")
         void throwRedisDown() {
@@ -184,6 +326,12 @@ class GlobalExceptionHandlerTest {
         }
     }
 
-    record TestRequest(@NotBlank String name) {
+    record TestRequest(@NotBlank String name, @Size(max = 5) String memo) {
+    }
+
+    record TypedRequest(Boolean flag) {
+    }
+
+    record TestFilter(Integer size, DealCategory category) {
     }
 }
