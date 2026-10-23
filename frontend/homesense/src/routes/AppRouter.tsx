@@ -12,7 +12,7 @@ import { NotificationHistoryPage } from '../pages/notifications/NotificationHist
 import { ProfileEditPage } from '../pages/profileEdit/ProfileEditPage';
 import { NotificationSettingsPage } from '../pages/notificationSettings/NotificationSettingsPage';
 import { SearchResultsPage } from '../pages/search/SearchResultsPage';
-import { MY_ROUTES } from './paths';
+import { AUTH_ROUTES, MY_ROUTES } from './paths';
 import { RequireAuth } from './RequireAuth';
 
 export function AppRouter() {
@@ -20,12 +20,12 @@ export function AppRouter() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
+        <Route path={AUTH_ROUTES.login} element={<LoginPage />} />
+        <Route path={AUTH_ROUTES.signup} element={<SignupPage />} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
         {/* 백엔드가 발송하는 재설정 링크가 {baseUrl}/password-reset?token=... 형식으로 고정돼 있다
             (AUTH-03 프론트 프롬프트 1절) — 이 경로를 바꾸면 이미 발송된 메일의 링크가 깨진다. */}
-        <Route path="/password-reset" element={<PasswordResetPage />} />
+        <Route path={AUTH_ROUTES.passwordReset} element={<PasswordResetPage />} />
         <Route path="/search" element={<SearchResultsPage />} />
         <Route path="/complexes/:id" element={<ComplexDetailRoute />} />
         <Route path="/map" element={<MapPage />} />
