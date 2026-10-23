@@ -53,6 +53,22 @@ describe('getRedirectPath', () => {
     },
   );
 
+  // 잘못된 퍼센트 시퀀스면 decodeURIComponent가 예외를 던진다. 판정은 예외 없이 끝나야 한다(가입 직후 이동 단계라
+  // 에러 바운더리가 없으면 흰 화면). 라우터처럼 디코딩하지 않은 경로로 맞춘다 — 인증 화면 하위면 HOME-01.
+  it.each(['/login/%E0%A4%A', '/LOGIN/%E0%A4%A', '/signup/%'])('잘못된 퍼센트 시퀀스(%s)도 예외 없이 판정하고, 인증 화면이면 홈', (pathname) => {
+    expect(() => getRedirectPath(at({ pathname, search: '', hash: '' }))).not.toThrow();
+    expect(returnState(at({ pathname, search: '', hash: '' }))).toBeUndefined();
+  });
+
+  it('잘못된 퍼센트 시퀀스가 있어도 앱 안 일반 경로는 그대로(라우터도 그 경로로 화면을 맞춘다)', () => {
+    expect(getRedirectPath(at({ pathname: '/complexes/%E0%A4%A', search: '', hash: '' }))).toBe('/complexes/%E0%A4%A');
+  });
+
+  it.each(['/login/%E0%A4%A', '/complexes/%E0%A4%A', '/%'])('잘못된 퍼센트 시퀀스에서도 판정이 라우터의 매칭과 같다: %s', (pathname) => {
+    const routes = Object.values(AUTH_ROUTES).flatMap((path) => [{ path }, { path: `${path}/*` }]);
+    expect(getRedirectPath(at({ pathname, search: '', hash: '' })) === '/').toBe(matchRoutes(routes, pathname) !== null);
+  });
+
   it('인증 화면 이름으로 시작하는 다른 경로는 허용', () => {
     expect(getRedirectPath(at({ pathname: '/login-help', search: '', hash: '' }))).toBe('/login-help');
   });
