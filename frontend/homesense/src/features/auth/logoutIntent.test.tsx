@@ -357,4 +357,19 @@ describe('AuthProvider.logout — 로그아웃을 시작한 세션만 지운다(
     expect(logoutBodies).toEqual(['RA']);
     expect(tokenStorage.getAccessToken()).toBe(B1);
   });
+
+  it('Refresh Token 없이 Access Token만 남은 상태에서 로그아웃하면 그 Access Token도 지우고 비로그인으로 끝난다', async () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, A1); // 비정상 상태 — 로그인은 언제나 두 토큰을 함께 저장한다
+    handler = async (config) => {
+      if (config.url === '/api/users/me') return respond(config, 200, ok({ userId: 1, email: 'a@test.com', nickname: 'A', createdAt: '' }));
+      return respond(config, 200, ok([]));
+    };
+    render(<Tree />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '로그아웃' })).toBeTruthy());
+    act(() => screen.getByRole('button', { name: '로그아웃' }).click());
+
+    await waitFor(() => expect(screen.getByText('홈 화면')).toBeTruthy());
+    expect(tokenStorage.getAccessToken()).toBeNull();
+    expect(sent).not.toContain('/api/auth/logout'); // 보낼 Refresh Token이 없다
+  });
 });

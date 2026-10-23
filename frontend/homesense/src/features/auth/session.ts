@@ -535,9 +535,10 @@ export async function revokeSessionWithinDeadline(ticket: LogoutTicket | null): 
  * 끝나야 하므로 락 없이 같은 조건으로 지운다. 예외는 던지지 않는다.
  */
 export async function clearLoggedOutSession(ticket: LogoutTicket | null): Promise<void> {
-  if (ticket === null) return;
+  // 시작할 때 Refresh Token이 없었으면(Access Token만 남은 비정상 상태) 그사이 새 로그인이 없는 한 남은 값을 지운다 —
+  // 로그인은 언제나 Refresh Token을 함께 저장하므로, 지금도 Refresh Token이 없으면 새 세션이 아니다.
   const clearIfOwned = () => {
-    if (belongsTo(ticket)) tokenStorage.clearTokens();
+    if (ticket === null ? tokenStorage.getRefreshToken() === null : belongsTo(ticket)) tokenStorage.clearTokens();
   };
   try {
     await withRefreshLock(clearIfOwned);

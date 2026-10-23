@@ -5,15 +5,25 @@ export const DEFAULT_AUTHENTICATED_PATH = '/';
 /** 돌아가면 다시 인증 화면으로 고리를 만드는 경로 — 복귀 목적지로 쓰지 않는다. */
 const AUTH_PATHS = ['/login', '/signup', '/password-reset'];
 
-/** 앱 안의 경로이고 인증 화면이 아닐 때만 복귀 목적지로 쓴다. `//host`(프로토콜 상대 URL)도 막는다. */
+/**
+ * 앱 안의 경로이고 인증 화면이 아닐 때만 복귀 목적지로 쓴다. `//host`(프로토콜 상대 URL)도 막는다.
+ * 인증 화면 비교는 대소문자를 가리지 않는다 — 라우터가 경로를 대소문자 구분 없이 맞추므로 `/LOGIN`도 로그인 화면이다.
+ */
 function isReturnablePath(pathname: string): boolean {
   if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname.includes('\\')) return false;
-  return !AUTH_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  const lower = pathname.toLowerCase();
+  return !AUTH_PATHS.some((path) => lower === path || lower.startsWith(`${path}/`));
+}
+
+/** search는 비었거나 `?`로, hash는 비었거나 `#`로 시작해야 한다 — 이어 붙였을 때 경로가 `//host`로 바뀌지 않게 한다. */
+function isPart(value: unknown, prefix: string): boolean {
+  return value === undefined || (typeof value === 'string' && (value === '' || value.startsWith(prefix)));
 }
 
 function returnTarget(location: Location): Location | null {
   const from = (location.state as { from?: Partial<Location> } | null)?.from;
   if (!from || typeof from.pathname !== 'string' || !isReturnablePath(from.pathname)) return null;
+  if (!isPart(from.search, '?') || !isPart(from.hash, '#')) return null;
   return from as Location;
 }
 

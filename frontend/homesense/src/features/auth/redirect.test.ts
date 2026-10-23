@@ -23,6 +23,17 @@ describe('getRedirectPath', () => {
     expect(getRedirectPath(at({ pathname, search: '', hash: '' }))).toBe('/');
   });
 
+  it.each(['/LOGIN', '/SignUp/', '/Password-Reset'])('대소문자만 다른 인증 화면(%s)도 홈', (pathname) => {
+    expect(getRedirectPath(at({ pathname, search: '', hash: '' }))).toBe('/');
+  });
+
+  it.each([
+    { pathname: '/', search: '/evil.example', hash: '' },
+    { pathname: '/', search: '', hash: '/evil.example' },
+  ])('경로로 이어지는 검색어·해시는 홈 (%o)', (from) => {
+    expect(getRedirectPath(at(from))).toBe('/');
+  });
+
   it('인증 화면 이름으로 시작하는 다른 경로는 허용', () => {
     expect(getRedirectPath(at({ pathname: '/login-help', search: '', hash: '' }))).toBe('/login-help');
   });
