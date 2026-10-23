@@ -4,6 +4,8 @@ import { login as loginRequest, signup as signupRequest } from './api';
 import {
   advanceSessionGeneration,
   beginRecheck,
+  captureLogoutTicket,
+  clearLoggedOutSession,
   currentSessionGeneration,
   markTabAuthenticated,
   markTabUnauthenticated,
@@ -147,15 +149,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 서버 폐기(최선 노력, 상한 5초) 후 로컬 토큰을 지운다 — 서버가 응답하지 않거나 요청이 멈춰도 상한 뒤
   // finally에서 반드시 로컬 로그아웃을 끝낸다(예전엔 멈춘 요청이 로그아웃을 영원히 붙잡았다, Codex P2).
   // 로그아웃 의도는 서버 폐기를 기다리기 전에 기록한다(`pendingLogouts`, 위 설명).
+  //
+  // 지우는 것은 로그아웃을 시작한 순간의 세션뿐이다(`captureLogoutTicket`). 기다리는 동안 다른 탭이 새로 로그인했으면
+  // 그 토큰은 남기고, 이 탭은 다른 탭과 같이 저장소의 계정을 따라간다(다시 확인). 비로그인으로 남기면 이 탭의 요청이
+  // 저장소에 남은 다른 계정 토큰을 싣고 나가 "화면은 비로그인, 요청은 B"가 된다. 그사이 이 탭의 세션이 이미 바뀌었으면
+  // (다른 탭 로그인을 storage 이벤트로 먼저 따라갔거나, 이 탭에서 다시 로그인) 상태를 건드리지 않는다.
   const logout = useCallback(async () => {
     pendingLogouts.current += 1;
-    advanceSessionGeneration();
+    const ticket = captureLogoutTicket();
+    const generation = advanceSessionGeneration();
     setSignedOutRedirectTo('/');
     try {
-      await revokeSessionWithinDeadline();
+      await revokeSessionWithinDeadline(ticket);
     } finally {
-      tokenStorage.clearTokens();
-      becomeAnonymous(true);
+      await clearLoggedOutSession(ticket);
+      if (currentSessionGeneration() === generation) {
+        if (tokenStorage.getAccessToken() === null) becomeAnonymous(true);
+        else beginRecheck();
+      }
       pendingLogouts.current -= 1;
     }
   }, [becomeAnonymous]);

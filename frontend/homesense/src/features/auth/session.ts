@@ -414,9 +414,9 @@ async function verify(): Promise<SessionResult> {
  */
 export async function storeTokens(accessToken: string, refreshToken: string): Promise<void> {
   try {
-    await withRefreshLock(() => tokenStorage.setTokens(accessToken, refreshToken));
+    await withRefreshLock(() => tokenStorage.startSession(accessToken, refreshToken));
   } catch {
-    tokenStorage.setTokens(accessToken, refreshToken);
+    tokenStorage.startSession(accessToken, refreshToken);
   }
 }
 
@@ -456,35 +456,62 @@ async function postLogout(refreshToken: string, signal: AbortSignal): Promise<vo
 }
 
 /**
+ * 로그아웃을 시작한 순간 저장소에 있던 세션. 로그아웃은 이 세션만 서버에서 폐기하고 로컬에서 지운다 — 서버 응답을
+ * 기다리는 동안 다른 탭이 새로 로그인한 토큰(다른 세션)은 건드리지 않는다. 예전엔 응답 뒤 저장소를 무조건 비워, 그사이
+ * 다른 탭에서 로그인한 계정까지 로그아웃됐다(백로그 1번 하위). 세션은 토큰 값이 아니라 세션 ID로 가린다
+ * (`tokenStorage.getSessionId`) — 같은 세션을 다른 탭이 재발급해 토큰 값이 바뀌어도 이 로그아웃이 지운다.
+ */
+export interface LogoutTicket {
+  readonly sessionId: string | null;
+  readonly refreshToken: string;
+}
+
+/** 지금 저장소의 세션을 로그아웃 대상으로 잡는다. 저장된 토큰이 없으면 null(폐기할 것도 지울 것도 없다). */
+export function captureLogoutTicket(): LogoutTicket | null {
+  const refreshToken = tokenStorage.getRefreshToken();
+  return refreshToken === null ? null : { sessionId: tokenStorage.getSessionId(), refreshToken };
+}
+
+/**
+ * 저장소의 토큰이 아직 이 로그아웃이 잡은 세션의 것인지. 세션 ID가 없는 토큰(이 값을 도입하기 전에 저장된 세션)은
+ * 저장소에도 세션 ID가 없을 때 같은 세션으로 본다 — 그 뒤의 로그인은 언제나 세션 ID를 함께 저장한다.
+ */
+function belongsTo(ticket: LogoutTicket): boolean {
+  if (tokenStorage.getRefreshToken() === null) return false;
+  return tokenStorage.getSessionId() === ticket.sessionId;
+}
+
+/**
  * 서버 쪽 Refresh Token을 폐기한다(SVC-AUTH-01.logout). 이 API는 인증이 필요해 Access Token이 만료돼
  * 401이면 한 번 재발급한 뒤 새 Refresh Token으로 다시 로그아웃한다 — 인증 엔드포인트라 인터셉터가 재발급하지
- * 않으므로 여기서 같은 재발급 경로(`refreshSession`)를 직접 부른다.
+ * 않으므로 여기서 같은 재발급 경로(`refreshSession`)를 직접 부른다. 재발급 뒤 저장소가 다른 세션(다른 탭의 새
+ * 로그인)이면 두 번째 로그아웃을 보내지 않는다 — 보냈다면 그 새 세션을 서버에서 폐기한다.
  *
  * `signal`이 중단되면(전체 상한 초과) 진행 중인 로그아웃 요청을 취소하고 다음 단계로 가지 않는다 — 호출자가
  * 로컬 로그아웃을 끝낸 뒤 사용자가 다른 계정으로 다시 로그인했을 수 있는데, 뒤늦게 이어진 이 작업이 저장소를
  * 다시 읽어 그 새 계정의 토큰으로 로그아웃을 보내면 안 된다.
  */
-async function revokeSessionOnServer(signal: AbortSignal): Promise<void> {
-  const refreshToken = tokenStorage.getRefreshToken();
-  if (!refreshToken) return;
+async function revokeSessionOnServer(ticket: LogoutTicket, signal: AbortSignal): Promise<void> {
   try {
-    await postLogout(refreshToken, signal);
+    await postLogout(ticket.refreshToken, signal);
     return;
   } catch (error) {
     if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
   }
   if (signal.aborted) return;
-  if ((await refreshSession(refreshToken)).kind !== 'refreshed') return;
-  if (signal.aborted) return;
+  if ((await refreshSession(ticket.refreshToken)).kind !== 'refreshed') return;
+  if (signal.aborted || !belongsTo(ticket)) return;
   const rotated = tokenStorage.getRefreshToken();
   if (rotated) await postLogout(rotated, signal);
 }
 
 /**
  * 서버 폐기를 `LOGOUT_REVOKE_DEADLINE_MS` 안에서만 기다린다. 넘기면 중단 신호를 보내고 곧바로 돌아온다 —
- * 호출자(`AuthProvider.logout`)는 결과와 무관하게 `finally`에서 로컬 로그아웃을 끝낸다. 예외는 던지지 않는다.
+ * 호출자(`AuthProvider.logout`)는 결과와 무관하게 `finally`에서 로컬 로그아웃(`clearLoggedOutSession`)을 끝낸다.
+ * 예외는 던지지 않는다.
  */
-export async function revokeSessionWithinDeadline(): Promise<void> {
+export async function revokeSessionWithinDeadline(ticket: LogoutTicket | null): Promise<void> {
+  if (ticket === null) return;
   const controller = new AbortController();
   const deadline = new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
@@ -494,11 +521,28 @@ export async function revokeSessionWithinDeadline(): Promise<void> {
     controller.signal.addEventListener('abort', () => clearTimeout(timer));
   });
   try {
-    await Promise.race([revokeSessionOnServer(controller.signal), deadline]);
+    await Promise.race([revokeSessionOnServer(ticket, controller.signal), deadline]);
   } catch {
     // 네트워크 오류·timeout 등 — 서버 폐기는 최선 노력이다.
   } finally {
     controller.abort(); // 정상 종료든 상한 초과든, 남은 단계가 이어지지 않게 한다.
+  }
+}
+
+/**
+ * 로그아웃의 로컬 정리 — 저장소가 아직 이 로그아웃이 잡은 세션이면 지운다. 다른 세션(그사이 다른 탭에서 새로 로그인)
+ * 이면 그대로 둔다. 재발급의 조건부 삭제와 같이 재발급 락 안에서 비교·삭제한다. 락 대기가 상한을 넘겨도 로그아웃은
+ * 끝나야 하므로 락 없이 같은 조건으로 지운다. 예외는 던지지 않는다.
+ */
+export async function clearLoggedOutSession(ticket: LogoutTicket | null): Promise<void> {
+  if (ticket === null) return;
+  const clearIfOwned = () => {
+    if (belongsTo(ticket)) tokenStorage.clearTokens();
+  };
+  try {
+    await withRefreshLock(clearIfOwned);
+  } catch {
+    clearIfOwned();
   }
 }
 
