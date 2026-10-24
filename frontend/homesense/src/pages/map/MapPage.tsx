@@ -22,15 +22,14 @@ import {
   mapFilterKey,
   parseMapUrl,
   resolveInitialView,
-  serializeMapUrl,
   type MapBounds,
-  type MapUrlState,
   type MapViewport,
   type PointView,
   type RegionView,
 } from '../../features/map/mapParams';
 import { fetchSelectedComplex, type MapPinItem } from '../../features/map/selection';
 import { useMapPoints } from '../../features/map/useMapPoints';
+import { useReplaceMapUrl } from '../../features/map/useReplaceMapUrl';
 import type { RegionAutocompleteResponse } from '../../features/region/types';
 import {
   defaultFilters,
@@ -72,7 +71,7 @@ const CONTROL_BUTTON_CLASS =
  * 채운다.
  */
 export function MapPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const isMobile = useMediaQuery(MEDIA_MD_DOWN);
@@ -134,23 +133,8 @@ export function MapPage() {
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
   const apiQuery = useMemo(() => (bounds ? buildMapApiQuery(filters, bounds) : null), [bounds, filters]);
 
-  // 화면 폭이 768px 경계를 넘으면(태블릿 회전·창 크기 변경) 레이아웃이 바뀌어 지도가 다시 마운트된다. KakaoMapView는 마운트할
-  // 때만 startView를 읽으므로, 지도가 한 번이라도 위치를 알렸으면(bounds) 마지막 위치(URL 뷰포트)에서 다시 시작한다 — 그러지
-  // 않으면 진입 때 위치로 돌아가고 첫 idle이 URL까지 그 위치로 덮는다. 아직 위치를 알리지 않았으면(지도 생성 중) 시작 위치를
-  // 그대로 쓴다(그사이 검색은 moveToQuery가 startView에 반영한다).
-  const [layoutIsMobile, setLayoutIsMobile] = useState(isMobile);
-  if (layoutIsMobile !== isMobile) {
-    setLayoutIsMobile(isMobile);
-    if (bounds !== null && urlState.viewport) setStartView({ kind: 'point', viewport: urlState.viewport });
-  }
   const points = useMapPoints(apiQuery);
-
-  const replaceUrl = useCallback(
-    (update: (prev: MapUrlState) => MapUrlState) => {
-      setSearchParams((prev) => serializeMapUrl(update(parseMapUrl(prev))), { replace: true });
-    },
-    [setSearchParams],
-  );
+  const replaceUrl = useReplaceMapUrl();
 
   const handleIdle = useCallback(
     (viewport: MapViewport, next: MapBounds) => {
@@ -232,17 +216,9 @@ export function MapPage() {
       setStartView({ kind: 'region', query, level, fallback: DEFAULT_VIEWPORT });
       return;
     }
+    // 지도가 아직 만들어지는 중이면(deferred) 검색어가 그 지도의 시작 위치로 넘어간다. 지도는 화면 폭이 바뀌어도 다시
+    // 마운트되지 않아(아래 레이아웃) 여기에 따로 남길 필요가 없다.
     const result = await map.moveToQuery(query, level, () => intentRef.current === intent);
-    // 지도가 아직 만들어지는 중이라 검색어가 그 지도의 시작 위치로 넘어갔다 — 그사이 레이아웃이 바뀌어 지도가 다시 마운트돼도
-    // 같은 검색어로 시작하게 여기에도 남긴다.
-    if (result === 'deferred' && intentRef.current === intent) {
-      setStartView((prev) => ({
-        kind: 'region',
-        query,
-        level,
-        fallback: prev === null ? DEFAULT_VIEWPORT : prev.kind === 'point' ? prev.viewport : prev.fallback,
-      }));
-    }
     // 밀린 검색(stale)은 알리지 않는다 — 앞 지역을 못 찾았다는 토스트가 뒤 지역 화면이나 다른 화면에 뜨면 안 된다.
     if (result === 'not-found' && intentRef.current === intent) {
       showToast(NOT_FOUND_MESSAGE, 'error');
@@ -517,13 +493,41 @@ export function MapPage() {
     />
   );
 
-  if (isMobile) {
-    return (
-      <MainLayout fullHeight>
-        <div className="relative h-full overflow-hidden">
-          <div className="absolute inset-0">{mapView}</div>
-          {filterBar}
-          {errorBanner}
+  // 레이아웃은 트리 하나다(반응형 렌더 규칙). 화면 폭이 768px 경계를 넘어도 지도 컨테이너와 SDK 지도 객체가 같은 자리에
+  // 남는다 — 위치·확대 레벨·핀·진행 중인 지역 검색이 그대로이고, 크기 변화는 KakaoMapView의 ResizeObserver가 relayout으로
+  // 맞춘다. 화면 크기마다 달라지는 것은 클래스와, 한쪽에만 있는 목록 자리(데스크톱 사이드바 / 모바일 하단 시트)뿐이다.
+  // 조건부 자식은 자리를 비워 둔 채(false) 렌더해 지도 래퍼의 위치가 바뀌지 않게 한다.
+  return (
+    <MainLayout fullHeight>
+      <div className={`relative flex h-full flex-col ${isMobile ? 'overflow-hidden' : ''}`}>
+        {filterBar}
+        <div className={isMobile ? 'absolute inset-0' : 'relative flex min-h-0 flex-1'}>
+          {!isMobile && (
+            <aside
+              aria-label="지도 단지 목록"
+              className={`h-full w-[380px] shrink-0 border-r border-[#e5e7eb] bg-white ${listCollapsed ? 'hidden' : ''}`}
+            >
+              {listPanel}
+            </aside>
+          )}
+          <div className={isMobile ? 'absolute inset-0' : 'relative min-w-0 flex-1'} data-testid="map-area">
+            {mapView}
+            {errorBanner}
+            {/* 목록 접기·펼치기(Figma 26:14831) — 지도 왼쪽 가장자리. */}
+            {!isMobile && (
+              <button
+                type="button"
+                onClick={() => setListCollapsed((v) => !v)}
+                aria-label={listCollapsed ? '목록 펼치기' : '목록 접기'}
+                aria-expanded={!listCollapsed}
+                className="absolute top-1/2 left-0 z-20 flex h-[52px] w-5 -translate-y-1/2 items-center justify-center rounded-r-[14px] border border-l-0 border-[#e5e7eb] bg-white text-[#6a7282] shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.1)]"
+              >
+                <ChevronLeftIcon className={`size-3.5 ${listCollapsed ? 'rotate-180' : ''}`} />
+              </button>
+            )}
+          </div>
+        </div>
+        {isMobile && (
           <MapListSheet
             snap={sheetSnap}
             onSnapChange={setSheetSnap}
@@ -535,37 +539,7 @@ export function MapPage() {
           >
             {listPanel}
           </MapListSheet>
-        </div>
-      </MainLayout>
-    );
-  }
-
-  return (
-    <MainLayout fullHeight>
-      <div className="flex h-full flex-col">
-        {filterBar}
-        <div className="relative flex min-h-0 flex-1">
-          <aside
-            aria-label="지도 단지 목록"
-            className={`h-full w-[380px] shrink-0 border-r border-[#e5e7eb] bg-white ${listCollapsed ? 'hidden' : ''}`}
-          >
-            {listPanel}
-          </aside>
-          <div className="relative min-w-0 flex-1">
-            {mapView}
-            {errorBanner}
-            {/* 목록 접기·펼치기(Figma 26:14831) — 지도 왼쪽 가장자리. */}
-            <button
-              type="button"
-              onClick={() => setListCollapsed((v) => !v)}
-              aria-label={listCollapsed ? '목록 펼치기' : '목록 접기'}
-              aria-expanded={!listCollapsed}
-              className="absolute top-1/2 left-0 z-20 flex h-[52px] w-5 -translate-y-1/2 items-center justify-center rounded-r-[14px] border border-l-0 border-[#e5e7eb] bg-white text-[#6a7282] shadow-[0_1px_1.5px_rgba(0,0,0,0.1),0_1px_1px_rgba(0,0,0,0.1)]"
-            >
-              <ChevronLeftIcon className={`size-3.5 ${listCollapsed ? 'rotate-180' : ''}`} />
-            </button>
-          </div>
-        </div>
+        )}
       </div>
     </MainLayout>
   );
