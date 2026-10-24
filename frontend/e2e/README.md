@@ -10,6 +10,8 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 쓴다** — `npm test`(= `npx playwright test`, 설정 `playwright.config.mjs`)로 실행하고, dev 서버(`BASE`)가 없으면
 `../homesense`에서 5173으로 띄운다. 응답은 `page.route`로 붙잡았다가 풀며 `waitForTimeout`을 쓰지 않는다. 공용
 헬퍼는 `specs/helpers.mjs`(JWT 모양 목업 토큰, 기본 응답).
+지도 스펙(`map-responsive`)은 가짜 카카오 SDK(`fakeKakaoSdk.js`)를 쓰며, 설정이 띄우는 dev 서버에는 가짜
+`VITE_KAKAO_JS_KEY`를 넣어 준다 — 이미 떠 있는 서버를 재사용하면 그 서버에 키가 있어야 한다(없으면 지도 대신 오류 화면).
 
 ## 실행 전제
 - Node 18+ (`node -v`), 이 디렉터리에서 `npm install` 1회 (playwright 1.63.0 고정). 브라우저가 이미
