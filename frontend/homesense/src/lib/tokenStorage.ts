@@ -1,6 +1,19 @@
 /** localStorage 키. 다른 탭의 변경을 `storage` 이벤트로 받을 때 이 키로 거른다. */
 export const ACCESS_TOKEN_KEY = 'homesense.accessToken';
 const REFRESH_TOKEN_KEY = 'homesense.refreshToken';
+/**
+ * 로그인 세션 하나를 가리키는 무작위 ID. 로그인·가입으로 토큰을 처음 저장할 때 새로 만들고, 재발급(Rotation)으로
+ * 토큰 값만 바뀔 때는 그대로 둔다. 로그아웃은 시작할 때 이 값을 기억했다가 끝났을 때 같을 때만 토큰을 지운다 —
+ * 그사이 다른 탭이 새로 로그인한 토큰(다른 세션)은 지우지 않고, 같은 세션을 다른 탭이 재발급한 토큰은 지운다.
+ * 토큰 값만으로는 "같은 세션의 재발급"과 "새 로그인"을 구분할 수 없어 따로 둔다(CLAUDE.md "로그아웃 조건부 삭제" 절).
+ */
+const SESSION_ID_KEY = 'homesense.authSessionId';
+
+function newSessionId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 /**
  * 판단 기록 — accessToken/refreshToken을 localStorage에 저장한다 (SVC-AUTH-01 응답이 두 토큰을
@@ -19,6 +32,17 @@ export const tokenStorage = {
   getRefreshToken(): string | null {
     return localStorage.getItem(REFRESH_TOKEN_KEY);
   },
+  /** 지금 저장된 토큰의 세션 ID. 이 값을 도입하기 전에 저장된 토큰이면 null. */
+  getSessionId(): string | null {
+    return localStorage.getItem(SESSION_ID_KEY);
+  },
+  /** 로그인·가입 — 새 세션으로 저장한다. */
+  startSession(accessToken: string, refreshToken: string): void {
+    localStorage.setItem(SESSION_ID_KEY, newSessionId());
+    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  },
+  /** 재발급 — 같은 세션의 토큰 값만 바꾼다(세션 ID 유지). */
   setTokens(accessToken: string, refreshToken: string): void {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
@@ -26,5 +50,6 @@ export const tokenStorage = {
   clearTokens(): void {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(SESSION_ID_KEY);
   },
 };

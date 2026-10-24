@@ -10,3 +10,13 @@ export const MY_ROUTES = {
   notifications: '/notifications',
   profileEdit: '/my/profile',
 } as const;
+
+/**
+ * 인증 화면 경로. 라우트 정의(AppRouter)와 로그인·가입 후 복귀 목적지 판정(`features/auth/redirect.ts`)이 같은 값을 쓴다 —
+ * 판정이 라우터의 `matchPath`로 이 경로를 맞추므로, 경로를 바꿔도 둘이 어긋나지 않는다.
+ */
+export const AUTH_ROUTES = {
+  login: '/login',
+  signup: '/signup',
+  passwordReset: '/password-reset',
+} as const;

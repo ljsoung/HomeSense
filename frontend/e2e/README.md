@@ -5,8 +5,11 @@ AUTH-02 회원가입 / SCR-LEGAL-01 개인정보처리방침 / AUTH-03 비밀번
 밖 `C:\Users\super\homesense-e2e-scripts\`에 있었으나(캐시 정리 시 유실 위험, CLAUDE.md SCR-LEGAL-01
 백로그가 이 위험을 지적했다) 저장소 안으로 옮겨 커밋했다.
 
-**CI에는 편입하지 않는다** — 로컬 실행 가능한 상태로만 유지한다. `@playwright/test` 프레임워크로의
-전환(CLAUDE.md SCR-LEGAL-01 절이 남긴 완결 필요 항목)도 아직 하지 않았다 — 아래 "알려진 한계" 참고.
+**CI에는 편입하지 않는다** — 로컬 실행 가능한 상태로만 유지한다. 기존 `*.mjs` 스크립트는 `@playwright/test`로
+옮기지 않았다(아래 "알려진 한계" 참고). **2026-10-23부터 새 검증은 `specs/*.spec.mjs`(`@playwright/test`, `expect` 단언)로
+쓴다** — `npm test`(= `npx playwright test`, 설정 `playwright.config.mjs`)로 실행하고, dev 서버(`BASE`)가 없으면
+`../homesense`에서 5173으로 띄운다. 응답은 `page.route`로 붙잡았다가 풀며 `waitForTimeout`을 쓰지 않는다. 공용
+헬퍼는 `specs/helpers.mjs`(JWT 모양 목업 토큰, 기본 응답).
 
 ## 실행 전제
 - Node 18+ (`node -v`), 이 디렉터리에서 `npm install` 1회 (playwright 1.63.0 고정). 브라우저가 이미

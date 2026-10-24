@@ -3,5 +3,13 @@
   "private": true,
   "type": "module",
   "description": "HomeSense frontend Playwright verification scripts (AUTH-02/AUTH-03/SCR-LEGAL-01/SCR-SRCH-01) — local-only, not wired into CI. See README.md.",
-  "dependencies": { "playwright": "1.63.0" }
+  "dependencies": {
+    "playwright": "1.63.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  },
+  "scripts": {
+    "test": "playwright test"
+  }
 }

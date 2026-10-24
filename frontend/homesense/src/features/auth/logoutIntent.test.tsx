@@ -171,7 +171,7 @@ describe('AuthProvider.logout — 로그아웃 의도는 서버 폐기를 기다
     expect(screen.getByText('홈 화면')).toBeTruthy();
   });
 
-  it('로그아웃 응답이 먼저 오고 그 뒤에 다른 탭 때문에 시작된 다시 확인이 끝나도 로그인 화면이 아니라 홈으로 간다', async () => {
+  it('로그아웃 응답이 먼저 오고 그 뒤에 다른 탭 때문에 시작된 다시 확인이 끝나면, 이 탭은 B 토큰을 지우지 않고 B로 확정된다', async () => {
     tokenStorage.setTokens(A1, 'RA');
     const B1 = fakeJwt('2');
     const logoutGate = deferred();
@@ -196,26 +196,24 @@ describe('AuthProvider.logout — 로그아웃 의도는 서버 폐기를 기다
     act(() => screen.getByRole('button', { name: '로그아웃' }).click());
     await waitFor(() => expect(sent).toContain('/api/auth/logout'));
 
-    // 그사이 다른 탭이 로그아웃(토큰 삭제)하고 곧바로 B로 로그인한다. 삭제 이벤트를 받아 다시 확인할 때 저장소에는
-    // 이미 B 토큰이 있어 확인 중으로 시작하고, B로 /api/users/me를 보낸다.
+    // 그사이 다른 탭이 B로 로그인한다(새 세션). 이벤트를 받아 다시 확인하고 B로 /api/users/me를 보낸다.
     act(() => {
-      tokenStorage.setTokens(B1, 'RB');
-      window.dispatchEvent(new StorageEvent('storage', { key: ACCESS_TOKEN_KEY, newValue: null, storageArea: localStorage }));
+      tokenStorage.startSession(B1, 'RB');
+      window.dispatchEvent(new StorageEvent('storage', { key: ACCESS_TOKEN_KEY, newValue: B1, storageArea: localStorage }));
     });
     await waitFor(() => expect(sent.filter((url) => url === '/api/users/me')).toHaveLength(2));
 
-    // 이 탭의 로그아웃 응답이 먼저 와서 로컬 로그아웃이 끝나고(토큰 삭제·직접 로그아웃 기록·진행 중 로그아웃 0건),
-    // 그다음 다시 확인의 B 응답이 온다. 저장소가 비어 B로 확정하지 못하고 다시 확인 → 비로그인으로 끝난다.
-    // 두 응답이 같은 렌더 안에서 처리되므로 가드는 마지막 상태만 본다.
+    // 이 탭의 로그아웃 응답이 먼저 온다. 예전엔 여기서 저장소를 비워 B까지 로그아웃시켰다(백로그 1번 하위).
+    // 이제는 A 세션만 지우므로 B 토큰이 남고, 이어서 B 확인이 끝나 이 탭도 B로 확정된다.
     await act(async () => {
       logoutGate.resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
       meGateB.resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    await waitFor(() => expect(screen.getByText('홈 화면')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: '로그아웃' })).toBeTruthy());
     expect(screen.queryByText('로그인 화면')).toBeNull();
-    expect(tokenStorage.getAccessToken()).toBeNull();
+    expect(tokenStorage.getAccessToken()).toBe(B1);
   });
 
   it('직접 로그아웃 뒤 다른 탭의 로그인으로 이 탭이 B로 확정되면 기록이 내려가, B 세션 만료 시 로그인 화면으로 간다', async () => {
@@ -241,7 +239,7 @@ describe('AuthProvider.logout — 로그아웃 의도는 서버 폐기를 기다
 
     // 다른 탭이 B로 로그인 → 이 탭이 다시 확인해 B로 확정된다.
     act(() => {
-      tokenStorage.setTokens(B1, 'RB');
+      tokenStorage.startSession(B1, 'RB');
       window.dispatchEvent(new StorageEvent('storage', { key: ACCESS_TOKEN_KEY, newValue: B1, storageArea: localStorage }));
     });
     await waitFor(() => expect(sent.filter((url) => url === '/api/users/me')).toHaveLength(2));
@@ -270,5 +268,108 @@ describe('AuthProvider.logout — 로그아웃 의도는 서버 폐기를 기다
       window.dispatchEvent(new StorageEvent('storage', { key: ACCESS_TOKEN_KEY, newValue: null, storageArea: localStorage }));
     });
     await waitFor(() => expect(screen.getByText('로그인 화면')).toBeTruthy());
+  });
+});
+
+describe('AuthProvider.logout — 로그아웃을 시작한 세션만 지운다(백로그 1번 하위)', () => {
+  const B1 = fakeJwt('2');
+  const logoutBodies: string[] = [];
+
+  /** 로그아웃 응답을 gate가 풀릴 때까지 붙잡는다. status는 풀렸을 때 돌려줄 상태 코드. */
+  function holdLogout(gate: { promise: Promise<void> }, status: number) {
+    handler = async (config) => {
+      if (config.url === '/api/users/me') {
+        const isB = String(config.headers.Authorization) === `Bearer ${B1}`;
+        return respond(config, 200, ok({ userId: isB ? 2 : 1, email: 'x@test.com', nickname: isB ? 'B' : 'A', createdAt: '' }));
+      }
+      if (config.url === '/api/auth/logout') {
+        logoutBodies.push(JSON.parse(String(config.data)).refreshToken);
+        await gate.promise;
+        return status === 200 ? respond(config, 200, ok(null)) : respond(config, status, failure(status === 401 ? 'UNAUTHORIZED' : 'ERROR'));
+      }
+      return respond(config, 200, ok([]));
+    };
+  }
+
+  async function clickLogout() {
+    render(<Tree />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '로그아웃' })).toBeTruthy());
+    act(() => screen.getByRole('button', { name: '로그아웃' }).click());
+    await waitFor(() => expect(sent).toContain('/api/auth/logout'));
+  }
+
+  beforeEach(() => {
+    logoutBodies.length = 0;
+  });
+
+  it.each([200, 503])(
+    '응답(%i)을 기다리는 동안 다른 탭이 로그인하면 — storage 이벤트가 아직 안 와도 — B 토큰을 남기고 이 탭이 B를 따라간다',
+    async (status) => {
+      tokenStorage.startSession(A1, 'RA');
+      const gate = deferred();
+      holdLogout(gate, status);
+      await clickLogout();
+
+      act(() => tokenStorage.startSession(B1, 'RB')); // 이벤트는 보내지 않는다 — 응답이 이벤트보다 먼저 처리되는 순서
+      await act(async () => {
+        gate.resolve();
+      });
+
+      // 다시 확인이 B 토큰으로 /api/users/me를 보내 B로 확정된다(보호 화면이 다시 보인다).
+      await waitFor(() => expect(sent.filter((url) => url === '/api/users/me')).toHaveLength(2));
+      await waitFor(() => expect(screen.getByRole('button', { name: '로그아웃' })).toBeTruthy());
+      expect(tokenStorage.getAccessToken()).toBe(B1);
+      expect(tokenStorage.getRefreshToken()).toBe('RB');
+      expect(logoutBodies).toEqual(['RA']);
+    },
+  );
+
+  it('같은 세션을 다른 탭이 그사이 재발급했으면(토큰 값만 바뀜) 그 토큰도 지우고 비로그인으로 끝난다', async () => {
+    tokenStorage.startSession(A1, 'RA');
+    const gate = deferred();
+    holdLogout(gate, 200);
+    await clickLogout();
+
+    act(() => tokenStorage.setTokens(fakeJwt('1'), 'RA2')); // 재발급 — 세션 ID 유지
+    await act(async () => {
+      gate.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText('홈 화면')).toBeTruthy());
+    expect(tokenStorage.getAccessToken()).toBeNull();
+    expect(tokenStorage.getRefreshToken()).toBeNull();
+  });
+
+  it('로그아웃이 401로 재발급을 거칠 때 그사이 다른 탭이 로그인했으면 B 토큰으로 두 번째 로그아웃을 보내지 않는다', async () => {
+    tokenStorage.startSession(A1, 'RA');
+    const gate = deferred();
+    holdLogout(gate, 401); // Access Token 만료 — 로그아웃은 재발급 후 다시 보내야 한다
+    await clickLogout();
+
+    act(() => tokenStorage.startSession(B1, 'RB'));
+    await act(async () => {
+      gate.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '로그아웃' })).toBeTruthy());
+    // 재발급은 락 안에서 저장소가 이미 바뀐 것을 보고 요청 없이 끝나고, B 세션이라 두 번째 로그아웃을 보내지 않는다.
+    expect(sent).not.toContain('/api/auth/refresh');
+    expect(logoutBodies).toEqual(['RA']);
+    expect(tokenStorage.getAccessToken()).toBe(B1);
+  });
+
+  it('Refresh Token 없이 Access Token만 남은 상태에서 로그아웃하면 그 Access Token도 지우고 비로그인으로 끝난다', async () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, A1); // 비정상 상태 — 로그인은 언제나 두 토큰을 함께 저장한다
+    handler = async (config) => {
+      if (config.url === '/api/users/me') return respond(config, 200, ok({ userId: 1, email: 'a@test.com', nickname: 'A', createdAt: '' }));
+      return respond(config, 200, ok([]));
+    };
+    render(<Tree />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '로그아웃' })).toBeTruthy());
+    act(() => screen.getByRole('button', { name: '로그아웃' }).click());
+
+    await waitFor(() => expect(screen.getByText('홈 화면')).toBeTruthy());
+    expect(tokenStorage.getAccessToken()).toBeNull();
+    expect(sent).not.toContain('/api/auth/logout'); // 보낼 Refresh Token이 없다
   });
 });

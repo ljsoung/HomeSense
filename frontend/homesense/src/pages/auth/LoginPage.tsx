@@ -11,7 +11,7 @@ import { HomeIcon } from '../../components/icons/HomeIcon';
 import { AuthLayout } from '../../components/layout/AuthLayout';
 import { Button } from '../../components/ui/Button';
 import { TextField } from '../../components/ui/TextField';
-import { getRedirectPath } from '../../features/auth/redirect';
+import { getRedirectPath, returnState } from '../../features/auth/redirect';
 import { useAuth } from '../../features/auth/useAuth';
 import { loginSchema, type LoginFormValues } from '../../features/auth/loginSchema';
 import type { ApiErrorResponse } from '../../types/api';
@@ -124,7 +124,7 @@ export function LoginPage() {
       <div className="flex h-10 w-full flex-col items-center pt-5">
         <p className="text-[13px] text-[#6a7282]">
           계정이 없으신가요?{' '}
-          <Link to="/signup" className="font-bold text-brand">
+          <Link to="/signup" state={returnState(location)} className="font-bold text-brand">
             회원가입
           </Link>
         </p>

@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { getRedirectPath, returnState } from '../../features/auth/redirect';
 import { EyeIcon } from '../../components/icons/EyeIcon';
 import { EyeOffIcon } from '../../components/icons/EyeOffIcon';
 import { HomeIcon } from '../../components/icons/HomeIcon';
@@ -41,6 +42,7 @@ type EmailCheckState =
 export function SignupPage() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   // confirmedAge14는 가입 요청에 ageConfirmed로 실어 보내 서버도 검증한다(화면을 거치지 않는 직접
@@ -186,7 +188,8 @@ export function SignupPage() {
         nickname: values.nickname.trim(),
         ageConfirmed: confirmedAge14,
       });
-      navigate('/', { replace: true });
+      // 로그인 화면을 거쳐 왔으면 원래 화면으로 돌아간다(로그인 성공과 같은 규칙, CLAUDE.md SCR-AUTH-02 "가입 후 복귀" 행).
+      navigate(getRedirectPath(location), { replace: true });
     } catch (error) {
       if (axios.isAxiosError<ApiErrorResponse>(error) && error.response) {
         const status = error.response.status;
@@ -405,7 +408,7 @@ export function SignupPage() {
       <div className="flex w-full flex-col items-center pt-5">
         <p className="text-[13px] text-[#6a7282]">
           이미 계정이 있으신가요?{' '}
-          <Link to="/login" className="font-bold text-brand">
+          <Link to="/login" state={returnState(location)} className="font-bold text-brand">
             로그인
           </Link>
         </p>
