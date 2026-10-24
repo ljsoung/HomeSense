@@ -340,7 +340,11 @@ export function KakaoMapView({
       frame = requestAnimationFrame(() => {
         const map = mapRef.current;
         if (!map) return;
+        // 크기가 바뀌어도 화면 가운데가 같은 곳을 보게 한다 — 768px 경계를 넘어 레이아웃이 바뀌어도(지도는 다시 마운트되지
+        // 않는다) 사용자가 보던 위치가 그대로 가운데 남는다. 아직 relayout 전이라 getCenter는 바뀌기 전 중심이다.
+        const center = map.getCenter();
         map.relayout();
+        map.setCenter(center);
         publishViewRef.current?.();
       });
     });
