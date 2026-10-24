@@ -69,6 +69,8 @@
       if (e.target === this.pane) event.trigger(this, 'click');
     });
     window.__fakeMap = this;
+    // 지도 객체를 몇 번 만들었는지 — 화면 폭이 바뀌어도 지도를 다시 만들지 않는지 본다(specs/map-responsive).
+    window.__fakeMapCreatedCount = (window.__fakeMapCreatedCount || 0) + 1;
     this._idleSoon();
   }
   KMap.prototype._idleSoon = function () {
@@ -195,13 +197,23 @@
 
   const Status = { OK: 'OK', ZERO_RESULT: 'ZERO_RESULT', ERROR: 'ERROR' };
   // 검색어별 지연(__FAKE_KAKAO_OPTIONS.geocodeDelays) — 앞 검색이 뒤 검색보다 늦게 끝나는 경우를 만든다(map01-check 13).
+  // holdGeocode가 켜져 있으면 결과를 붙잡아 두고 window.__releaseGeocodes()를 부를 때 돌려준다 — 검색이 진행 중인 동안
+  // 무언가(화면 폭 변경 등)를 하고 나서 끝나게 만든다(specs/map-responsive).
+  window.__heldGeocodes = window.__heldGeocodes || [];
+  window.__releaseGeocodes = () => window.__heldGeocodes.splice(0).forEach((done) => done());
   function lookup(query, cb) {
-    const delays = (window.__FAKE_KAKAO_OPTIONS || {}).geocodeDelays || {};
-    setTimeout(() => {
+    const options = window.__FAKE_KAKAO_OPTIONS || {};
+    const delays = options.geocodeDelays || {};
+    const answer = () => {
       const hit = FAKE_GEOCODE[query];
       if (hit) cb([hit], Status.OK);
       else cb([], Status.ZERO_RESULT);
-    }, delays[query] ?? 10);
+    };
+    if (options.holdGeocode) {
+      window.__heldGeocodes.push(answer);
+      return;
+    }
+    setTimeout(answer, delays[query] ?? 10);
   }
   function Geocoder() {}
   Geocoder.prototype.addressSearch = lookup;
