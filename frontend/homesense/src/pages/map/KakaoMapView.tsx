@@ -77,6 +77,9 @@ interface KakaoMapViewProps {
  */
 const CLUSTER_MIN_LEVEL = 5;
 
+/** idle의 중심이 기억한 중심과 이만큼(px) 안이면 움직이지 않은 것으로 본다 — SDK 격자 맞춤 오차(최대 1px)보다 크게. */
+const SNAP_TOLERANCE_PX = 1.5;
+
 const PIN_BUTTON_CLASS =
   'group flex min-h-11 min-w-11 cursor-pointer items-end justify-center bg-transparent p-0 focus-visible:outline-none';
 const BUBBLE_BASE_CLASS =
@@ -294,18 +297,18 @@ export function KakaoMapView({
           const b = map.getBounds();
           const sw = b.getSouthWest();
           const ne = b.getNorthEast();
-          // SDK는 중심을 컨테이너 크기에 따른 픽셀 격자에 맞춘다(폭이 홀수면 반 픽셀) — 크기 변경 뒤 기억한 중심으로 되돌려도
-          // getCenter()는 반 픽셀 어긋난 값을 돌려준다. 이 값을 기억하면 경계를 넘을 때마다 한 방향으로 쌓이고 URL도 바뀐다.
-          // 그래서 기억한 중심과 1px 안이면 움직이지 않은 것으로 보고 기억한 중심을 그대로 쓴다(복원 뒤 idle이 몇 번 오든,
-          // 동기든 비동기든 같다). 사용자가 옮겼으면(1px 넘게) 새 중심을 기억한다.
+          // SDK는 중심을 픽셀 격자에 맞춘다 — 크기 변경 뒤 기억한 중심으로 되돌려도 getCenter()는 최대 1px 어긋난 값을
+          // 돌려준다(실제 SDK 2026-10-27: 폭 767에서 setCenter(126.9783807) → 126.9783354, 1.0px). 이 값을 기억하면 경계를 넘을
+          // 때마다 한 방향으로 쌓이고 URL도 바뀐다. 그래서 기억한 중심과 1.5px 안이면 움직이지 않은 것으로 보고 기억한 중심을
+          // 그대로 쓴다(복원 뒤 idle이 몇 번 오든, 동기든 비동기든 같다). 사용자가 옮겼으면(1.5px 넘게) 새 중심을 기억한다.
           const snapped = map.getCenter();
           const remembered = lastCenterRef.current;
           const latPerPx = (ne.getLat() - sw.getLat()) / (container.clientHeight || 1);
           const lngPerPx = (ne.getLng() - sw.getLng()) / (container.clientWidth || 1);
           const unmoved =
             remembered !== null &&
-            Math.abs(snapped.getLat() - remembered.getLat()) < latPerPx &&
-            Math.abs(snapped.getLng() - remembered.getLng()) < lngPerPx;
+            Math.abs(snapped.getLat() - remembered.getLat()) < SNAP_TOLERANCE_PX * latPerPx &&
+            Math.abs(snapped.getLng() - remembered.getLng()) < SNAP_TOLERANCE_PX * lngPerPx;
           const center = unmoved ? remembered : snapped;
           lastCenterRef.current = center;
           callbacks.current.onIdle(
