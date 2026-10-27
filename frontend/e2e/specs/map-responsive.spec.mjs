@@ -51,7 +51,12 @@ const sidebar = (page) => page.getByRole('complementary', { name: '지도 단지
 const mapSnapshot = (page) =>
   page.evaluate(() => {
     const map = window.__fakeMap;
+    // 기준 핀이 지도 영역 가운데에서 화면상 얼마나 떨어져 있는지 — 사용자가 십자선으로 재는 값과 같다.
+    const canvas = document.querySelector('[data-testid="map-canvas"]').getBoundingClientRect();
+    const pin = document.querySelector('[data-testid="map-canvas"] button[data-complex-id="1"]')?.getBoundingClientRect();
     return {
+      pinDx: pin ? pin.x + pin.width / 2 - (canvas.x + canvas.width / 2) : null,
+      pinDy: pin ? pin.y + pin.height / 2 - (canvas.y + canvas.height / 2) : null,
       created: window.__fakeMapCreatedCount,
       tag: map.__tag ?? null,
       lat: map.getCenter().getLat(),
@@ -61,13 +66,30 @@ const mapSnapshot = (page) =>
     };
   });
 
-/** 화면 폭을 바꾸고 지도가 새 크기로 relayout될 때까지 기다린다. */
+/**
+ * 화면 폭을 바꾸고 지도가 새 크기로 relayout될 때까지 기다린다. 실제 SDK처럼 가짜 SDK도 창 resize 이벤트에 스스로 relayout하므로
+ * (중심이 어긋난다) 이 대기만으로는 앱의 보정까지 끝났다는 뜻이 아니다 — 위치는 호출한 쪽이 폴링으로 확인한다.
+ */
 async function resizeTo(page, width, layout) {
   const before = (await mapSnapshot(page)).relayouts;
   await page.setViewportSize({ width, height: 900 });
   if (layout === 'desktop') await expect(sidebar(page)).toBeVisible();
   else await expect(sidebar(page)).toHaveCount(0);
   await expect.poll(async () => (await mapSnapshot(page)).relayouts).toBeGreaterThan(before);
+}
+
+/** 시작 상태와의 차이. 화면 위치는 1px 안이면 0으로 본다. */
+async function driftFrom(page, start) {
+  const now = await mapSnapshot(page);
+  const px = (d) => (Math.abs(d) <= 1 ? 0 : Math.round(d));
+  return {
+    created: now.created,
+    tag: now.tag,
+    level: now.level,
+    centerMoved: Math.abs(now.lat - start.lat) > 1e-9 || Math.abs(now.lng - start.lng) > 1e-9,
+    pinDx: px(now.pinDx - start.pinDx),
+    pinDy: px(now.pinDy - start.pinDy),
+  };
 }
 
 test('767 → 1024 → 767: 지도 객체·위치·레벨·핀·URL·히스토리가 그대로이고 뒤로가기는 이전 화면으로', async ({ page }) => {
@@ -102,15 +124,14 @@ test('767 → 1024 → 767: 지도 객체·위치·레벨·핀·URL·히스토�
     [767, 'mobile'],
   ]) {
     await resizeTo(page, width, layout);
-    const now = await mapSnapshot(page);
-    expect(now.created, `${width}px: 지도를 다시 만들지 않는다`).toBe(1);
-    expect(now.tag).toBe('original');
-    expect(now.level).toBe(start.level);
-    expect(now.lat).toBeCloseTo(start.lat, 9);
-    expect(now.lng).toBeCloseTo(start.lng, 9);
+    // 지도를 다시 만들지 않고(생성 1회·같은 객체), 같은 곳이 화면 가운데에 남는다 — 기준 핀과 지도 영역 가운데의 거리가 같다
+    // (사용자가 십자선으로 재는 값).
+    await expect
+      .poll(() => driftFrom(page, start), { message: `${width}px: 지도 객체·중심·레벨·기준 핀 위치` })
+      .toEqual({ created: 1, tag: 'original', level: start.level, centerMoved: false, pinDx: 0, pinDy: 0 });
     await expect(pins(page)).toHaveCount(ITEMS.length);
     await expect(page.locator('[data-testid="map-canvas"] button[data-complex-id="1"]')).toHaveAttribute('data-e2e-tag', 'original');
-    expect(page.url(), `${width}px: URL이 그대로`).toBe(startUrl);
+    await expect(page, `${width}px: URL이 그대로`).toHaveURL(startUrl);
     expect(await page.evaluate(() => window.history.length)).toBe(startHistory);
   }
 
