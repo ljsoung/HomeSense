@@ -46,7 +46,7 @@ for (const logoutStatus of [200, 503]) {
       localStorage.setItem('homesense.authSessionId', 'session-A');
     }, [[ACCESS_KEY, REFRESH_KEY], TOKEN_A]);
     await tabA.reload();
-    const headerA = tabA.locator('header:visible');
+    const headerA = tabA.getByRole('banner');
     await headerA.getByRole('button', { name: /계정 메뉴/ }).click();
     await tabA.getByRole('menuitem', { name: '로그아웃' }).click();
     await expect.poll(() => logoutBodies).toEqual(['RA']);
@@ -58,7 +58,7 @@ for (const logoutStatus of [200, 503]) {
     await tabB.getByLabel('비밀번호', { exact: true }).fill('Passw0rd!');
     await tabB.getByRole('button', { name: '로그인', exact: true }).click();
     await expect(tabB).toHaveURL(/\/$/);
-    await expect(tabB.locator('header:visible').getByRole('button', { name: /계정 메뉴/ })).toBeVisible();
+    await expect(tabB.getByRole('banner').getByRole('button', { name: /계정 메뉴/ })).toBeVisible();
 
     // 탭 A의 로그아웃 응답이 이제 온다.
     logoutGate.release();
@@ -74,7 +74,7 @@ for (const logoutStatus of [200, 503]) {
     // 탭 B는 새로고침해도 B로 확인된다.
     meResults.length = 0;
     await tabB.reload();
-    await expect(tabB.locator('header:visible').getByRole('button', { name: /계정 메뉴/ })).toBeVisible();
+    await expect(tabB.getByRole('banner').getByRole('button', { name: /계정 메뉴/ })).toBeVisible();
     expect(meResults).toContainEqual({ sub: '8', status: 200 });
     expect(await tabB.evaluate((key) => localStorage.getItem(key), REFRESH_KEY)).toBe('RB');
 

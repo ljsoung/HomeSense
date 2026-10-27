@@ -51,7 +51,7 @@ async function openHome({ tokens } = {}) {
   return { context, page, errors, refreshCalls };
 }
 
-const header = (page) => page.locator('header').first();
+const header = (page) => page.getByRole('banner');
 
 // 1) 비로그인 — GNB와 히어로
 {

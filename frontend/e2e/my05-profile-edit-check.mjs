@@ -353,7 +353,7 @@ async function scenarioLeaveWhileSaving(label, viewport) {
 
 async function scenarioPasswordAfterLeave(label, viewport) {
   for (const { name, link, expectedPath } of [
-    { name: '공개 화면(홈)', link: 'header a[href="/"]:visible', expectedPath: '/' },
+    { name: '공개 화면(홈)', link: 'header a[href="/"]', expectedPath: '/' },
     { name: '보호 화면(관심목록)', link: 'a[href="/favorites"]:visible', expectedPath: '/login' },
   ]) {
     const { context, page, calls, db } = await open(viewport, { putMode: 'hold' });
@@ -373,7 +373,7 @@ async function scenarioPasswordAfterLeave(label, viewport) {
     if (expectedPath === '/') {
       await page.waitForTimeout(500);
       ok(`${label} 10 ${name}: 홈에 머묾(MY-01·로그인 화면으로 끌려가지 않음)`, new URL(page.url()).pathname === '/', page.url());
-      ok(`${label} 10 ${name}: 헤더가 비로그인(로그인 링크)`, (await page.locator('header:visible a[href="/login"]').count()) >= 1);
+      ok(`${label} 10 ${name}: 헤더가 비로그인(로그인 링크)`, (await page.getByRole('banner').locator('a[href="/login"]').count()) >= 1);
     }
     ok(`${label} 10 ${name}: PUT 1회·로그아웃 API 미호출`, puts(calls).length === 1 && !calls.some((c) => c.path === '/api/auth/logout'));
     await context.close();
@@ -381,11 +381,11 @@ async function scenarioPasswordAfterLeave(label, viewport) {
 }
 
 async function logOutFromHome(page) {
-  await page.locator('header a[href="/"]:visible').first().click();
+  await page.getByRole('banner').locator('a[href="/"]').click();
   await waitPath(page, '/');
-  await page.locator('header:visible').getByRole('button', { name: /계정 메뉴/ }).click();
+  await page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).click();
   await page.getByRole('menuitem', { name: '로그아웃' }).click();
-  await page.locator('header:visible a[href="/login"]').first().waitFor({ timeout: 5000 });
+  await page.getByRole('banner').locator('a[href="/login"]').first().waitFor({ timeout: 5000 });
 }
 
 // release: 늦게 도착하는 응답 — 'ok'(성공), 'unauthorized'(401 — 인터셉터가 B 토큰으로 재시도·재발급하지 않아야 한다),
@@ -398,24 +398,24 @@ async function scenarioPasswordAfterAccountSwitch(label, viewport, release = 'ok
   await saveButton(page).click();
   await page.waitForFunction(() => document.querySelector('button[aria-busy="true"]') !== null);
   await page.evaluate(() => { window.__sameDocument = true; });
-  await page.locator('header a[href="/"]:visible').first().click();
+  await page.getByRole('banner').locator('a[href="/"]').click();
   await waitPath(page, '/');
-  await page.locator('header:visible').getByRole('button', { name: /계정 메뉴/ }).click();
+  await page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).click();
   await page.getByRole('menuitem', { name: '로그아웃' }).click();
   // 앱 안 링크로 이동한다 — page.goto는 새로고침이라 보류 중인 PUT과 그 뒤처리가 함께 사라진다.
-  await page.locator('header:visible a[href="/login"]').first().click();
+  await page.getByRole('banner').locator('a[href="/login"]').first().click();
   await waitPath(page, '/login');
   await page.getByLabel('이메일').fill(OTHER_USER.email);
   await page.getByLabel('비밀번호', { exact: true }).fill('Other123!');
   await page.locator('button[type="submit"]').click();
   ok(`${label}: B로 로그인 → 홈`, await waitPath(page, '/'));
-  await page.locator('header:visible').getByRole('button', { name: /다른계정 계정 메뉴/ }).waitFor({ timeout: 5000 }).catch(() => {});
+  await page.getByRole('banner').getByRole('button', { name: /다른계정 계정 메뉴/ }).waitFor({ timeout: 5000 }).catch(() => {});
   ok(`${label}: 응답 보류 중(새로고침 없이 같은 문서)`, puts(calls).length === 1 && await page.evaluate(() => window.__sameDocument === true));
   db.release(release);
   await page.waitForTimeout(800);
   ok(`${label}: 늦은 응답 뒤에도 B의 토큰 유지`,
     await page.evaluate((tokenB) => localStorage.getItem('homesense.accessToken') === tokenB && localStorage.getItem('homesense.refreshToken') === 'R2', TOKEN_B));
-  ok(`${label}: 헤더가 B로 로그인된 채`, (await page.locator('header:visible').getByRole('button', { name: /다른계정 계정 메뉴/ }).count()) === 1);
+  ok(`${label}: 헤더가 B로 로그인된 채`, (await page.getByRole('banner').getByRole('button', { name: /다른계정 계정 메뉴/ }).count()) === 1);
   ok(`${label}: 비밀번호 변경 안내 토스트 없음`, (await page.getByText('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해주세요.').count()) === 0);
   ok(`${label}: 홈에 머묾`, new URL(page.url()).pathname === '/', page.url());
   ok(`${label}: PUT 1회(B 토큰으로 재시도 없음)`, puts(calls).length === 1);

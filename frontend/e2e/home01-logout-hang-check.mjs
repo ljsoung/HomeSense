@@ -65,7 +65,7 @@ async function openLoggedIn(account, { hang, expireAccessAfterLoad = false, noLo
 const stored = (page) => page.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [ACCESS_KEY, REFRESH_KEY]);
 
 async function clickLogout(page) {
-  const header = page.locator('header').first();
+  const header = page.getByRole('banner');
   await header.getByRole('button', { name: /계정 메뉴/ }).click();
   await page.getByRole('menuitem', { name: '로그아웃' }).click();
   const startedAt = Date.now();
@@ -111,7 +111,7 @@ async function clickLogout(page) {
     refreshResponses.includes(200) || refreshFailedOnClient.length > 0,
     `responses=${JSON.stringify(refreshResponses)} failed=${JSON.stringify(refreshFailedOnClient)}`);
   ok('재발급 멈춤: 늦은 응답이 지운 토큰을 되살리지 않음', (await stored(page)).every((v) => v === null));
-  ok('재발급 멈춤: 헤더는 계속 비로그인', await page.locator('header').first().getByRole('link', { name: '로그인' }).isVisible());
+  ok('재발급 멈춤: 헤더는 계속 비로그인', await page.getByRole('banner').getByRole('link', { name: '로그인' }).isVisible());
   ok('pageerror 없음(재발급 멈춤)', errors.length === 0);
   await context.close();
 }
@@ -161,7 +161,7 @@ async function clickLogout(page) {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: refresh }),
   }).then((r) => r.ok);
   ok('B 재로그인: B의 Refresh Token이 서버에서 폐기되지 않음', refreshStillValid);
-  const menu = page.locator('header').first().getByRole('button', { name: /계정 메뉴/ });
+  const menu = page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ });
   ok('B 재로그인: 화면은 B로 로그인 상태', (await menu.isVisible()) && (await menu.textContent()).includes(accountB.nickname));
   ok('pageerror 없음(B 재로그인)', errors.length === 0);
   await context.close();

@@ -170,7 +170,7 @@ await runScenario('Web Locks 있음', { noLocks: false });
   tab1.on('pageerror', (e) => errors.push(String(e)));
   await tab1.goto(`${BASE}/`);
   await tab1.waitForLoadState('networkidle');
-  const menuA = tab1.locator('header').first().getByRole('button', { name: /계정 메뉴/ });
+  const menuA = tab1.getByRole('banner').getByRole('button', { name: /계정 메뉴/ });
   ok('다른 계정: 탭 1이 계정 A로 로그인 상태', (await menuA.waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await menuA.textContent()).includes('계정A'));
 
   // 서버가 계정 A의 토큰을 만료시킨다. 탭 1이 보호 API를 부르고(A 토큰), 응답이 오기 전에 탭 2가 계정 B로 로그인한다.

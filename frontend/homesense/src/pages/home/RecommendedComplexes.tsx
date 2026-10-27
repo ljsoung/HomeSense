@@ -15,7 +15,7 @@ interface RecommendedComplexesProps {
 
 /**
  * HOME-01 구성요소 5 — GET /api/complexes/popular 연동. 완료 조건: 모바일은 1.2장 보이는 가로
- * 스크롤 캐러셀(Figma 모바일 프레임 확인), 데스크톱/태블릿은 그리드.
+ * 스크롤 캐러셀(Figma 모바일 프레임 확인), 데스크톱/태블릿은 그리드 — 같은 목록 한 벌의 배치만 바뀐다.
  */
 export function RecommendedComplexes({ favoritedIds, onToggleFavorite, pendingFavoriteId }: RecommendedComplexesProps) {
   const [complexes, setComplexes] = useState<ComplexSummaryResponse[]>([]);
@@ -63,31 +63,24 @@ export function RecommendedComplexes({ favoritedIds, onToggleFavorite, pendingFa
           <Spinner />
         </div>
       ) : (
-        <>
-          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-3 md:hidden">
-            {complexes.map((complex) => (
+        // 목록은 한 벌이다(반응형 렌더 규칙) — 모바일은 가로 스크롤(카드 83% 폭), md 이상은 같은 목록이 그리드가 된다.
+        // 예전엔 두 벌을 렌더하고 CSS로 한쪽을 숨겨 하트 버튼이 카드 수의 두 배였다.
+        <ul
+          aria-label="추천 단지"
+          className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-3 md:mx-0 md:grid md:grid-cols-2 md:gap-5 md:overflow-visible md:px-0 md:pb-0 lg:grid-cols-4"
+        >
+          {complexes.map((complex) => (
+            <li key={complex.complexId} className="flex w-[83%] shrink-0 md:w-auto">
               <ComplexCard
-                key={complex.complexId}
                 complex={complex}
                 isFavorited={favoritedIds.has(complex.complexId)}
                 onToggleFavorite={() => onToggleFavorite(complex.complexId)}
                 favoritePending={pendingFavoriteId === complex.complexId}
-                className="w-[83%] shrink-0"
+                className="w-full"
               />
-            ))}
-          </div>
-          <div className="hidden grid-cols-2 gap-5 md:grid lg:grid-cols-4">
-            {complexes.map((complex) => (
-              <ComplexCard
-                key={complex.complexId}
-                complex={complex}
-                isFavorited={favoritedIds.has(complex.complexId)}
-                onToggleFavorite={() => onToggleFavorite(complex.complexId)}
-                favoritePending={pendingFavoriteId === complex.complexId}
-              />
-            ))}
-          </div>
-        </>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

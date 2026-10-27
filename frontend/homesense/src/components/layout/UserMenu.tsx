@@ -4,18 +4,16 @@ import { useAuth } from '../../features/auth/useAuth';
 import { useLogoutAction } from '../../features/auth/useLogoutAction';
 import { MY_ROUTES } from '../../routes/paths';
 
-interface UserMenuProps {
-  /** 'desktop' = 아바타+닉네임 알약(Figma 3:38), 'mobile' = 아바타 원형만. */
-  variant: 'desktop' | 'mobile';
-}
-
 /**
  * 로그인 상태의 헤더 우측 아바타 — 누르면 "마이페이지 / 로그아웃" 메뉴가 열린다. Figma(3:2/24:6736)는
  * 아바타만 그리고 로그아웃 위치를 정의하지 않아 여기 둔다. MY-01의 계정 다이얼로그에도
  * 로그아웃이 있고, 두 곳은 같은 경로(useLogoutAction)를 쓴다. ARIA 메뉴 버튼 패턴(aria-haspopup/aria-expanded, role=menu/menuitem)을 따르고,
  * 열리면 첫 항목에 포커스, ↑/↓로 이동, Esc·바깥 클릭으로 닫힌다(Esc는 버튼으로 포커스 복귀).
+ *
+ * 모양은 화면 크기에 따라 클래스로만 바뀐다 — md 이상은 아바타+닉네임 알약(Figma 3:38), 모바일은 아바타 원형만(24:6736).
+ * 버튼·메뉴는 한 벌이라 폭이 바뀌어도 열린 메뉴와 포커스가 그대로다.
  */
-export function UserMenu({ variant }: UserMenuProps) {
+export function UserMenu() {
   const { user } = useAuth();
   const { logoutWithNotice, loggingOut } = useLogoutAction();
   const [open, setOpen] = useState(false);
@@ -74,22 +72,12 @@ export function UserMenu({ variant }: UserMenuProps) {
         aria-controls={open ? menuId : undefined}
         aria-label={`${nickname || '내'} 계정 메뉴`}
         onClick={() => setOpen((prev) => !prev)}
-        className={
-          variant === 'desktop'
-            ? 'flex items-center gap-2 rounded-full py-1 pr-3 pl-1 hover:bg-[#f7f8fa]'
-            : 'flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white'
-        }
+        className="flex items-center gap-2 rounded-full md:py-1 md:pr-3 md:pl-1 md:hover:bg-[#f7f8fa]"
       >
-        {variant === 'desktop' ? (
-          <>
-            <span className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
-              {initial}
-            </span>
-            <span className="text-[13px] font-medium text-[#364153]">{nickname}</span>
-          </>
-        ) : (
-          initial
-        )}
+        <span className="flex size-7 items-center justify-center rounded-full bg-brand text-[11px] font-bold text-white">
+          {initial}
+        </span>
+        <span className="hidden text-[13px] font-medium text-[#364153] md:inline">{nickname}</span>
       </button>
 
       {open && (

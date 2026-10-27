@@ -14,7 +14,7 @@ const TABS = [
 ] as const;
 
 /**
- * UIC-02. 모바일 전용(md 이상은 MainLayout이 숨기고 Gnb로 대체). Figma가 활성 탭(홈)만
+ * UIC-02. 모바일 전용(md 이상은 숨기고 AppHeader의 중앙 메뉴로 대체). Figma가 활성 탭(홈)만
  * strokeWidth 2.29/브랜드색, 비활성 탭은 1.65/회색으로 캡처해뒀다 — 실제로는 라우트에 따라
  * 어느 탭이든 활성화될 수 있어 strokeWidth·색상을 currentColor/prop으로 동적으로 바꾼다.
  */
@@ -22,7 +22,7 @@ export function BottomTabNav() {
   const location = useLocation();
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-[#e5e7eb] bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
+    <nav aria-label="하단 탭 메뉴" className="fixed inset-x-0 bottom-0 z-40 flex border-t border-[#e5e7eb] bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
       {TABS.map(({ to, label, Icon }) => {
         // 단지 상세(`/complexes/*`, DTL-01)는 검색에서 이어지는 화면이라 "검색" 탭을 활성으로 둔다. 알림 설정·이력(MY-03·04,
         // `/notifications/*`)은 마이페이지 하위 화면이라 "마이" 탭을 활성으로 둔다.

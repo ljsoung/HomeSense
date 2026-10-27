@@ -27,10 +27,8 @@ for (const vp of viewports) {
   await page.waitForSelector('text=인기 검색 지역', { timeout: 10000 });
   await page.waitForTimeout(300);
 
-  // RecommendedComplexes는 모바일 가로 스크롤용과 데스크톱/태블릿 그리드용 두 세트를 함께 렌더링하고
-  // CSS(`hidden md:grid` 등)로 뷰포트에 맞는 쪽만 보이게 한다 — 그래서 button[aria-pressed] 개수는
-  // 항상 카드 수의 2배이고, 현재 뷰포트에서 실제로 "보이는" 쪽만 상호작용 대상이어야 한다.
-  const visibleHeart = page.locator('button[aria-pressed]:visible');
+  // 추천 단지 목록은 한 벌이다(2026-10-27) — 예전엔 모바일·데스크톱 두 세트를 렌더해 하트가 카드 수의 2배였다.
+  const visibleHeart = page.getByRole('list', { name: '추천 단지' }).locator('button[aria-pressed]');
   const cardCount = await visibleHeart.count();
   ok(`${vp.name} — 인기 단지 카드가 렌더링됨`, cardCount > 0);
 
