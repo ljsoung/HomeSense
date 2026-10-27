@@ -58,7 +58,7 @@ export function MenuGrid({ onOpenAccount }: { onOpenAccount: () => void }) {
     <nav aria-labelledby={headingId}>
       <h2
         id={headingId}
-        className="mb-2 text-[13px] leading-5 font-bold text-[#99a1af] md:mb-3 md:text-[14px] md:leading-[21px]"
+        className="mb-2 text-[13px] leading-5 font-bold text-muted md:mb-3 md:text-[14px] md:leading-[21px]"
       >
         메뉴
       </h2>

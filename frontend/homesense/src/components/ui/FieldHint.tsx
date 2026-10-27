@@ -14,7 +14,7 @@ export function FieldHint({ status, message, id }: FieldHintProps) {
     <div
       id={id}
       role={isError ? 'alert' : 'status'}
-      className={`mt-1 flex items-center gap-1.5 text-[12px] ${isError ? 'text-[#fb2c36]' : 'text-[#00a63e]'}`}
+      className={`mt-1 flex items-center gap-1.5 text-[12px] ${isError ? 'text-[#e7000b]' : 'text-[#00a63e]'}`}
     >
       {isError ? (
         <AlertCircleIcon className="size-3.5 shrink-0" />

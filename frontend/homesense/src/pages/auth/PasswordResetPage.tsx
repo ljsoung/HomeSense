@@ -64,12 +64,12 @@ function StepIndicator({ step }: { step: 1 | 2 }) {
       <div className={`h-px w-8 shrink-0 ${step1Done ? 'bg-[#22c55e]' : 'bg-[#e5e7eb]'}`} />
       <div
         className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-          step === 2 ? 'bg-brand text-white' : 'bg-[#e5e7eb] text-[#99a1af]'
+          step === 2 ? 'bg-brand text-white' : 'bg-[#e5e7eb] text-[#4a5565]'
         }`}
       >
         2
       </div>
-      <span className={`text-[12px] font-semibold ${step === 2 ? 'text-brand' : 'text-[#99a1af]'}`}>비밀번호 설정</span>
+      <span className={`text-[12px] font-semibold ${step === 2 ? 'text-brand' : 'text-muted'}`}>비밀번호 설정</span>
     </div>
   );
 }
@@ -206,12 +206,12 @@ function RequestStep() {
           <MailIcon className="size-4 shrink-0 text-[#99a1af]" />
           <p className="truncate text-[14px] font-medium text-[#364153]">{sentEmail}</p>
         </div>
-        <p className="w-full pt-2 text-center text-[11.5px] text-[#99a1af]">
+        <p className="w-full pt-2 text-center text-[11.5px] text-muted">
           보안상 이메일 존재 여부와 무관하게 동일한 안내 문구를 표시합니다.
         </p>
         <div className="w-full pt-6">
           {cooldown > 0 ? (
-            <div className="flex h-[54.5px] w-full items-center justify-center gap-2 rounded-[14px] border-2 border-[#e5e7eb] bg-white text-[15px] font-bold text-[#9ca3af]">
+            <div className="flex h-[54.5px] w-full items-center justify-center gap-2 rounded-[14px] border-2 border-[#e5e7eb] bg-white text-[15px] font-bold text-muted">
               <ClockIcon className="size-4" />
               {cooldown}초 후 재발송 가능
             </div>
@@ -258,7 +258,7 @@ function RequestStep() {
         {serverError && <FieldHint id="request-error" status="error" message={serverError} />}
         <div className="w-full pt-1">
           {isCoolingDownForCurrentEmail ? (
-            <div className="flex h-[54.5px] w-full items-center justify-center gap-2 rounded-[14px] border-2 border-[#e5e7eb] bg-white text-[15px] font-bold text-[#9ca3af]">
+            <div className="flex h-[54.5px] w-full items-center justify-center gap-2 rounded-[14px] border-2 border-[#e5e7eb] bg-white text-[15px] font-bold text-muted">
               <ClockIcon className="size-4" />
               {cooldown}초 후 다시 시도 가능
             </div>

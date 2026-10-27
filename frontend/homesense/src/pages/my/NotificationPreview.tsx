@@ -55,7 +55,7 @@ export function NotificationPreview({ state, onRetry }: { state: Loadable<Notifi
                   <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-[#1e2939]">
                     {notification.title}
                   </span>
-                  <time dateTime={notification.createdAt} className="mt-0.5 text-[11px] leading-[17px] text-[#99a1af]">
+                  <time dateTime={notification.createdAt} className="mt-0.5 text-[11px] leading-[17px] text-muted">
                     {formatRelativeTime(notification.createdAt, now)}
                   </time>
                 </span>

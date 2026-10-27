@@ -52,7 +52,7 @@ export function RecommendedComplexes({ favoritedIds, onToggleFavorite, pendingFa
     <section className="mx-auto max-w-[1280px] px-4 pt-8 pb-4 md:px-8">
       <div className="flex items-center justify-between pb-5">
         <h2 className="text-[18px] font-extrabold tracking-[-0.3px] text-[#101828] md:text-[20px]">인기 검색 지역 · 추천 단지</h2>
-        <span className="flex items-center gap-0.5 text-[13px] font-semibold text-[#99a1af]">
+        <span className="flex items-center gap-0.5 text-[13px] font-semibold text-muted">
           전체보기
           <ChevronRightIcon className="size-4" />
         </span>

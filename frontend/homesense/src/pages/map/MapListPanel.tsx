@@ -149,7 +149,7 @@ export function MapListPanel({
       </div>
 
       <div className="shrink-0 border-t border-[#f3f4f6] bg-[#f9fafb] px-4 py-2">
-        <p className="text-[10px] leading-[16.25px] text-[#99a1af]">{DATA_SOURCE_TEXT}</p>
+        <p className="text-[10px] leading-[16.25px] text-muted">{DATA_SOURCE_TEXT}</p>
       </div>
     </div>
   );

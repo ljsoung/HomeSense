@@ -26,7 +26,7 @@ export function LocationCard({ address, locationPrecision, loading, mapHref }: L
         위치
       </h2>
       <div className="pt-3">
-        <div className="flex h-[160px] flex-col items-center justify-center gap-2 rounded-[14px] border border-[#f3f4f6] bg-[#f7f8fa] text-[#99a1af]">
+        <div className="flex h-[160px] flex-col items-center justify-center gap-2 rounded-[14px] border border-[#f3f4f6] bg-[#f7f8fa] text-muted">
           <MapFoldIcon className="size-6" />
           <p className="text-[12px]">{mapHref ? '아래 버튼으로 지도에서 위치를 확인하세요' : '지도 위치 정보가 없습니다'}</p>
         </div>
@@ -34,7 +34,7 @@ export function LocationCard({ address, locationPrecision, loading, mapHref }: L
       {loading ? (
         <div className="mt-2.5 h-4 w-2/3 animate-pulse rounded bg-[#f3f4f6]" />
       ) : (
-        <p className="pt-2.5 text-[11px] leading-[16.5px] text-[#99a1af]">{address || '주소 정보 없음'}</p>
+        <p className="pt-2.5 text-[11px] leading-[16.5px] text-muted">{address || '주소 정보 없음'}</p>
       )}
       {approximate && <p className="pt-1 text-[11px] leading-[16.5px] text-[#973c00]">근사 위치입니다</p>}
       <div className="pt-3">
@@ -59,7 +59,7 @@ export function LocationCard({ address, locationPrecision, loading, mapHref }: L
         )}
       </div>
       {!mapHref && !loading && (
-        <p id="complex-location-map-note" className="pt-1.5 text-center text-[11px] text-[#99a1af]">
+        <p id="complex-location-map-note" className="pt-1.5 text-center text-[11px] text-muted">
           위치 정보가 없어 지도에서 볼 수 없습니다
         </p>
       )}

@@ -56,7 +56,7 @@ export function FilterPanel({ draft, onChangeDraft, onApply, onReset, showHeader
       {showHeader && (
         <div className="flex items-center justify-between">
           <h3 className="text-[16px] font-bold text-[#101828]">필터</h3>
-          <button type="button" onClick={onReset} className="flex items-center gap-1 text-[12px] text-[#99a1af] hover:text-[#6a7282]">
+          <button type="button" onClick={onReset} className="flex items-center gap-1 text-[12px] text-muted hover:text-[#4a5565]">
             <RotateCcwIcon />
             초기화
           </button>

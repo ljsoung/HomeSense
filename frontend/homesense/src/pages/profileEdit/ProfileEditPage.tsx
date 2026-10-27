@@ -42,7 +42,7 @@ const SAVED_TOAST = '회원정보가 저장되었습니다';
 
 const CARD_CLASS =
   'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.04),0_4px_24px_rgba(0,0,0,0.08)]';
-const SECTION_TITLE_CLASS = 'text-[13px] leading-[19.5px] font-bold text-[#99a1af]';
+const SECTION_TITLE_CLASS = 'text-[13px] leading-[19.5px] font-bold text-muted';
 
 type FieldKey = Exclude<ErrorTarget, 'banner'>;
 
@@ -309,7 +309,7 @@ function ProfileEditForm({ baseline: initialBaseline }: { baseline: UserResponse
                 >
                   <span className={SECTION_TITLE_CLASS}>비밀번호 변경</span>
                   <span
-                    className={`flex items-center gap-1.5 text-[12px] leading-[18px] font-semibold ${form.passwordOpen ? 'text-brand' : 'text-[#99a1af]'}`}
+                    className={`flex items-center gap-1.5 text-[12px] leading-[18px] font-semibold ${form.passwordOpen ? 'text-brand' : 'text-muted'}`}
                   >
                     {form.passwordOpen ? '접기' : '펼치기'}
                     <ChevronDownIcon aria-hidden="true" className={`size-3.5 ${form.passwordOpen ? 'rotate-180' : ''}`} />
@@ -385,7 +385,7 @@ function ProfileEditForm({ baseline: initialBaseline }: { baseline: UserResponse
           </div>
 
           <div className="mt-6 flex items-center gap-2.5 xl:justify-between">
-            <p id={ids.notice} className="hidden text-[12.5px] leading-[18.75px] text-[#99a1af] xl:block">
+            <p id={ids.notice} className="hidden text-[12.5px] leading-[18.75px] text-muted xl:block">
               {notice}
             </p>
             <div className="flex flex-1 gap-2.5 xl:flex-none">
@@ -517,13 +517,13 @@ function Field({
         {endAdornment && <div className="absolute inset-y-0 right-3.5 flex items-center">{endAdornment}</div>}
       </div>
       {error !== undefined && (
-        <p id={`${id}-error`} role="alert" className="mt-1.5 flex items-center gap-1 text-[12px] leading-[18px] font-medium text-[#fb2c36]">
+        <p id={`${id}-error`} role="alert" className="mt-1.5 flex items-center gap-1 text-[12px] leading-[18px] font-medium text-[#e7000b]">
           <AlertCircleIcon aria-hidden="true" className="size-3.5 shrink-0" />
           <span>{error}</span>
         </p>
       )}
       {help && (
-        <p id={`${id}-help`} className="mt-1.5 text-[12px] leading-[18px] font-medium text-[#99a1af]">
+        <p id={`${id}-help`} className="mt-1.5 text-[12px] leading-[18px] font-medium text-muted">
           {help}
         </p>
       )}

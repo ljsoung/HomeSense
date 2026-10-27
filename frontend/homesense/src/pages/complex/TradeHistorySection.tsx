@@ -27,7 +27,7 @@ function amount(value: number | null | undefined): string {
   return value == null ? '-' : formatKoreanPrice(value);
 }
 
-const TH = 'px-4 py-3 text-[11px] font-bold leading-[16.5px] tracking-[0.275px] text-[#99a1af]';
+const TH = 'px-4 py-3 text-[11px] font-bold leading-[16.5px] tracking-[0.275px] text-muted';
 
 /**
  * DTL-01 구성요소 5·6 — 거래유형 탭(Figma 4:3182, 가운데 정렬한 별도 카드)과 실거래 이력 카드(Figma 4:3192).
@@ -96,7 +96,7 @@ export function TradeHistorySection({ dealType, onChangeDealType, history, onRet
           <h2 id="trade-history-title" className="text-[15px] font-extrabold leading-[22.5px] text-[#101828]">
             실거래 이력
           </h2>
-          <p className="pt-0.5 text-[11.5px] leading-[17.25px] text-[#99a1af]">계약일 기준 · 최근 거래 순</p>
+          <p className="pt-0.5 text-[11.5px] leading-[17.25px] text-muted">계약일 기준 · 최근 거래 순</p>
         </div>
 
         {history.status === 'loading' ? (
@@ -187,7 +187,7 @@ export function TradeHistorySection({ dealType, onChangeDealType, history, onRet
             )}
             {isSale && (
               <div
-                className="flex flex-col gap-4 border-t border-[#f3f4f6] px-5 py-3 text-[11px] leading-[16.5px] text-[#99a1af] md:flex-row md:px-6"
+                className="flex flex-col gap-4 border-t border-[#f3f4f6] px-5 py-3 text-[11px] leading-[16.5px] text-muted md:flex-row md:px-6"
                 aria-label="범례"
               >
                 <span className="flex items-center gap-1.5">
@@ -219,7 +219,7 @@ function HistoryRow({
   onOpen: (trade: TradeResponse) => void;
 }) {
   const cancelled = trade.isCancelled;
-  const muted = cancelled ? 'text-[#99a1af] line-through' : '';
+  const muted = cancelled ? 'text-muted line-through' : '';
   const date = formatFullDate(trade.dealDate);
   const background = cancelled ? 'bg-[rgba(254,242,242,0.5)]' : striped ? 'bg-[#fafafa]' : 'bg-white';
   const cell = 'whitespace-nowrap px-4 py-[15px]';
@@ -260,7 +260,7 @@ function HistoryRow({
                 {trade.cancelDate && <span className="text-[11px] leading-[16.5px] text-[#e7000b]">{formatFullDate(trade.cancelDate)}</span>}
               </span>
             ) : trade.isRegistered ? (
-              <span className="text-[12px] leading-[18px] text-[#99a1af]">완료</span>
+              <span className="text-[12px] leading-[18px] text-muted">완료</span>
             ) : (
               <RegistrationPendingBadge />
             )}
@@ -273,10 +273,11 @@ function HistoryRow({
 
 function DealingTypeBadge({ code, dimmed }: { code: string | null | undefined; dimmed: boolean }) {
   const label = dealingTypeLabel(code);
-  if (label === '-') return <span className="text-[#99a1af]">-</span>;
-  const tone = code === 'DIRECT' ? 'bg-[#eff6ff] text-[#1447e6]' : 'bg-[#f3f4f6] text-[#4a5565]';
+  if (label === '-') return <span className="text-muted">-</span>;
+  // 해제 행(dimmed)은 반투명 대신 회색 배지로 흐리게 보인다 — opacity 50%면 글자 대비가 2.36:1까지 떨어진다(WCAG 1.4.3).
+  const tone = dimmed ? 'bg-[#f3f4f6] text-[#4a5565]' : code === 'DIRECT' ? 'bg-[#eff6ff] text-[#1447e6]' : 'bg-[#f3f4f6] text-[#4a5565]';
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold leading-[15.75px] ${tone} ${dimmed ? 'opacity-50' : ''}`}>
+    <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold leading-[15.75px] ${tone}`}>
       {label}
     </span>
   );
@@ -289,5 +290,5 @@ function RegistrationPendingBadge() {
 }
 
 function CancelledBadge() {
-  return <span className="rounded-full bg-[#ffe2e2] px-2 py-0.5 text-[10px] font-bold leading-[15px] text-[#e7000b]">해제</span>;
+  return <span className="rounded-full bg-[#ffe2e2] px-2 py-0.5 text-[10px] font-bold leading-[15px] text-[#c10007]">해제</span>;
 }

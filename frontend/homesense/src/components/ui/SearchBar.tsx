@@ -117,7 +117,7 @@ export function SearchBar({
             setTimeout(autocomplete.close, 120);
           }}
           placeholder={placeholder}
-          className={`w-full min-w-0 text-[#101828] placeholder:text-[#99a1af] focus:outline-none ${
+          className={`w-full min-w-0 text-[#101828] placeholder:text-muted focus:outline-none ${
             variant === 'compact' ? 'bg-transparent text-[13px] font-medium' : 'text-[14px]'
           }`}
         />

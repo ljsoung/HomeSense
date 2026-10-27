@@ -27,7 +27,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
     <div className="relative w-full">
       <input
         ref={ref}
-        className={`h-11 w-full rounded-[14px] border bg-white px-4 text-[14px] text-[#101828] outline-none transition-colors placeholder:text-[#99a1af] ${statusBorderClass(status)} ${
+        className={`h-11 w-full rounded-[14px] border bg-white px-4 text-[14px] text-[#101828] outline-none transition-colors placeholder:text-muted ${statusBorderClass(status)} ${
           endAdornment ? 'pr-11' : ''
         } ${className}`}
         {...props}

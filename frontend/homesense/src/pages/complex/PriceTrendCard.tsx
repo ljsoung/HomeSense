@@ -58,7 +58,7 @@ export function PriceTrendCard({ saleHistory, onRetry, today }: PriceTrendCardPr
           <h2 id={`${gradientId}-title`} className="text-[14px] font-extrabold leading-[21px] text-[#101828]">
             가격 추이
           </h2>
-          <p className="pt-0.5 text-[11px] leading-[16.5px] text-[#99a1af]">
+          <p className="pt-0.5 text-[11px] leading-[16.5px] text-muted">
             {trend?.kind === 'ready' ? `최근 1년 · ${trend.areaBucket}㎡ 평균` : '최근 1년 매매'}
           </p>
         </div>
@@ -67,7 +67,7 @@ export function PriceTrendCard({ saleHistory, onRetry, today }: PriceTrendCardPr
             <p className="text-[17px] font-extrabold leading-[25.5px] tracking-[-0.3px] text-brand">{formatEok(trend.latestAverage)}</p>
             <p
               className={`text-[10.5px] font-semibold leading-[15.75px] ${
-                trend.changeRate > 0 ? 'text-[#fb2c36]' : trend.changeRate < 0 ? 'text-[#155dfc]' : 'text-[#6a7282]'
+                trend.changeRate > 0 ? 'text-[#e7000b]' : trend.changeRate < 0 ? 'text-[#155dfc]' : 'text-[#6a7282]'
               }`}
             >
               {trend.changeRate > 0 ? '▲ +' : trend.changeRate < 0 ? '▼ −' : ''}
@@ -96,7 +96,7 @@ export function PriceTrendCard({ saleHistory, onRetry, today }: PriceTrendCardPr
         )}
       </div>
 
-      <p className="flex items-center gap-1 pt-2 text-[10.5px] leading-[15.75px] text-[#99a1af]">
+      <p className="flex items-center gap-1 pt-2 text-[10.5px] leading-[15.75px] text-muted">
         <InfoCircleIcon className="size-3 shrink-0" aria-hidden="true" />
         최근 1년 평균 거래가 기준 · 국토교통부 실거래
       </p>

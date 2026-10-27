@@ -58,7 +58,7 @@ export function MapPopup({ item, autoFocus, onClose }: MapPopupProps) {
         <p id={titleId} className="pt-2 pr-5 text-[13.5px] font-bold leading-[18.5px] text-[#101828]">
           {item.complexName}
         </p>
-        {meta && <p className="pt-0.5 text-[11px] leading-[16.5px] text-[#99a1af]">{meta}</p>}
+        {meta && <p className="pt-0.5 text-[11px] leading-[16.5px] text-muted">{meta}</p>}
         {trade ? (
           <p className="pt-2 text-[20px] font-extrabold leading-[30px] tracking-[-0.4px] text-[#1c1c1e]">
             {describeDealAmount(trade.representativeDealCategory, trade.rentType, trade.representativeAmount, trade.monthlyRentAmount)}

@@ -51,7 +51,7 @@ const BROWSE_HREF = '/';
 type Layout = 'desktop' | 'tablet' | 'mobile';
 
 const CARD_CLASS = 'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06)]';
-const MUTED_TEXT = 'text-[12px] leading-[18px] text-[#99a1af]';
+const MUTED_TEXT = 'text-[12px] leading-[18px] text-muted';
 
 /**
  * SCR-MY-04 알림 이력(UI정의서 5.5절, FR-6.4). 트리는 한 벌이다 — 머리(브레드크럼/앱 바)와 행 배치만 화면 크기로 고르고, 목록
@@ -161,7 +161,7 @@ export function NotificationHistoryPage() {
           </nav>
           <div className="pt-5">
             <h1 className="text-[22px] leading-[33px] font-extrabold tracking-[-0.5px] text-[#101828]">{TITLE}</h1>
-            <p className="mt-0.5 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+            <p className="mt-0.5 text-[13px] leading-[19.5px] text-muted">{SUBTITLE}</p>
           </div>
           <section aria-label={TITLE} className={`mt-6 overflow-hidden ${CARD_CLASS}`}>
             {isAllEmpty ? (
@@ -185,7 +185,7 @@ export function NotificationHistoryPage() {
     <MainLayout>
       <div className="flex flex-col">
         <MobileAppBar title={TITLE} />
-        <p className="px-4 pt-4 pb-1 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+        <p className="px-4 pt-4 pb-1 text-[13px] leading-[19.5px] text-muted">{SUBTITLE}</p>
         <section aria-label={TITLE} className="mt-3 bg-white">
           {isAllEmpty ? (
             emptyAll
@@ -293,7 +293,7 @@ function ListBody({
   if (history.items.length === 0) {
     // 유형 필터 빈 상태(D9) — chip은 유지하고 짧게. 전체 빈 상태는 페이지가 따로 그린다.
     const message = filter === 'ALL' ? '이 페이지에 알림이 없어요' : FILTER_EMPTY_MESSAGE[filter];
-    return <p className="px-6 py-14 text-center text-[13px] leading-[19.5px] text-[#99a1af]">{message}</p>;
+    return <p className="px-6 py-14 text-center text-[13px] leading-[19.5px] text-muted">{message}</p>;
   }
 
   const total = history.pageMeta?.totalElements ?? history.items.length;
@@ -419,16 +419,16 @@ function NotificationRow({
           {unread && <span className="sr-only"> (읽지 않음)</span>}
         </span>
         {desktop ? (
-          <time dateTime={notification.createdAt} className="mt-0.5 text-[11.5px] leading-[17.25px] text-[#99a1af]">
+          <time dateTime={notification.createdAt} className="mt-0.5 text-[11.5px] leading-[17.25px] text-muted">
             {absolute}
           </time>
         ) : (
-          <span className="pt-1 text-[11px] leading-[16.5px] text-[#99a1af]">
+          <span className="pt-1 text-[11px] leading-[16.5px] text-muted">
             <time dateTime={notification.createdAt}>{relative ? `${relative} · ${absolute}` : absolute}</time>
           </span>
         )}
       </span>
-      {desktop && relative && <span className="shrink-0 text-[12.5px] leading-[18.75px] text-[#99a1af]">{relative}</span>}
+      {desktop && relative && <span className="shrink-0 text-[12.5px] leading-[18.75px] text-muted">{relative}</span>}
       <span className={`flex w-6 shrink-0 justify-center ${desktop ? '' : 'pt-1.5'}`}>
         {unread && <span aria-hidden="true" data-testid="unread-dot" className="size-2 rounded-full bg-[#0f5c54]" />}
       </span>

@@ -132,7 +132,7 @@ export function RegionAdder({ registeredCodes, onAdd }: RegionAdderProps) {
                 // 후보 클릭(mousedown)이 blur보다 먼저 처리되도록 살짝 늦춘다(UIC-03과 같다).
                 setTimeout(autocomplete.close, 120);
               }}
-              className="w-full min-w-0 text-[14px] text-[#101828] placeholder:font-medium placeholder:text-[#99a1af] focus:outline-none"
+              className="w-full min-w-0 text-[14px] text-[#101828] placeholder:font-medium placeholder:text-muted focus:outline-none"
             />
           </div>
           {open && (

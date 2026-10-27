@@ -430,7 +430,7 @@ export function SearchResultsPage() {
               {isMobile ? (
                 <div ref={sentinelRef} className="flex items-center justify-center py-6">
                   {status === 'loadingMore' && <Spinner className="size-6" />}
-                  {!hasMore && accumulated.length > 0 && <p className="text-[12px] text-[#99a1af]">마지막 결과입니다</p>}
+                  {!hasMore && accumulated.length > 0 && <p className="text-[12px] text-muted">마지막 결과입니다</p>}
                   {hasMore && status !== 'loadingMore' && (
                     <button
                       type="button"

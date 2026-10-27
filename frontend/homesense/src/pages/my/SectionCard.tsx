@@ -6,7 +6,7 @@ import { ArrowRightIcon } from '../../components/icons/ArrowRightIcon';
 export const CARD_CLASS = 'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05)]';
 
 /** 섹션 제목 — 카드 밖 위쪽에 놓는 14/21 Bold 회색 글자(메뉴·관심 매물·최근 알림 공통). */
-export const SECTION_TITLE_CLASS = 'text-[14px] leading-[21px] font-bold text-[#99a1af]';
+export const SECTION_TITLE_CLASS = 'text-[14px] leading-[21px] font-bold text-muted';
 
 interface SectionCardProps {
   title: string;

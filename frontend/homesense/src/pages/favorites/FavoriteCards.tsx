@@ -61,7 +61,7 @@ function areaFloorText(favorite: FavoritePropertySummaryResponse): string {
 export function RateValue({ value, className }: { value: number | null | undefined; className: string }) {
   if (value == null) {
     return (
-      <span className={`${className} text-[#99a1af]`}>
+      <span className={`${className} text-muted`}>
         <span aria-hidden="true">—</span>
         <span className="sr-only">{RATE_LABEL} 변동 정보 없음</span>
       </span>
@@ -184,7 +184,7 @@ function DesktopMetric({ value, label, width }: { value: ReactNode; label: strin
   return (
     <div className={`flex shrink-0 flex-col items-end text-right ${width}`}>
       {value}
-      <span aria-hidden={label === RATE_LABEL ? 'true' : undefined} className="text-[11px] leading-[16.5px] text-[#99a1af]">
+      <span aria-hidden={label === RATE_LABEL ? 'true' : undefined} className="text-[11px] leading-[16.5px] text-muted">
         {label}
       </span>
     </div>
@@ -195,7 +195,7 @@ function DesktopMetric({ value, label, width }: { value: ReactNode; label: strin
 function TabletMetric({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col">
-      <span aria-hidden={label === RATE_LABEL ? 'true' : undefined} className="text-[10px] leading-[15px] text-[#99a1af]">
+      <span aria-hidden={label === RATE_LABEL ? 'true' : undefined} className="text-[10px] leading-[15px] text-muted">
         {label}
       </span>
       {children}
@@ -224,7 +224,7 @@ function MobileMetrics({ rows }: { rows: { label: string; value: ReactNode }[] }
 function MobileMetricRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <>
-      <span aria-hidden={label === RATE_LABEL ? 'true' : undefined} className="text-[11px] leading-[16.5px] whitespace-nowrap text-[#99a1af]">
+      <span aria-hidden={label === RATE_LABEL ? 'true' : undefined} className="text-[11px] leading-[16.5px] whitespace-nowrap text-muted">
         {label}
       </span>
       <span className="min-w-0">{value}</span>
@@ -269,7 +269,7 @@ export function PropertyCard({ favorite, badge, layout, onDelete, linkRef }: Pro
             <h3 className="truncate text-[14px] leading-[21px] font-bold text-[#101828]">{title}</h3>
             {alertBadge}
           </div>
-          <p className="mt-0.5 truncate text-[12px] leading-[18px] text-[#99a1af]">{meta}</p>
+          <p className="mt-0.5 truncate text-[12px] leading-[18px] text-muted">{meta}</p>
         </div>
         <DesktopMetric
           width="w-[124px]"
@@ -292,7 +292,7 @@ export function PropertyCard({ favorite, badge, layout, onDelete, linkRef }: Pro
             {alertBadge}
           </div>
           <h3 className="mt-1 truncate text-[15px] leading-[22px] font-bold text-[#101828]">{title}</h3>
-          {areaFloor && <p className="mt-0.5 text-[12px] leading-[18px] text-[#99a1af]">{areaFloor}</p>}
+          {areaFloor && <p className="mt-0.5 text-[12px] leading-[18px] text-muted">{areaFloor}</p>}
           <div className="mt-3 flex items-center gap-4">
             <TabletMetric label="최근 매매가">
               <span className="text-[16px] leading-[24px] font-extrabold whitespace-nowrap text-[#1c1c1e]">{price}</span>
@@ -320,7 +320,7 @@ export function PropertyCard({ favorite, badge, layout, onDelete, linkRef }: Pro
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
           <DataTrustBadge housingType={favorite.housingType} />
-          {areaFloor && <span className="text-[10px] leading-[15px] text-[#99a1af]">{areaFloor}</span>}
+          {areaFloor && <span className="text-[10px] leading-[15px] text-muted">{areaFloor}</span>}
         </div>
         <h3 className="mt-0.5 truncate text-[13.5px] leading-[20px] font-bold text-[#101828]">{title}</h3>
         <MobileMetrics
@@ -330,7 +330,7 @@ export function PropertyCard({ favorite, badge, layout, onDelete, linkRef }: Pro
           ]}
         />
         <div className="mt-2 flex items-center justify-between gap-4">
-          <span className="text-[10px] leading-[15px] text-[#99a1af]">등록일 {registered}</span>
+          <span className="text-[10px] leading-[15px] text-muted">등록일 {registered}</span>
           <div className="flex items-center gap-4">
             {alertBadge}
             <DeleteButton layout="mobile" label={deleteLabel} onClick={onDelete} />
@@ -370,7 +370,7 @@ export function RegionCard({ region, layout, onDelete, linkRef }: RegionCardProp
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="shrink-0 text-[14px] leading-[21px] font-bold text-[#101828]">{title}</h3>
-            {parent && <span className="truncate text-[12px] leading-[18px] text-[#99a1af]">{parent}</span>}
+            {parent && <span className="truncate text-[12px] leading-[18px] text-muted">{parent}</span>}
           </div>
           <p className="mt-0.5 truncate text-[13px] leading-[19.5px] text-[#6a7282]">
             3.3㎡당 평균가 <span className="font-bold text-[#364153]">{perPyeong}</span> · 최근 1개월 신규거래{' '}
@@ -388,7 +388,7 @@ export function RegionCard({ region, layout, onDelete, linkRef }: RegionCardProp
       <li className={ROW_CLASS.tablet} data-favorite-key={`region:${region.favoriteRegionId}`}>
         <PinBox />
         <div className="min-w-0 flex-1">
-          {parent && <p className="truncate text-[12px] leading-[18px] text-[#99a1af]">{parent}</p>}
+          {parent && <p className="truncate text-[12px] leading-[18px] text-muted">{parent}</p>}
           <h3 className="truncate text-[15px] leading-[22px] font-bold text-[#101828]">{title}</h3>
           <div className="mt-3 flex items-center gap-4">
             <TabletMetric label="3.3㎡당 평균가">
@@ -415,7 +415,7 @@ export function RegionCard({ region, layout, onDelete, linkRef }: RegionCardProp
     <li className={ROW_CLASS.mobile} data-favorite-key={`region:${region.favoriteRegionId}`}>
       <PinBox />
       <div className="min-w-0 flex-1">
-        {parent && <p className="truncate text-[10px] leading-[15px] text-[#99a1af]">{parent}</p>}
+        {parent && <p className="truncate text-[10px] leading-[15px] text-muted">{parent}</p>}
         <h3 className="mt-0.5 truncate text-[13.5px] leading-[20px] font-bold text-[#101828]">{title}</h3>
         <MobileMetrics
           rows={[

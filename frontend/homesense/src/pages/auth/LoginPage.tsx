@@ -84,7 +84,7 @@ export function LoginPage() {
             id="password"
             label="비밀번호"
             labelAction={
-              <Link to="/password-reset" className="text-[12px] text-[#99a1af] hover:text-[#6a7282]">
+              <Link to="/password-reset" className="text-[12px] text-muted hover:text-[#4a5565]">
                 비밀번호 찾기
               </Link>
             }
@@ -107,7 +107,7 @@ export function LoginPage() {
             {...register('password', { onChange: clearServerError })}
           />
           {hasServerError && (
-            <div id="login-error" role="alert" className="flex items-center gap-1.5 text-[12px] text-[#fb2c36]">
+            <div id="login-error" role="alert" className="flex items-center gap-1.5 text-[12px] text-[#e7000b]">
               <AlertCircleIcon className="size-3.5 shrink-0" />
               <span>{serverError}</span>
             </div>
@@ -132,14 +132,14 @@ export function LoginPage() {
 
       <div className="flex w-full items-center gap-3 pt-6">
         <div className="h-px flex-1 bg-[#e5e7eb]" />
-        <p className="text-[12px] text-[#99a1af]">또는</p>
+        <p className="text-[12px] text-muted">또는</p>
         <div className="h-px flex-1 bg-[#e5e7eb]" />
       </div>
 
       <div className="flex w-full flex-col pt-6">
         <div className="flex items-center justify-center gap-2">
-          <p className="text-[11.5px] text-[#99a1af]">소셜 로그인</p>
-          <span className="rounded-full border border-[#fee685] bg-[#fffbeb] px-2 py-0.5 text-[10px] font-semibold text-[#e17100]">
+          <p className="text-[11.5px] text-muted">소셜 로그인</p>
+          <span className="rounded-full border border-[#fee685] bg-[#fffbeb] px-2 py-0.5 text-[10px] font-semibold text-[#bb4d00]">
             2차 확장 예정
           </span>
         </div>

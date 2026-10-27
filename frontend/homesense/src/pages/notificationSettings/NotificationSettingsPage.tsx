@@ -53,7 +53,7 @@ const NEW_TRADE_HINT = '매매·전세·월세 거래가 새로 등록되면 알
 const CARD_CLASS = 'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.06)]';
 const SECTION_TITLE_CLASS = 'text-[15px] leading-[22.5px] font-bold text-[#101828]';
 /** 카드 설명·대상 행 보조 텍스트·대상마다 다름·이메일 끔 안내·적용 안내(Figma 1.2·1.8) */
-const HELP_TEXT_CLASS = 'text-[12px] leading-[18px] text-[#99a1af]';
+const HELP_TEXT_CLASS = 'text-[12px] leading-[18px] text-muted';
 /** 체크박스 행(대상 선택·수신 방법) — 선택 여부로 배경·테두리만 바뀐다. 선택 안 됨도 투명 테두리를 둬 높이가 흔들리지 않게 한다. */
 const ROW_BASE_CLASS = 'flex items-center gap-3 rounded-[14px] border px-4 py-3 transition-colors has-[input:disabled]:cursor-not-allowed';
 const ROW_SELECTED_CLASS = 'border-[rgba(15,92,84,0.2)] bg-[#e8f2f0]';
@@ -184,7 +184,7 @@ export function NotificationSettingsPage() {
             </ol>
           </nav>
           <h1 className="text-[22px] leading-[33px] font-extrabold text-[#101828]">{TITLE}</h1>
-          <p className="mt-0.5 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+          <p className="mt-0.5 text-[13px] leading-[19.5px] text-muted">{SUBTITLE}</p>
           <div className="mt-6">{body}</div>
         </div>
       ) : (
@@ -192,7 +192,7 @@ export function NotificationSettingsPage() {
           <MobileAppBar title={TITLE} />
           {/* 태블릿·모바일 모두 좌우 16px(태블릿 768에서 736px, 모바일 393에서 361px). */}
           <div className="flex w-full flex-col px-4 pt-5">
-            <p className="text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+            <p className="text-[13px] leading-[19.5px] text-muted">{SUBTITLE}</p>
             <div className="mt-6">{body}</div>
           </div>
         </div>
@@ -446,7 +446,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         />
         <style>{THRESHOLD_RANGE_CSS}</style>
         {/* 트랙(입력 높이 22 중 가운데 6)과 라벨 사이 6px */}
-        <div aria-hidden="true" className="-mt-0.5 flex justify-between text-[11px] leading-[16.5px] text-[#99a1af]">
+        <div aria-hidden="true" className="-mt-0.5 flex justify-between text-[11px] leading-[16.5px] text-muted">
           <span>{THRESHOLD_MIN}%</span>
           <span>{THRESHOLD_MAX}%</span>
         </div>
@@ -502,7 +502,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
                 이메일 수신
                 {mixed.email && <MixedTag id={ids.emailMixed} />}
               </span>
-              {email && <span className="truncate text-[11px] leading-[16.5px] font-medium text-[#99a1af]">{email}</span>}
+              {email && <span className="truncate text-[11px] leading-[16.5px] font-medium text-muted">{email}</span>}
             </span>
           </label>
           {!values.email && (
@@ -550,7 +550,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         )}
         <div className={`flex gap-3 ${layout === 'desktop' ? 'items-center justify-between' : 'flex-col'}`}>
           <div className="flex flex-col gap-0.5">
-            <p id={ids.hint} className="text-[12.5px] leading-[18.75px] text-[#99a1af]">
+            <p id={ids.hint} className="text-[12.5px] leading-[18.75px] text-muted">
               {SAVE_HINT_TEXT[hint]}
             </p>
             {hadDifferences && selectedKeys.length > 1 && (

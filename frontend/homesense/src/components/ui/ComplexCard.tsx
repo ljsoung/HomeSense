@@ -109,7 +109,7 @@ export function ComplexCard({
           >
             {complex.complexName}
           </button>
-          {meta && <p className="pt-0.5 text-[11px] leading-[16.5px] text-[#99a1af]">{meta}</p>}
+          {meta && <p className="pt-0.5 text-[11px] leading-[16.5px] text-muted">{meta}</p>}
           <p className="pt-0.5 text-[16px] font-extrabold leading-6 tracking-[-0.3px] text-[#1c1c1e]">
             {describeDealAmount(complex.representativeDealCategory, complex.rentType, complex.representativeAmount, complex.monthlyRentAmount)}
           </p>
@@ -173,8 +173,8 @@ export function ComplexCard({
             <div className="min-w-0">
               <DataTrustBadge housingType={complex.representativeHousingType} precisionBadge={complex.precisionBadge} />
               <p className="mt-1 truncate text-[14px] font-bold text-[#101828]">{complex.complexName}</p>
-              <p className="truncate text-[11.5px] text-[#99a1af]">{formatAddress(complex.sigungu, complex.dongRi)}</p>
-              <p className="mt-1 text-[11px] text-[#99a1af]">
+              <p className="truncate text-[11.5px] text-muted">{formatAddress(complex.sigungu, complex.dongRi)}</p>
+              <p className="mt-1 text-[11px] text-muted">
                 전용 {formatArea(complex.representativeArea)}
                 {complex.floor != null ? ` · ${complex.floor}층` : ''} · {formatDottedDate(complex.representativeDealDate)}
                 {complex.approvalDate != null ? ` · 건축 ${complex.approvalDate.slice(0, 4)}년` : ''}
@@ -189,7 +189,7 @@ export function ComplexCard({
               {/* 월세는 ㎡당 가격을 보여주지 않는다 — representativeAmount가 보증금뿐이라 월세금액을
                   빼고 계산한 "㎡당 가격"은 실제 비용을 왜곡해서 보여준다. */}
               {complex.rentType !== 'WOLSE' && (
-                <p className="text-[11px] text-[#99a1af]">{formatPricePerArea(complex.representativeAmount, complex.representativeArea)}</p>
+                <p className="text-[11px] text-muted">{formatPricePerArea(complex.representativeAmount, complex.representativeArea)}</p>
               )}
             </div>
           </div>
@@ -213,13 +213,13 @@ export function ComplexCard({
       </div>
       <div className="flex flex-col p-4">
         <p className="truncate text-[14px] font-bold text-[#101828]">{complex.complexName}</p>
-        <p className="mt-0.5 truncate text-[11.5px] text-[#99a1af]">
+        <p className="mt-0.5 truncate text-[11.5px] text-muted">
           {formatAddress(complex.sigungu, complex.dongRi)}
         </p>
         <p className="mt-2 text-[17px] font-extrabold tracking-[-0.3px] text-[#1c1c1e]">
           {formatKoreanPrice(complex.representativeAmount)}
         </p>
-        <p className="mt-1.5 text-[11px] text-[#99a1af]">
+        <p className="mt-1.5 text-[11px] text-muted">
           전용 {formatArea(complex.representativeArea)}
           {complex.floor != null ? ` · ${complex.floor}층` : ''} · {complex.representativeDealDate}
         </p>

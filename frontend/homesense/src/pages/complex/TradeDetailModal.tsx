@@ -112,7 +112,7 @@ function TradeDetailBody({ trade }: { trade: TradeDetailResponse }) {
         </p>
         <p
           className={`mt-0.5 text-[20px] font-extrabold text-[#101828] ${
-            trade.isCancelled ? 'text-[#99a1af] line-through decoration-[#e7000b]/70' : ''
+            trade.isCancelled ? 'text-muted line-through decoration-[#e7000b]/70' : ''
           }`}
           data-testid="trade-detail-amount"
         >
@@ -136,7 +136,7 @@ function TradeDetailBody({ trade }: { trade: TradeDetailResponse }) {
             <dd
               className={`text-right ${
                 row.tone === 'muted'
-                  ? 'text-[#99a1af]'
+                  ? 'text-muted'
                   : row.tone === 'pending'
                     ? 'font-semibold text-[#973c00]'
                     : row.tone === 'cancel'
