@@ -78,7 +78,10 @@ async function resizeTo(page, width, layout) {
   await expect.poll(async () => (await mapSnapshot(page)).relayouts).toBeGreaterThan(before);
 }
 
-/** 시작 상태와의 차이. 화면 위치는 1px 안이면 0으로 본다. */
+/**
+ * 시작 상태와의 차이. 화면 위치는 1px 안이면 0으로 본다. 지도 중심 좌표는 직접 비교하지 않는다 — 실제 SDK(가짜 SDK도)는
+ * 중심을 컨테이너 크기에 따른 픽셀 격자에 맞춰 폭이 바뀌면 반 픽셀까지 달라진다. 화면 위치(기준 핀)와 URL로 본다.
+ */
 async function driftFrom(page, start) {
   const now = await mapSnapshot(page);
   const px = (d) => (Math.abs(d) <= 1 ? 0 : Math.round(d));
@@ -86,7 +89,6 @@ async function driftFrom(page, start) {
     created: now.created,
     tag: now.tag,
     level: now.level,
-    centerMoved: Math.abs(now.lat - start.lat) > 1e-9 || Math.abs(now.lng - start.lng) > 1e-9,
     pinDx: px(now.pinDx - start.pinDx),
     pinDy: px(now.pinDy - start.pinDy),
   };
@@ -128,7 +130,7 @@ test('767 → 1024 → 767: 지도 객체·위치·레벨·핀·URL·히스토�
     // (사용자가 십자선으로 재는 값).
     await expect
       .poll(() => driftFrom(page, start), { message: `${width}px: 지도 객체·중심·레벨·기준 핀 위치` })
-      .toEqual({ created: 1, tag: 'original', level: start.level, centerMoved: false, pinDx: 0, pinDy: 0 });
+      .toEqual({ created: 1, tag: 'original', level: start.level, pinDx: 0, pinDy: 0 });
     await expect(pins(page)).toHaveCount(ITEMS.length);
     await expect(page.locator('[data-testid="map-canvas"] button[data-complex-id="1"]')).toHaveAttribute('data-e2e-tag', 'original');
     await expect(page, `${width}px: URL이 그대로`).toHaveURL(startUrl);
@@ -137,6 +139,39 @@ test('767 → 1024 → 767: 지도 객체·위치·레벨·핀·URL·히스토�
 
   await page.goBack();
   await expect(page).toHaveURL(/\/privacy$/);
+});
+
+test('767 ↔ 1024를 5회 왕복해도 URL·중심이 처음과 같다(격자 맞춤 오차가 쌓이지 않는다)', async ({ page }) => {
+  // 가짜 SDK는 실제 SDK처럼 중심을 픽셀 격자에 맞춘다 — 폭이 홀수(767)면 반 픽셀, 짝수(644)면 정수. 격자에 맞춘 값을 다시
+  // 기준으로 쓰면 경계를 넘을 때마다 한 방향으로 반 픽셀씩 쌓인다.
+  await mockApis(page);
+  await page.setViewportSize({ width: 767, height: 900 });
+  await page.goto('/map?lat=37.5666&lng=126.9784&level=5');
+  await expect(pins(page)).toHaveCount(ITEMS.length);
+  await expect(page).toHaveURL(/lat=.*&level=5/);
+  await page.evaluate(() => {
+    window.__fakeMap.__tag = 'original';
+  });
+  const start = await mapSnapshot(page);
+  const startUrl = page.url();
+
+  for (let round = 1; round <= 5; round++) {
+    for (const [width, layout] of [
+      [1024, 'desktop'],
+      [767, 'mobile'],
+    ]) {
+      await resizeTo(page, width, layout);
+      await expect
+        .poll(async () => (await driftFrom(page, start)).pinDx, { message: `${round}회차 ${width}px: 기준 핀 가로 위치` })
+        .toBe(0);
+      await expect(page, `${round}회차 ${width}px: URL`).toHaveURL(startUrl);
+    }
+  }
+  const end = await mapSnapshot(page);
+  expect(end.created).toBe(1);
+  expect(end.lng, '5회 왕복 뒤 중심 경도').toBe(start.lng);
+  expect(end.lat, '5회 왕복 뒤 중심 위도').toBe(start.lat);
+  expect(page.url()).toBe(startUrl);
 });
 
 test('지역 검색이 진행 중일 때 768px 경계를 넘어도 검색이 끝나면 그 위치로 옮긴다(백로그 14)', async ({ page }) => {
@@ -157,11 +192,12 @@ test('지역 검색이 진행 중일 때 768px 경계를 넘어도 검색이 끝
   await resizeTo(page, 767, 'mobile');
   await page.evaluate(() => window.__releaseGeocodes());
 
-  await expect.poll(async () => (await mapSnapshot(page)).lat).toBeCloseTo(37.304, 6);
+  // 중심은 픽셀 격자에 맞춰지므로 1px(레벨 5에서 약 0.00004도) 안이면 같은 곳이다.
+  await expect.poll(async () => (await mapSnapshot(page)).lat).toBeCloseTo(37.304, 4);
   const now = await mapSnapshot(page);
   expect(now.created).toBe(1);
-  expect(now.lng).toBeCloseTo(127.01, 6);
+  expect(now.lng).toBeCloseTo(127.01, 4);
   expect(now.level).toBe(5);
-  await expect(page).toHaveURL(/lat=37\.304&lng=127\.01&level=5/);
+  await expect(page).toHaveURL(/lat=37\.30\d*&lng=127\.0(09|10)\d*&level=5/);
   await expect(page).toHaveURL(/keyword=/);
 });

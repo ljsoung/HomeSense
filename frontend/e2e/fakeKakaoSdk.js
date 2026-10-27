@@ -58,11 +58,11 @@
 
   function KMap(container, options) {
     this.container = container;
-    this.center = options.center;
     this.level = options.level;
     // 마지막으로 배치한 컨테이너 크기. 실제 SDK(2026-10-27 탐침)처럼 컨테이너 크기가 바뀌어도 relayout 전까지는 이 크기와
     // 왼쪽 위 기준으로 그대로 그리고, getCenter는 바뀌기 전 중심을 그대로 돌려준다.
     this.layout = { w: container.clientWidth || 800, h: container.clientHeight || 600 };
+    this.center = this._snap(options.center);
     // 실제 SDK는 창 resize 이벤트를 받으면 그 자리에서(동기로) 스스로 relayout하고 idle까지 낸다(왼쪽 위 고정 — 중심이
     // 어긋난다). 앱의 ResizeObserver 보정보다 먼저 일어난다.
     this._onWindowResize = () => {
@@ -96,6 +96,18 @@
   KMap.prototype._size = function () {
     return { w: this.container.clientWidth || 800, h: this.container.clientHeight || 600 };
   };
+  /**
+   * 실제 SDK처럼 중심을 픽셀 격자에 맞춘다 — 왼쪽 위 모서리가 정수 픽셀에 오도록(폭·높이가 홀수면 중심은 반 픽셀). 실제 SDK
+   * 탐침(2026-10-27): setCenter(126.9784) 뒤 getCenter가 폭 644px에서 126.978358, 767px에서 126.9783807.
+   */
+  KMap.prototype._snap = function (latlng) {
+    // 격자는 고정 축척(위도 37.5 기준)으로 잡는다 — 실제 SDK의 투영 좌표처럼, 맞춘 값을 다시 맞춰도 그대로여야 한다.
+    const d = degPerPx(this.level, 37.5);
+    const { w, h } = this.layout;
+    const x = Math.round(latlng.lng / d.lng - w / 2) + w / 2;
+    const y = Math.round(-latlng.lat / d.lat - h / 2) + h / 2;
+    return new LatLng(-y * d.lat, x * d.lng);
+  };
   /** 지금 컨테이너에 보이는 영역의 가운데 — 왼쪽 위는 마지막 배치 그대로, 크기만 지금 크기. */
   KMap.prototype._visibleCenter = function () {
     const live = this._size();
@@ -119,7 +131,7 @@
     return this.center;
   };
   KMap.prototype.setCenter = function (latlng) {
-    this.center = latlng;
+    this.center = this._snap(latlng);
     this._idleSoon();
   };
   KMap.prototype.panTo = function (latlng) {
@@ -140,7 +152,7 @@
     return new LatLngBounds(new LatLng(top - live.h * d.lat, left), new LatLng(top, left + live.w * d.lng));
   };
   KMap.prototype.setBounds = function (bounds) {
-    this.center = new LatLng((bounds.sw.lat + bounds.ne.lat) / 2, (bounds.sw.lng + bounds.ne.lng) / 2);
+    this.center = this._snap(new LatLng((bounds.sw.lat + bounds.ne.lat) / 2, (bounds.sw.lng + bounds.ne.lng) / 2));
     this._idleSoon();
   };
   // 실제 SDK처럼 왼쪽 위를 그대로 두고 지금 크기로 다시 배치한다 — 중심은 보이던 가운데(어긋난 값)가 되고 idle을 낸다.
