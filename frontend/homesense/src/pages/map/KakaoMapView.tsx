@@ -291,11 +291,23 @@ export function KakaoMapView({
           if (typeof ResizeObserver !== 'undefined' && size && (size.w !== container.clientWidth || size.h !== container.clientHeight)) {
             return;
           }
-          const center = map.getCenter();
-          lastCenterRef.current = center;
           const b = map.getBounds();
           const sw = b.getSouthWest();
           const ne = b.getNorthEast();
+          // SDK는 중심을 컨테이너 크기에 따른 픽셀 격자에 맞춘다(폭이 홀수면 반 픽셀) — 크기 변경 뒤 기억한 중심으로 되돌려도
+          // getCenter()는 반 픽셀 어긋난 값을 돌려준다. 이 값을 기억하면 경계를 넘을 때마다 한 방향으로 쌓이고 URL도 바뀐다.
+          // 그래서 기억한 중심과 1px 안이면 움직이지 않은 것으로 보고 기억한 중심을 그대로 쓴다(복원 뒤 idle이 몇 번 오든,
+          // 동기든 비동기든 같다). 사용자가 옮겼으면(1px 넘게) 새 중심을 기억한다.
+          const snapped = map.getCenter();
+          const remembered = lastCenterRef.current;
+          const latPerPx = (ne.getLat() - sw.getLat()) / (container.clientHeight || 1);
+          const lngPerPx = (ne.getLng() - sw.getLng()) / (container.clientWidth || 1);
+          const unmoved =
+            remembered !== null &&
+            Math.abs(snapped.getLat() - remembered.getLat()) < latPerPx &&
+            Math.abs(snapped.getLng() - remembered.getLng()) < lngPerPx;
+          const center = unmoved ? remembered : snapped;
+          lastCenterRef.current = center;
           callbacks.current.onIdle(
             { lat: center.getLat(), lng: center.getLng(), level: map.getLevel() },
             { swLat: sw.getLat(), swLng: sw.getLng(), neLat: ne.getLat(), neLng: ne.getLng() },
