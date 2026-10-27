@@ -80,10 +80,15 @@ export function SearchResultsPage() {
 
   const [draft, setDraft] = useState<SearchFilters>(filters);
   const [sheetOpen, setSheetOpen] = useState(false);
-  // 필터 패널은 한 벌만 렌더한다(반응형 렌더 규칙) — md 이상은 사이드바, 모바일은 하단 시트. 필터 값(draft)은 이 페이지가
-  // 들고 있어 폭이 바뀌어 패널이 다른 자리로 옮겨져도 고르던 값이 남는다. 모바일을 벗어나면 시트를 닫아 둔다(다시 모바일이
-  // 되어도 저절로 열리지 않게).
-  if (!isMobile && sheetOpen) setSheetOpen(false);
+  // 필터 패널은 한 벌만 렌더한다(반응형 렌더 규칙) — md 이상은 사이드바, 모바일은 하단 시트. 시트는 "필터 적용" 버튼 방식이라,
+  // 적용하지 않고 닫히면(닫기·바깥 클릭·Esc·폭이 넓어져 시트가 사라짐) 시트에서 고른 값은 버리고 적용된 조건(URL)으로 되돌린다
+  // — 그러지 않으면 사이드바나 다시 연 시트가 적용되지 않은 값을 보여 지금 결과와 어긋난다. 모바일을 벗어나면 시트를 닫는다
+  // (다시 모바일이 되어도 저절로 열리지 않게). 사이드바(md 이상)에서 고르던 값은 패널이 계속 보이므로 폭이 바뀌어도 남는다.
+  const discardSheet = () => {
+    setSheetOpen(false);
+    setDraft(filters);
+  };
+  if (!isMobile && sheetOpen) discardSheet();
 
   // hasFetchedRef가 true가 되기 전(=아직 한 번도 실제 응답을 받지 못한 상태)에는 절대 캐시에
   // 쓰지 않는다 — React StrictMode의 개발 모드 이중 마운트(mount→cleanup→mount)가 데이터 조회
@@ -447,7 +452,7 @@ export function SearchResultsPage() {
       </div>
 
       {isMobile && (
-        <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="필터">
+        <BottomSheet open={sheetOpen} onClose={discardSheet} title="필터">
           <FilterPanel draft={draft} onChangeDraft={setDraft} onApply={handleApplyFilter} onReset={handleResetFilter} showHeader={false} />
         </BottomSheet>
       )}

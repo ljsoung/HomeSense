@@ -141,7 +141,7 @@ test('HOME-01 추천 단지: 목록 한 벌, 폭이 바뀌어도 같은 노드�
   expect(calls['/api/complexes/popular']).toBe(popularCalls);
 });
 
-test('SRCH-01 필터 패널: 한쪽에만 렌더, 폭이 바뀌어도 고르던 값이 남음', async ({ page }) => {
+test('SRCH-01 필터 패널: 한쪽에만 렌더, 시트에서 적용하지 않은 값은 닫히면(폭 변경 포함) 버린다', async ({ page }) => {
   const calls = await mockApis(page);
   await page.setViewportSize(MOBILE);
   await page.goto('/search?regionCode=4111100000&regionLabel=%EC%88%98%EC%9B%90%EC%8B%9C');
@@ -152,28 +152,52 @@ test('SRCH-01 필터 패널: 한쪽에만 렌더, 폭이 바뀌어도 고르던 
   await expect(page.locator('aside')).toHaveCount(0);
   await expect(page.locator('input[type="radio"]')).toHaveCount(0);
 
-  await page.getByRole('button', { name: /^필터/ }).click();
-  const sheet = page.getByRole('dialog', { name: '필터' });
-  await expect(sheet).toBeVisible();
-  await expect(page.locator('input[type="radio"]')).toHaveCount(3);
-  // 적용하지 않고 월세만 고른다.
+  const openSheet = async () => {
+    await page.getByRole('button', { name: /^필터/ }).click();
+    const sheet = page.getByRole('dialog', { name: '필터' });
+    await expect(sheet).toBeVisible();
+    await expect(page.locator('input[type="radio"]')).toHaveCount(3);
+    return sheet;
+  };
+
+  // 1) 시트에서 월세를 고르고(적용 안 함) 폭을 넓히면 시트가 사라지며 그 값은 버려진다 — 사이드바는 적용된 매매.
+  let sheet = await openSheet();
   await sheet.getByText('월세', { exact: true }).click();
   await expect(sheet.getByRole('radio', { name: '월세' })).toBeChecked();
-
   await page.setViewportSize(DESKTOP);
   const sidebar = page.getByRole('complementary', { name: '필터' });
   await expect(sidebar).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('input[type="radio"]')).toHaveCount(3);
-  await expect(sidebar.getByRole('radio', { name: '월세' })).toBeChecked();
+  await expect(sidebar.getByRole('radio', { name: '매매' })).toBeChecked();
+  expect(page.url()).not.toContain('dealType');
 
+  // 다시 모바일 — 시트는 저절로 열리지 않고, 열면 매매.
   await page.setViewportSize(MOBILE);
   await expect(page.locator('aside')).toHaveCount(0);
-  // 데스크톱으로 갔다 오면 시트는 닫혀 있다(저절로 열리지 않는다). 다시 열면 고르던 값 그대로.
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('button', { name: /^필터/ }).click();
-  await expect(page.getByRole('dialog', { name: '필터' }).getByRole('radio', { name: '월세' })).toBeChecked();
-  // 적용하지 않았으므로 URL(검색 조건)은 그대로다. 검색 API는 768px 경계를 넘을 때마다 다시 부른다 — 모바일(누적)과
-  // 데스크톱(페이지)의 목록 방식이 달라 isMobile이 조회 조건에 들어 있다(이번 변경 전부터의 동작, CLAUDE.md 백로그).
-  expect(page.url()).not.toContain('dealType');
+  sheet = await openSheet();
+  await expect(sheet.getByRole('radio', { name: '매매' })).toBeChecked();
+
+  // 2) 닫기 버튼으로 닫아도 버려진다.
+  await sheet.getByText('전세', { exact: true }).click();
+  await sheet.getByRole('button', { name: '닫기' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  sheet = await openSheet();
+  await expect(sheet.getByRole('radio', { name: '매매' })).toBeChecked();
+
+  // 3) 적용하면 남는다 — URL이 바뀌고 넓힌 사이드바도 월세.
+  await sheet.getByText('월세', { exact: true }).click();
+  await sheet.getByRole('button', { name: '필터 적용' }).click();
+  await expect(page).toHaveURL(/dealType=/);
+  await page.setViewportSize(DESKTOP);
+  await expect(sidebar.getByRole('radio', { name: '월세' })).toBeChecked();
+
+  // 4) 사이드바에서 고르던 값(적용 안 함)은 패널이 계속 보이므로 폭이 바뀌어도 남는다 — 모바일에서 시트를 열면 그 값.
+  await sidebar.getByText('전세', { exact: true }).click();
+  await page.setViewportSize(MOBILE);
+  sheet = await openSheet();
+  await expect(sheet.getByRole('radio', { name: '전세' })).toBeChecked();
+  // 검색 API는 768px 경계를 넘을 때마다 다시 부른다 — 모바일(누적)과 데스크톱(페이지)의 목록 방식이 달라 isMobile이 조회
+  // 조건에 들어 있다(이번 변경 전부터의 동작, CLAUDE.md 백로그 16).
 });
