@@ -19,6 +19,15 @@ function ok(name, cond, detail = '') {
   if (cond) { pass++; console.log(`PASS ${name}`); } else { fail++; console.log(`FAIL ${name}${detail ? ' :: ' + detail : ''}`); }
 }
 
+// 최근 알림 시각은 실행 날짜 기준으로 만든다(KST, 오프셋 없는 LocalDateTime) — 고정 날짜(2026-10-15)였을 때는 10월 22일부터
+// "7일 이내 알림은 상대 시각" 검사가 실패했다.
+function kstDaysAgo(days) {
+  const kst = new Date(Date.now() + 9 * 3600_000 - days * 86400_000);
+  return `${kst.toISOString().slice(0, 10)}T09:00:00`;
+}
+const RECENT = kstDaysAgo(1);
+const RECENT_READ = kstDaysAgo(2);
+
 const USER = { userId: 7, email: 'jiseong@homesense.kr', nickname: '지성', createdAt: '2026-09-15T10:20:30' };
 
 /**
@@ -42,10 +51,10 @@ function makeNotifications(count = 45) {
   }
   const byId = (id) => list.find((n) => n.notificationId === id);
   if (count < 45) return list;
-  Object.assign(byId(45), { notificationType: 'PRICE_CHANGE', title: '숭인 힐스테이트 실거래가 2.1% 상승', complexId: 10, isRead: false, createdAt: '2026-10-15T09:00:00' });
-  Object.assign(byId(44), { notificationType: 'NEW_TRADE', title: '서울특별시 종로구 창신동 신규 실거래 3건', complexId: undefined, legalDongCd: '1111017500', tradeId: 99, isRead: false, createdAt: '2026-10-15T09:00:00' });
-  Object.assign(byId(43), { notificationType: 'PRICE_CHANGE', title: '사라진 단지 실거래가 1.2% 하락', complexId: undefined, isRead: false, createdAt: '2026-10-15T09:00:00' });
-  Object.assign(byId(42), { notificationType: 'PRICE_CHANGE', title: '읽은 단지 실거래가 0.5% 상승', complexId: 42, isRead: true, createdAt: '2026-10-14T09:00:00' });
+  Object.assign(byId(45), { notificationType: 'PRICE_CHANGE', title: '숭인 힐스테이트 실거래가 2.1% 상승', complexId: 10, isRead: false, createdAt: RECENT });
+  Object.assign(byId(44), { notificationType: 'NEW_TRADE', title: '서울특별시 종로구 창신동 신규 실거래 3건', complexId: undefined, legalDongCd: '1111017500', tradeId: 99, isRead: false, createdAt: RECENT });
+  Object.assign(byId(43), { notificationType: 'PRICE_CHANGE', title: '사라진 단지 실거래가 1.2% 하락', complexId: undefined, isRead: false, createdAt: RECENT });
+  Object.assign(byId(42), { notificationType: 'PRICE_CHANGE', title: '읽은 단지 실거래가 0.5% 상승', complexId: 42, isRead: true, createdAt: RECENT_READ });
   return list;
 }
 
@@ -136,7 +145,7 @@ async function scenarioRender(label, viewport, layout) {
     (await iconColor(45)) === 'rgb(239, 68, 68)' && (await iconColor(43)) === 'rgb(59, 130, 246)' && (await iconColor(44)) === 'rgb(15, 92, 84)');
   if (layout === 'desktop') {
     ok(`${label} 1: 브레드크럼`, await page.getByRole('navigation', { name: '위치 경로' }).isVisible());
-    ok(`${label} 1: GNB "알림" 활성`, (await page.locator('header').getByRole('link', { name: '알림' }).getAttribute('class')).includes('text-brand'));
+    ok(`${label} 1: GNB "알림" 활성`, (await page.getByRole('banner').getByRole('link', { name: '알림' }).getAttribute('class')).includes('text-brand'));
     const card = page.locator('section[aria-label="알림 이력"]');
     const notice = page.getByText('발생 후 6개월이 지난 알림은 자동 보관됩니다');
     const [cardBox, noticeBox] = [await card.boundingBox(), await notice.boundingBox()];
