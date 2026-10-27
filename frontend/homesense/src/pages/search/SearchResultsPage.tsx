@@ -80,6 +80,10 @@ export function SearchResultsPage() {
 
   const [draft, setDraft] = useState<SearchFilters>(filters);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // 필터 패널은 한 벌만 렌더한다(반응형 렌더 규칙) — md 이상은 사이드바, 모바일은 하단 시트. 필터 값(draft)은 이 페이지가
+  // 들고 있어 폭이 바뀌어 패널이 다른 자리로 옮겨져도 고르던 값이 남는다. 모바일을 벗어나면 시트를 닫아 둔다(다시 모바일이
+  // 되어도 저절로 열리지 않게).
+  if (!isMobile && sheetOpen) setSheetOpen(false);
 
   // hasFetchedRef가 true가 되기 전(=아직 한 번도 실제 응답을 받지 못한 상태)에는 절대 캐시에
   // 쓰지 않는다 — React StrictMode의 개발 모드 이중 마운트(mount→cleanup→mount)가 데이터 조회
@@ -267,9 +271,11 @@ export function SearchResultsPage() {
   return (
     <MainLayout>
       <div className="mx-auto flex max-w-[1280px] flex-col gap-5 px-4 py-5 md:flex-row md:items-start md:px-8 md:py-8">
-        <aside className="hidden w-[280px] shrink-0 rounded-[16px] border border-[#e5e7eb] bg-white p-5 md:block">
-          <FilterPanel draft={draft} onChangeDraft={setDraft} onApply={handleApplyFilter} onReset={handleResetFilter} />
-        </aside>
+        {!isMobile && (
+          <aside aria-label="필터" className="w-[280px] shrink-0 rounded-[16px] border border-[#e5e7eb] bg-white p-5">
+            <FilterPanel draft={draft} onChangeDraft={setDraft} onApply={handleApplyFilter} onReset={handleResetFilter} />
+          </aside>
+        )}
 
         <div className="min-w-0 flex-1">
           <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-[#e5e7eb] bg-white p-4">
@@ -440,9 +446,11 @@ export function SearchResultsPage() {
         </div>
       </div>
 
-      <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="필터">
-        <FilterPanel draft={draft} onChangeDraft={setDraft} onApply={handleApplyFilter} onReset={handleResetFilter} showHeader={false} />
-      </BottomSheet>
+      {isMobile && (
+        <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="필터">
+          <FilterPanel draft={draft} onChangeDraft={setDraft} onApply={handleApplyFilter} onReset={handleResetFilter} showHeader={false} />
+        </BottomSheet>
+      )}
     </MainLayout>
   );
 }

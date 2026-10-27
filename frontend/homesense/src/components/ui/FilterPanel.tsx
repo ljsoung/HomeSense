@@ -39,10 +39,9 @@ const formatEok = (manwon: number) => {
  * 실제 URL(=검색 조건)에 반영된다 — 이 패널 자체는 URL을 직접 건드리지 않는다.
  */
 export function FilterPanel({ draft, onChangeDraft, onApply, onReset, showHeader = true }: FilterPanelProps) {
-  // 라디오 그룹 이름은 인스턴스마다 달라야 한다 — SRCH-01 모바일은 숨겨진 데스크톱 사이드바와 바텀시트에
-  // FilterPanel을 동시에 렌더하는데, 둘이 같은 name을 쓰면 브라우저가 6개 라디오를 한 그룹으로 묶어
-  // 문서 전체에서 하나만 체크되게 한다. 그 결과 시트에서 거래유형을 바꾸면 체크가 숨겨진 사이드바
-  // 쪽으로 넘어가 시트에는 아무것도 선택되지 않은 것처럼 보였다.
+  // 라디오 그룹 이름은 인스턴스마다 다르게 둔다 — 같은 name을 쓰는 패널이 한 문서에 둘 있으면 브라우저가 라디오를 한
+  // 그룹으로 묶어 문서 전체에서 하나만 체크된다. 예전 SRCH-01 모바일이 숨긴 사이드바와 바텀시트에 패널을 동시에 렌더해
+  // 이 문제가 났다. 지금은 화면마다 패널을 한 벌만 렌더하지만(2026-10-27) 다시 둘이 생겨도 섞이지 않게 남긴다.
   const dealTypeGroupName = `dealType-${useId()}`;
   const toggleHousingType = (type: HousingType, checked: boolean) => {
     onChangeDraft((prev) => {
