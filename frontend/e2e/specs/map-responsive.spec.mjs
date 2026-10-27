@@ -1,0 +1,203 @@
+// SCR-MAP-01 — 화면 폭이 768px 경계를 넘어도 지도가 다시 만들어지지 않는다(백로그 12·13·14).
+// 카카오 SDK는 가짜(fakeKakaoSdk.js), /api/** 는 page.route 목업. 백엔드 불필요.
+// 전제: dev 서버에 VITE_KAKAO_JS_KEY가 있어야 한다(값은 무엇이든). playwright.config가 띄우는 서버는 넣어 준다 — 이미 떠
+// 있는 서버를 재사용하면 그 서버의 .env.local에 키가 있어야 한다.
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expect, test } from '@playwright/test';
+import { errBody, okBody } from '../mockApi.mjs';
+
+const FAKE_SDK = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'fakeKakaoSdk.js'), 'utf8');
+
+// 기본 위치(서울시청 부근, 레벨 6) 주변 단지 4개.
+const CENTER = { lat: 37.5666, lng: 126.9784 };
+const ITEMS = [1, 2, 3, 4].map((id) => ({
+  complexId: id,
+  complexName: `반응형단지${id}`,
+  sido: '서울특별시',
+  sigungu: '중구',
+  dongRi: '태평로1가',
+  representativeHousingType: 'APT',
+  representativeDealCategory: 'SALE',
+  representativeDealDate: '2026-09-10',
+  representativeAmount: 30000 + id * 5000,
+  representativeArea: 84.9,
+  matchMethod: 'EXACT',
+  precisionBadge: 'PRECISE',
+  floor: 5,
+  latitude: CENTER.lat + (id - 2) * 0.003,
+  longitude: CENTER.lng + (id - 2) * 0.004,
+  locationPrecision: 'PRECISE',
+}));
+
+async function mockApis(page) {
+  await page.route('https://dapi.kakao.com/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_SDK }),
+  );
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/complexes/map') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: okBody({ items: ITEMS, truncated: false, limit: 500 }) });
+    }
+    return route.fulfill({ status: 404, contentType: 'application/json', body: errBody('NOT_FOUND', 'mock 없음') });
+  });
+}
+
+const pins = (page) => page.locator('[data-testid="map-canvas"] button[data-complex-id]');
+const sidebar = (page) => page.getByRole('complementary', { name: '지도 단지 목록' });
+
+/** 지금 지도 객체의 상태 — 같은 객체인지는 표식(__tag)으로 본다. */
+const mapSnapshot = (page) =>
+  page.evaluate(() => {
+    const map = window.__fakeMap;
+    // 기준 핀이 지도 영역 가운데에서 화면상 얼마나 떨어져 있는지 — 사용자가 십자선으로 재는 값과 같다.
+    const canvas = document.querySelector('[data-testid="map-canvas"]').getBoundingClientRect();
+    const pin = document.querySelector('[data-testid="map-canvas"] button[data-complex-id="1"]')?.getBoundingClientRect();
+    return {
+      pinDx: pin ? pin.x + pin.width / 2 - (canvas.x + canvas.width / 2) : null,
+      pinDy: pin ? pin.y + pin.height / 2 - (canvas.y + canvas.height / 2) : null,
+      created: window.__fakeMapCreatedCount,
+      tag: map.__tag ?? null,
+      lat: map.getCenter().getLat(),
+      lng: map.getCenter().getLng(),
+      level: map.getLevel(),
+      relayouts: window.__fakeRelayoutCount ?? 0,
+    };
+  });
+
+/**
+ * 화면 폭을 바꾸고 지도가 새 크기로 relayout될 때까지 기다린다. 실제 SDK처럼 가짜 SDK도 창 resize 이벤트에 스스로 relayout하므로
+ * (중심이 어긋난다) 이 대기만으로는 앱의 보정까지 끝났다는 뜻이 아니다 — 위치는 호출한 쪽이 폴링으로 확인한다.
+ */
+async function resizeTo(page, width, layout) {
+  const before = (await mapSnapshot(page)).relayouts;
+  await page.setViewportSize({ width, height: 900 });
+  if (layout === 'desktop') await expect(sidebar(page)).toBeVisible();
+  else await expect(sidebar(page)).toHaveCount(0);
+  await expect.poll(async () => (await mapSnapshot(page)).relayouts).toBeGreaterThan(before);
+}
+
+/**
+ * 시작 상태와의 차이. 화면 위치는 1px 안이면 0으로 본다. 지도 중심 좌표는 직접 비교하지 않는다 — 실제 SDK(가짜 SDK도)는
+ * 중심을 컨테이너 크기에 따른 픽셀 격자에 맞춰 폭이 바뀌면 반 픽셀까지 달라진다. 화면 위치(기준 핀)와 URL로 본다.
+ */
+async function driftFrom(page, start) {
+  const now = await mapSnapshot(page);
+  const px = (d) => (Math.abs(d) <= 1 ? 0 : Math.round(d));
+  return {
+    created: now.created,
+    tag: now.tag,
+    level: now.level,
+    pinDx: px(now.pinDx - start.pinDx),
+    pinDy: px(now.pinDy - start.pinDy),
+  };
+}
+
+test('767 → 1024 → 767: 지도 객체·위치·레벨·핀·URL·히스토리가 그대로이고 뒤로가기는 이전 화면으로', async ({ page }) => {
+  await mockApis(page);
+  await page.setViewportSize({ width: 767, height: 900 });
+  await page.goto('/privacy');
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+  // 앱 안 이동(하단 탭)으로 지도에 들어간다 — 뒤로가기가 이 화면으로 돌아와야 한다.
+  await page.getByRole('link', { name: '지도', exact: true }).click();
+  await expect(page).toHaveURL(/\/map\?.*lat=/);
+  await expect(pins(page)).toHaveCount(ITEMS.length);
+
+  // 시작 위치가 아닌 상태로 만든다 — 확대 한 단계.
+  await page.getByRole('button', { name: '지도 확대' }).click();
+  await expect(page).toHaveURL(/level=5/);
+  await expect(pins(page)).toHaveCount(ITEMS.length);
+
+  // 지도 객체와 핀 DOM에 표식을 단다 — 다시 만들어지면 표식이 사라진다.
+  await page.evaluate(() => {
+    window.__fakeMap.__tag = 'original';
+    document.querySelector('[data-testid="map-canvas"] button[data-complex-id="1"]').dataset.e2eTag = 'original';
+  });
+  const start = await mapSnapshot(page);
+  expect(start.created).toBe(1);
+  expect(start.level).toBe(5);
+  const startUrl = page.url();
+  const startHistory = await page.evaluate(() => window.history.length);
+
+  for (const [width, layout] of [
+    [1024, 'desktop'],
+    [767, 'mobile'],
+  ]) {
+    await resizeTo(page, width, layout);
+    // 지도를 다시 만들지 않고(생성 1회·같은 객체), 같은 곳이 화면 가운데에 남는다 — 기준 핀과 지도 영역 가운데의 거리가 같다
+    // (사용자가 십자선으로 재는 값).
+    await expect
+      .poll(() => driftFrom(page, start), { message: `${width}px: 지도 객체·중심·레벨·기준 핀 위치` })
+      .toEqual({ created: 1, tag: 'original', level: start.level, pinDx: 0, pinDy: 0 });
+    await expect(pins(page)).toHaveCount(ITEMS.length);
+    await expect(page.locator('[data-testid="map-canvas"] button[data-complex-id="1"]')).toHaveAttribute('data-e2e-tag', 'original');
+    await expect(page, `${width}px: URL이 그대로`).toHaveURL(startUrl);
+    expect(await page.evaluate(() => window.history.length)).toBe(startHistory);
+  }
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/privacy$/);
+});
+
+test('767 ↔ 1024를 5회 왕복해도 URL·중심이 처음과 같다(격자 맞춤 오차가 쌓이지 않는다)', async ({ page }) => {
+  // 가짜 SDK는 실제 SDK처럼 중심을 픽셀 격자에 맞춘다 — 폭이 홀수(767)면 반 픽셀, 짝수(644)면 정수. 격자에 맞춘 값을 다시
+  // 기준으로 쓰면 경계를 넘을 때마다 한 방향으로 반 픽셀씩 쌓인다.
+  await mockApis(page);
+  await page.setViewportSize({ width: 767, height: 900 });
+  await page.goto('/map?lat=37.5666&lng=126.9784&level=5');
+  await expect(pins(page)).toHaveCount(ITEMS.length);
+  await expect(page).toHaveURL(/lat=.*&level=5/);
+  await page.evaluate(() => {
+    window.__fakeMap.__tag = 'original';
+  });
+  const start = await mapSnapshot(page);
+  const startUrl = page.url();
+
+  for (let round = 1; round <= 5; round++) {
+    for (const [width, layout] of [
+      [1024, 'desktop'],
+      [767, 'mobile'],
+    ]) {
+      await resizeTo(page, width, layout);
+      await expect
+        .poll(async () => (await driftFrom(page, start)).pinDx, { message: `${round}회차 ${width}px: 기준 핀 가로 위치` })
+        .toBe(0);
+      await expect(page, `${round}회차 ${width}px: URL`).toHaveURL(startUrl);
+    }
+  }
+  const end = await mapSnapshot(page);
+  expect(end.created).toBe(1);
+  expect(end.lng, '5회 왕복 뒤 중심 경도').toBe(start.lng);
+  expect(end.lat, '5회 왕복 뒤 중심 위도').toBe(start.lat);
+  expect(page.url()).toBe(startUrl);
+});
+
+test('지역 검색이 진행 중일 때 768px 경계를 넘어도 검색이 끝나면 그 위치로 옮긴다(백로그 14)', async ({ page }) => {
+  await mockApis(page);
+  await page.addInitScript(() => {
+    window.__FAKE_KAKAO_OPTIONS = { holdGeocode: true };
+  });
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto('/map?lat=37.5666&lng=126.9784&level=6');
+  await expect(pins(page)).toHaveCount(ITEMS.length);
+
+  const search = page.getByPlaceholder('지역명으로 지도 이동');
+  await search.fill('경기도 수원시 장안구');
+  await search.press('Enter');
+  await expect.poll(() => page.evaluate(() => window.__heldGeocodes.length)).toBeGreaterThan(0);
+
+  // 검색 결과를 붙잡은 채 모바일 폭으로 바꾼 뒤 풀어 준다.
+  await resizeTo(page, 767, 'mobile');
+  await page.evaluate(() => window.__releaseGeocodes());
+
+  // 중심은 픽셀 격자에 맞춰지므로 1px(레벨 5에서 약 0.00004도) 안이면 같은 곳이다.
+  await expect.poll(async () => (await mapSnapshot(page)).lat).toBeCloseTo(37.304, 4);
+  const now = await mapSnapshot(page);
+  expect(now.created).toBe(1);
+  expect(now.lng).toBeCloseTo(127.01, 4);
+  expect(now.level).toBe(5);
+  await expect(page).toHaveURL(/lat=37\.30\d*&lng=127\.0(09|10)\d*&level=5/);
+  await expect(page).toHaveURL(/keyword=/);
+});

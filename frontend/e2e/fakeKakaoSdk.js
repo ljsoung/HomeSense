@@ -58,8 +58,21 @@
 
   function KMap(container, options) {
     this.container = container;
-    this.center = options.center;
     this.level = options.level;
+    // 마지막으로 배치한 컨테이너 크기. 실제 SDK(2026-10-27 탐침)처럼 컨테이너 크기가 바뀌어도 relayout 전까지는 이 크기와
+    // 왼쪽 위 기준으로 그대로 그리고, getCenter는 바뀌기 전 중심을 그대로 돌려준다.
+    this.layout = { w: container.clientWidth || 800, h: container.clientHeight || 600 };
+    this.center = this._snap(options.center);
+    // 실제 SDK는 창 resize 이벤트를 받으면 그 자리에서(동기로) 스스로 relayout하고 idle까지 낸다(왼쪽 위 고정 — 중심이
+    // 어긋난다). 앱의 ResizeObserver 보정보다 먼저 일어난다.
+    this._onWindowResize = () => {
+      this.center = this._visibleCenter();
+      this.layout = this._size();
+      this._render();
+      window.__fakeRelayoutCount = (window.__fakeRelayoutCount || 0) + 1;
+      event.trigger(this, 'idle');
+    };
+    window.addEventListener('resize', this._onWindowResize);
     this.overlays = new Set();
     this.pane = document.createElement('div');
     this.pane.dataset.fakeMap = 'pane';
@@ -69,6 +82,8 @@
       if (e.target === this.pane) event.trigger(this, 'click');
     });
     window.__fakeMap = this;
+    // 지도 객체를 몇 번 만들었는지 — 화면 폭이 바뀌어도 지도를 다시 만들지 않는지 본다(specs/map-responsive).
+    window.__fakeMapCreatedCount = (window.__fakeMapCreatedCount || 0) + 1;
     this._idleSoon();
   }
   KMap.prototype._idleSoon = function () {
@@ -81,8 +96,29 @@
   KMap.prototype._size = function () {
     return { w: this.container.clientWidth || 800, h: this.container.clientHeight || 600 };
   };
+  /**
+   * 실제 SDK처럼 중심을 픽셀 격자에 맞춘다 — 왼쪽 위 모서리가 정수 픽셀에 오도록(폭·높이가 홀수면 중심은 반 픽셀). 실제 SDK
+   * 탐침(2026-10-27): setCenter(126.9784) 뒤 getCenter가 폭 644px에서 126.978358, 767px에서 126.9783807.
+   */
+  KMap.prototype._snap = function (latlng) {
+    // 격자는 고정 축척(위도 37.5 기준)으로 잡는다 — 실제 SDK의 투영 좌표처럼, 맞춘 값을 다시 맞춰도 그대로여야 한다.
+    const d = degPerPx(this.level, 37.5);
+    const { w, h } = this.layout;
+    const x = Math.round(latlng.lng / d.lng - w / 2) + w / 2;
+    const y = Math.round(-latlng.lat / d.lat - h / 2) + h / 2;
+    return new LatLng(-y * d.lat, x * d.lng);
+  };
+  /** 지금 컨테이너에 보이는 영역의 가운데 — 왼쪽 위는 마지막 배치 그대로, 크기만 지금 크기. */
+  KMap.prototype._visibleCenter = function () {
+    const live = this._size();
+    const d = degPerPx(this.level, this.center.lat);
+    return new LatLng(
+      this.center.lat - ((live.h - this.layout.h) / 2) * d.lat,
+      this.center.lng + ((live.w - this.layout.w) / 2) * d.lng,
+    );
+  };
   KMap.prototype._render = function () {
-    const { w, h } = this._size();
+    const { w, h } = this.layout;
     const d = degPerPx(this.level, this.center.lat);
     this.overlays.forEach((o) => {
       const x = (o.position.lng - this.center.lng) / d.lng + w / 2;
@@ -95,7 +131,7 @@
     return this.center;
   };
   KMap.prototype.setCenter = function (latlng) {
-    this.center = latlng;
+    this.center = this._snap(latlng);
     this._idleSoon();
   };
   KMap.prototype.panTo = function (latlng) {
@@ -109,24 +145,26 @@
     this._idleSoon();
   };
   KMap.prototype.getBounds = function () {
-    const { w, h } = this._size();
+    const live = this._size();
     const d = degPerPx(this.level, this.center.lat);
-    return new LatLngBounds(
-      new LatLng(this.center.lat - (h / 2) * d.lat, this.center.lng - (w / 2) * d.lng),
-      new LatLng(this.center.lat + (h / 2) * d.lat, this.center.lng + (w / 2) * d.lng),
-    );
+    const top = this.center.lat + (this.layout.h / 2) * d.lat;
+    const left = this.center.lng - (this.layout.w / 2) * d.lng;
+    return new LatLngBounds(new LatLng(top - live.h * d.lat, left), new LatLng(top, left + live.w * d.lng));
   };
   KMap.prototype.setBounds = function (bounds) {
-    this.center = new LatLng((bounds.sw.lat + bounds.ne.lat) / 2, (bounds.sw.lng + bounds.ne.lng) / 2);
+    this.center = this._snap(new LatLng((bounds.sw.lat + bounds.ne.lat) / 2, (bounds.sw.lng + bounds.ne.lng) / 2));
     this._idleSoon();
   };
+  // 실제 SDK처럼 왼쪽 위를 그대로 두고 지금 크기로 다시 배치한다 — 중심은 보이던 가운데(어긋난 값)가 되고 idle을 낸다.
   KMap.prototype.relayout = function () {
+    this.center = this._visibleCenter();
+    this.layout = this._size();
     this._render();
     window.__fakeRelayoutCount = (window.__fakeRelayoutCount || 0) + 1;
-    // 실제 SDK가 relayout 뒤 idle도 내는 경우를 흉내 낸다(map01-check 12b). 지연을 앱의 조회 디바운스(300ms)보다 길게 줄 수
-    // 있어, 디바운스가 아니라 "같은 조회는 다시 보내지 않음"으로 한 번만 나가는지 확인할 수 있다.
+    // relayout 뒤 idle. 지연(relayoutIdleDelay)을 앱의 조회 디바운스(300ms)보다 길게 줄 수 있어, 디바운스가 아니라 "같은
+    // 조회는 다시 보내지 않음"으로 한 번만 나가는지 확인할 수 있다(map01-check 12b). idleOnRelayout: false면 내지 않는다.
     const opts = window.__FAKE_KAKAO_OPTIONS || {};
-    if (opts.idleOnRelayout) {
+    if (opts.idleOnRelayout !== false) {
       setTimeout(() => {
         this._render();
         window.__fakeRelayoutIdleCount = (window.__fakeRelayoutIdleCount || 0) + 1;
@@ -195,13 +233,23 @@
 
   const Status = { OK: 'OK', ZERO_RESULT: 'ZERO_RESULT', ERROR: 'ERROR' };
   // 검색어별 지연(__FAKE_KAKAO_OPTIONS.geocodeDelays) — 앞 검색이 뒤 검색보다 늦게 끝나는 경우를 만든다(map01-check 13).
+  // holdGeocode가 켜져 있으면 결과를 붙잡아 두고 window.__releaseGeocodes()를 부를 때 돌려준다 — 검색이 진행 중인 동안
+  // 무언가(화면 폭 변경 등)를 하고 나서 끝나게 만든다(specs/map-responsive).
+  window.__heldGeocodes = window.__heldGeocodes || [];
+  window.__releaseGeocodes = () => window.__heldGeocodes.splice(0).forEach((done) => done());
   function lookup(query, cb) {
-    const delays = (window.__FAKE_KAKAO_OPTIONS || {}).geocodeDelays || {};
-    setTimeout(() => {
+    const options = window.__FAKE_KAKAO_OPTIONS || {};
+    const delays = options.geocodeDelays || {};
+    const answer = () => {
       const hit = FAKE_GEOCODE[query];
       if (hit) cb([hit], Status.OK);
       else cb([], Status.ZERO_RESULT);
-    }, delays[query] ?? 10);
+    };
+    if (options.holdGeocode) {
+      window.__heldGeocodes.push(answer);
+      return;
+    }
+    setTimeout(answer, delays[query] ?? 10);
   }
   function Geocoder() {}
   Geocoder.prototype.addressSearch = lookup;

@@ -2,7 +2,14 @@ import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type 
 import { createPortal } from 'react-dom';
 import { AlertTriangleIcon } from '../../components/icons/AlertTriangleIcon';
 import { loadKakaoMaps } from '../../features/map/kakaoLoader';
-import type { KakaoCluster, KakaoCustomOverlay, KakaoMap, KakaoMapsNamespace, KakaoMarkerClusterer } from '../../features/map/kakaoTypes';
+import type {
+  KakaoCluster,
+  KakaoCustomOverlay,
+  KakaoLatLng,
+  KakaoMap,
+  KakaoMapsNamespace,
+  KakaoMarkerClusterer,
+} from '../../features/map/kakaoTypes';
 import {
   approximateBounds,
   formatClusterCount,
@@ -69,6 +76,9 @@ interface KakaoMapViewProps {
  * 넓은 화면에서는 클러스터 원형 배지(건수)로 묶는다.
  */
 const CLUSTER_MIN_LEVEL = 5;
+
+/** idle의 중심이 기억한 중심과 이만큼(px) 안이면 움직이지 않은 것으로 본다 — SDK 격자 맞춤 오차(최대 1px)보다 크게. */
+const SNAP_TOLERANCE_PX = 1.5;
 
 const PIN_BUTTON_CLASS =
   'group flex min-h-11 min-w-11 cursor-pointer items-end justify-center bg-transparent p-0 focus-visible:outline-none';
@@ -176,6 +186,13 @@ export function KakaoMapView({
   const popupOverlayRef = useRef<KakaoCustomOverlay | null>(null);
   /** 지금 지도의 중심·레벨·bounds를 onIdle로 알린다 — 지도가 만들어질 때 채운다. */
   const publishViewRef = useRef<(() => void) | null>(null);
+  /**
+   * 크기 변경 보정용. layoutSizeRef: 이 컴포넌트가 마지막으로 배치한(지도 생성·relayout) 컨테이너 크기. lastCenterRef: 그 크기에서
+   * 지도가 마지막으로 멈췄을 때의 중심 — 크기가 바뀐 뒤 되돌릴 기준이다. SDK의 getCenter()는 기준이 될 수 없다: 실제 SDK는 창
+   * resize 이벤트에 스스로 relayout하면서 왼쪽 위를 고정해 중심을 어긋나게 바꿔 놓는다(2026-10-27 탐침).
+   */
+  const layoutSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const lastCenterRef = useRef<KakaoLatLng | null>(null);
   /** 팝업 오버레이가 지금 지도에 붙어 있는지. */
   const popupShownRef = useRef(false);
   const [popupContainer] = useState(() => {
@@ -268,11 +285,32 @@ export function KakaoMapView({
         });
         clustererRef.current = clusterer;
 
+        layoutSizeRef.current = { w: container.clientWidth, h: container.clientHeight };
+        lastCenterRef.current = map.getCenter();
         const handleIdle = () => {
-          const center = map.getCenter();
+          // 컨테이너 크기가 마지막 배치와 다르면 크기 변경 도중이다(창 resize에 SDK가 스스로 relayout해 중심이 어긋난 상태). 이
+          // 중심은 기억하지도 알리지도 않는다 — 아래 ResizeObserver가 원래 중심으로 되돌린 뒤 알린다.
+          const size = layoutSizeRef.current;
+          if (typeof ResizeObserver !== 'undefined' && size && (size.w !== container.clientWidth || size.h !== container.clientHeight)) {
+            return;
+          }
           const b = map.getBounds();
           const sw = b.getSouthWest();
           const ne = b.getNorthEast();
+          // SDK는 중심을 픽셀 격자에 맞춘다 — 크기 변경 뒤 기억한 중심으로 되돌려도 getCenter()는 최대 1px 어긋난 값을
+          // 돌려준다(실제 SDK 2026-10-27: 폭 767에서 setCenter(126.9783807) → 126.9783354, 1.0px). 이 값을 기억하면 경계를 넘을
+          // 때마다 한 방향으로 쌓이고 URL도 바뀐다. 그래서 기억한 중심과 1.5px 안이면 움직이지 않은 것으로 보고 기억한 중심을
+          // 그대로 쓴다(복원 뒤 idle이 몇 번 오든, 동기든 비동기든 같다). 사용자가 옮겼으면(1.5px 넘게) 새 중심을 기억한다.
+          const snapped = map.getCenter();
+          const remembered = lastCenterRef.current;
+          const latPerPx = (ne.getLat() - sw.getLat()) / (container.clientHeight || 1);
+          const lngPerPx = (ne.getLng() - sw.getLng()) / (container.clientWidth || 1);
+          const unmoved =
+            remembered !== null &&
+            Math.abs(snapped.getLat() - remembered.getLat()) < SNAP_TOLERANCE_PX * latPerPx &&
+            Math.abs(snapped.getLng() - remembered.getLng()) < SNAP_TOLERANCE_PX * lngPerPx;
+          const center = unmoved ? remembered : snapped;
+          lastCenterRef.current = center;
           callbacks.current.onIdle(
             { lat: center.getLat(), lng: center.getLng(), level: map.getLevel() },
             { swLat: sw.getLat(), swLng: sw.getLng(), neLat: ne.getLat(), neLng: ne.getLng() },
@@ -325,6 +363,8 @@ export function KakaoMapView({
       clustererRef.current = null;
       mapRef.current = null;
       publishViewRef.current = null;
+      layoutSizeRef.current = null;
+      lastCenterRef.current = null;
     };
   }, [attempt, popupContainer]);
 
@@ -340,7 +380,14 @@ export function KakaoMapView({
       frame = requestAnimationFrame(() => {
         const map = mapRef.current;
         if (!map) return;
+        // 크기가 바뀌어도 화면 가운데가 같은 곳을 보게 한다 — 768px 경계를 넘어 레이아웃이 바뀌어도(지도는 다시 마운트되지
+        // 않는다) 사용자가 보던 위치가 그대로 가운데 남는다. relayout은 왼쪽 위를 고정해 중심을 옮기므로, 크기가 바뀌기 전
+        // 마지막으로 멈춘 중심(lastCenterRef)으로 되돌린다. getCenter()를 쓰면 안 된다 — 창 resize에 SDK가 이미 스스로
+        // relayout해 어긋난 중심을 돌려준다.
+        const center = lastCenterRef.current ?? map.getCenter();
         map.relayout();
+        map.setCenter(center);
+        layoutSizeRef.current = { w: container.clientWidth, h: container.clientHeight };
         publishViewRef.current?.();
       });
     });
