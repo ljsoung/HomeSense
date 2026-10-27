@@ -63,8 +63,15 @@
     // 마지막으로 배치한 컨테이너 크기. 실제 SDK(2026-10-27 탐침)처럼 컨테이너 크기가 바뀌어도 relayout 전까지는 이 크기와
     // 왼쪽 위 기준으로 그대로 그리고, getCenter는 바뀌기 전 중심을 그대로 돌려준다.
     this.layout = { w: container.clientWidth || 800, h: container.clientHeight || 600 };
-    // 실제 SDK는 창 resize 이벤트를 받으면 스스로 relayout한다(왼쪽 위 고정 — 중심이 어긋난다).
-    this._onWindowResize = () => this.relayout();
+    // 실제 SDK는 창 resize 이벤트를 받으면 그 자리에서(동기로) 스스로 relayout하고 idle까지 낸다(왼쪽 위 고정 — 중심이
+    // 어긋난다). 앱의 ResizeObserver 보정보다 먼저 일어난다.
+    this._onWindowResize = () => {
+      this.center = this._visibleCenter();
+      this.layout = this._size();
+      this._render();
+      window.__fakeRelayoutCount = (window.__fakeRelayoutCount || 0) + 1;
+      event.trigger(this, 'idle');
+    };
     window.addEventListener('resize', this._onWindowResize);
     this.overlays = new Set();
     this.pane = document.createElement('div');
