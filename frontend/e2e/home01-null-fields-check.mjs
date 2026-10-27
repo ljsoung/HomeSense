@@ -64,8 +64,8 @@ async function scenario(label, width) {
   const summaryText = await page.getByText('관심 지역 요약').locator('xpath=ancestor::div[contains(@class,"rounded-[16px]")][1]').innerText();
   ok(`${label}: 관심 지역 요약에 NaN·undefined 없음`, !/NaN|undefined/.test(summaryText), summaryText.match(/.{0,20}(NaN|undefined).{0,20}/)?.[0]);
 
-  // 추천 단지는 모바일·데스크톱 목록을 둘 다 렌더한다(기술 부채) — 보이는 쪽 카드만 본다.
-  const name = page.locator('p:visible', { hasText: '층없는단지' }).first();
+  // 추천 단지 목록은 한 벌이다(2026-10-27) — 그 목록 안의 카드를 본다.
+  const name = page.getByRole('list', { name: '추천 단지' }).locator('p', { hasText: '층없는단지' });
   await name.waitFor({ timeout: 5000 });
   const cardText = (await name.locator('xpath=ancestor::div[contains(@class,"rounded-[16px]")][1]').innerText()).replace(/\s+/g, ' ');
   ok(`${label}: 층 없는 인기 단지 카드 — "층" 세그먼트 생략`, !/층/.test(cardText.replace('층없는단지', '')), cardText);

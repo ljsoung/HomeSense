@@ -1009,7 +1009,7 @@ for (const [label, jeonse] of [['전세 거래 있음', true], ['전세 거래 �
   await rows(page).first().waitFor();
   const search = page.getByPlaceholder('지역명으로 지도 이동');
   ok('23: 전제 — 데스크톱 검색창에 래미안', (await search.inputValue()) === RAEMIAN);
-  await page.locator('header').getByRole('link', { name: '지도로 보기' }).click();
+  await page.getByRole('banner').getByRole('link', { name: '지도로 보기' }).click();
   for (let i = 0; i < 40 && new URL(page.url()).searchParams.has('keyword'); i++) await page.waitForTimeout(50);
   await page.waitForTimeout(300);
   ok('23: GNB 지도로 보기 → URL에 keyword 없음', !new URL(page.url()).searchParams.has('keyword'));

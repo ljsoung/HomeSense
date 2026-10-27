@@ -65,7 +65,7 @@ const stored = (page) => page.evaluate((keys) => keys.map((k) => localStorage.ge
 {
   const account = await createAccount('d');
   const { context, page, errors, logoutResponses } = await openLoggedIn(account, { width: 1280, height: 900 });
-  const header = page.locator('header').first();
+  const header = page.getByRole('banner');
   const trigger = header.getByRole('button', { name: /계정 메뉴/ });
   ok('로그인 상태: 계정 메뉴 버튼 표시', await trigger.isVisible());
   ok('메뉴 닫힘 상태: aria-expanded=false', (await trigger.getAttribute('aria-expanded')) === 'false');
@@ -100,7 +100,7 @@ const stored = (page) => page.evaluate((keys) => keys.map((k) => localStorage.ge
 
   await page.reload();
   await page.waitForLoadState('networkidle');
-  ok('새로고침 후에도 비로그인 유지', await page.locator('header').first().getByRole('link', { name: '로그인' }).isVisible());
+  ok('새로고침 후에도 비로그인 유지', await page.getByRole('banner').getByRole('link', { name: '로그인' }).isVisible());
   ok('pageerror 없음(데스크톱)', errors.length === 0);
   await context.close();
 }
@@ -113,9 +113,9 @@ const stored = (page) => page.evaluate((keys) => keys.map((k) => localStorage.ge
   const [, refreshBefore] = await stored(page);
   await page.evaluate((key) => localStorage.setItem(key, 'expired.access.token'), ACCESS_KEY);
 
-  await page.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).click();
+  await page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).click();
   await page.getByRole('menuitem', { name: '로그아웃' }).click();
-  await page.locator('header').first().getByRole('link', { name: '로그인' }).waitFor({ timeout: 5000 });
+  await page.getByRole('banner').getByRole('link', { name: '로그인' }).waitFor({ timeout: 5000 });
   ok('만료 토큰: logout 401 후 재시도 200', JSON.stringify(logoutResponses) === '[401,200]');
   ok('만료 토큰: refresh 1회', refreshCalls.length - refreshAtLoad === 1);
   ok('만료 토큰: 로컬 토큰 삭제', (await stored(page)).every((v) => v === null));
@@ -129,7 +129,7 @@ const stored = (page) => page.evaluate((keys) => keys.map((k) => localStorage.ge
   const account = await createAccount('m');
   const { context, page, errors, logoutResponses } = await openLoggedIn(account, { width: 392, height: 800 });
   // 모바일에서는 DOM의 첫 header가 숨겨진 데스크톱 GNB라 실제로 보이는 모바일 헤더를 고른다.
-  const header = page.locator('header:visible').first();
+  const header = page.getByRole('banner');
   const trigger = header.getByRole('button', { name: /계정 메뉴/ });
   ok('모바일: 아바타(계정 메뉴) 표시', await trigger.isVisible());
   await trigger.click();

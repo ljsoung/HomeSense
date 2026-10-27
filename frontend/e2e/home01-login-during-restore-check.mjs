@@ -99,13 +99,13 @@ async function loginDuringRestore(label, noLocks) {
   ok(`${label}: B 로그인 응답을 받음`, Boolean(loginTokensB?.refreshToken));
   ok(`${label}: 저장된 토큰이 B 로그인 응답 그대로(A 재발급 결과로 덮이지 않음)`, Boolean(loginTokensB) && access === loginTokensB.accessToken && refresh === loginTokensB.refreshToken);
   ok(`${label}: 저장된 Access Token이 B 계정`, (await whoAmI(access)) === accountB.email);
-  const menu = page.locator('header').first().getByRole('button', { name: /계정 메뉴/ });
+  const menu = page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ });
   const menuShown = await menu.waitFor({ timeout: 5000 }).then(() => true, () => false);
   ok(`${label}: 화면에 B 닉네임 표시`, menuShown && (await menu.textContent()).includes(accountB.nickname));
 
   await page.reload();
   await page.waitForLoadState('networkidle');
-  const menuAfterReload = page.locator('header').first().getByRole('button', { name: /계정 메뉴/ });
+  const menuAfterReload = page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ });
   const shownAfterReload = await menuAfterReload.waitFor({ timeout: 5000 }).then(() => true, () => false);
   ok(`${label}: 새로고침 후에도 B로 로그인 유지`, shownAfterReload && (await menuAfterReload.textContent()).includes(accountB.nickname));
   const [accessAfterReload] = await page.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [ACCESS_KEY, REFRESH_KEY]);
@@ -180,7 +180,7 @@ async function authRequestsDuringLockWait(label, holdMs) {
     ok(`${label}: 락 대기 상한 뒤 대체 경로로 저장되어 홈으로 이동(${Date.now() - startedAt}ms)`, navigated);
     ok(`${label}: 그 시점 A 재발급은 아직 진행 중`, refreshStatuses.length === 0);
     await page.waitForLoadState('networkidle');
-    const menu = page.locator('header').first().getByRole('button', { name: /계정 메뉴/ });
+    const menu = page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ });
     const shown = await menu.waitFor({ timeout: 5000 }).then(() => true, () => false);
     ok(`${label}: 재발급 진행 중에도 화면은 B`, shown && (await menu.textContent()).includes(accountB.nickname));
     const whileHeld = authedRequests.filter((r) => r.screen !== '/login');
@@ -229,7 +229,7 @@ await authRequestsDuringLockWait('락 대기 상한 초과(7초)', 7000);
   await page.evaluate(() => { history.pushState({}, '', '/'); dispatchEvent(new PopStateEvent('popstate')); });
   const restoreRequestsAfterNav = [];
   page.on('request', (r) => { if (r.url().includes('/api/users/me') || r.url().includes('/api/auth/refresh')) restoreRequestsAfterNav.push(r.url()); });
-  const menu = page.locator('header').first().getByRole('button', { name: /계정 메뉴/ });
+  const menu = page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ });
   const settled = await menu.waitFor({ timeout: 5000 }).then(() => true, () => false);
   ok('복원 중 로그인 실패: 복원된 A 세션으로 헤더가 확정됨', settled && (await menu.textContent()).includes(accountA.nickname));
   ok('복원 중 로그인 실패: 페이지를 다시 불러오지 않고 확인(복원 재시작 없음)', restoreRequestsAfterNav.length === 0);

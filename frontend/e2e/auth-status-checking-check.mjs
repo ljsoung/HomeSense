@@ -43,7 +43,7 @@ async function scenario(label, width) {
   await page.goto(`${BASE}/`);
   await page.waitForTimeout(1500);
 
-  const header = page.locator('header:visible').first();
+  const header = page.getByRole('banner');
   const placeholder = header.getByTestId('account-placeholder');
   ok(`${label}: 확인 중 헤더에 자리 표시가 있음`, await placeholder.isVisible());
   ok(`${label}: 확인 중 헤더에 로그인 링크가 없음`, (await header.getByRole('link', { name: '로그인', exact: true }).count()) === 0);
@@ -68,7 +68,7 @@ async function anonymousScenario(label, width) {
   await context.route('**/api/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: okBody([]) }));
   const page = await context.newPage();
   await page.goto(`${BASE}/`);
-  const header = page.locator('header:visible').first();
+  const header = page.getByRole('banner');
   ok(`${label}: 토큰이 없으면 곧바로 로그인 링크`, await header.getByRole('link', { name: '로그인', exact: true }).waitFor({ timeout: 3000 }).then(() => true, () => false));
   ok(`${label}: 토큰이 없으면 자리 표시 없음`, (await header.getByTestId('account-placeholder').count()) === 0);
   await context.close();

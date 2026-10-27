@@ -63,7 +63,7 @@ async function openChecking(refreshToken) {
 
 /** 추천 단지 그리드에서 보이는 n번째 카드의 하트와 그 단지 id. */
 async function firstVisibleHeart(page, index = 0) {
-  const heart = page.locator('button[aria-pressed]:visible').nth(index);
+  const heart = page.locator('button[aria-pressed]').nth(index);
   await heart.waitFor({ timeout: 10000 });
   const name = await heart.evaluate((el) => {
     let n = el;
@@ -77,11 +77,11 @@ async function firstVisibleHeart(page, index = 0) {
 const isBusy = async (heart) =>
   (await heart.getAttribute('aria-busy')) === 'true' && ((await heart.getAttribute('class')) ?? '').split(' ').includes('ring-2');
 // 추천 단지는 모바일·데스크톱용 카드를 둘 다 렌더하므로(CSS로 하나만 보임) 보이는 하트만 센다.
-const busyCount = (page) => page.locator('button[aria-pressed][aria-busy="true"]:visible').count();
+const busyCount = (page) => page.locator('button[aria-pressed][aria-busy="true"]').count();
 
 const checkingHeaderEmpty = async (page) =>
-  (await page.locator('header').first().getByRole('link', { name: '로그인' }).count()) === 0 &&
-  (await page.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).count()) === 0;
+  (await page.getByRole('banner').getByRole('link', { name: '로그인' }).count()) === 0 &&
+  (await page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).count()) === 0;
 
 // 1) 로그인 사용자 — 확인 중 클릭은 로그인 화면으로 보내지 않고, 판정 뒤 등록한다.
 {
@@ -100,7 +100,7 @@ const checkingHeaderEmpty = async (page) =>
   ok('로그인 사용자: 처리 후 대기 표시 사라짐', !(await isBusy(heart)) && (await busyCount(page)) === 0);
   ok('로그인 사용자: 로그인 화면으로 이동하지 않음', new URL(page.url()).pathname === '/');
   ok('로그인 사용자: 대기 중인 하트 재생 항목을 남기지 않음', (await page.evaluate((k) => sessionStorage.getItem(k), PENDING_FAVORITE_KEY)) === null);
-  ok('로그인 사용자: 복원 뒤 로그인 상태(계정 메뉴)', await page.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).isVisible());
+  ok('로그인 사용자: 복원 뒤 로그인 상태(계정 메뉴)', await page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).isVisible());
   ok('로그인 사용자: 등록 요청이 정확히 1회(POST)', JSON.stringify(favoriteCalls.map((c) => c.method)) === '["POST"]');
   ok('로그인 사용자: 등록 요청은 복원(재발급) 뒤에 나감', favoriteCalls[0]?.at >= refreshDone() && refreshDone() > clickedAt);
   const [access] = await page.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [ACCESS_KEY, REFRESH_KEY]);
@@ -120,7 +120,7 @@ const checkingHeaderEmpty = async (page) =>
   ok('이미 찜함: 사전 등록 성공', added.ok);
   const { context, page, errors, favoriteCalls } = await openChecking(account.refreshToken);
   await page.goto(`${BASE}/`);
-  const target = page.locator('button[aria-pressed]:visible').first();
+  const target = page.locator('button[aria-pressed]').first();
   await target.waitFor({ timeout: 10000 });
   const { complexId: shownId } = await firstVisibleHeart(page);
   ok('이미 찜함: 첫 카드가 사전 등록한 단지', shownId === complexId);
@@ -155,7 +155,7 @@ const checkingHeaderEmpty = async (page) =>
   ok('무효 세션: 로그인 후 재생할 하트 클릭이 남음', (await page.evaluate((k) => sessionStorage.getItem(k), PENDING_FAVORITE_KEY)) === String(complexId));
   ok('무효 세션: 관심 매물 요청 없음', favoriteCalls.length === 0);
   await page.goBack();
-  await page.locator('button[aria-pressed]:visible').first().waitFor({ timeout: 10000 });
+  await page.locator('button[aria-pressed]').first().waitFor({ timeout: 10000 });
   ok('무효 세션: 홈으로 돌아와도 대기 표시가 남아 있지 않음', (await busyCount(page)) === 0);
   ok('pageerror 없음(무효 세션)', errors.length === 0);
   await context.close();

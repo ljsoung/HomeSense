@@ -17,7 +17,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(`${BASE}/search?regionCode=4111100000`);
 await page.waitForLoadState('networkidle');
 
-const trigger = page.getByRole('button', { name: /필터/ }).first();
+const trigger = page.getByRole('button', { name: /^필터/ });
 await trigger.click();
 const sheet = page.locator('[role="dialog"]');
 await sheet.waitFor();
@@ -27,8 +27,8 @@ const focusedLabel = () => page.evaluate(() => {
 });
 const focusInsideSheet = () => sheet.evaluate((d) => d.contains(document.activeElement));
 
-// 0) 모바일은 숨겨진 데스크톱 사이드바와 시트에 FilterPanel이 동시에 렌더된다 — id 중복·id 참조 깨짐이
-//    없어야 하고, 라디오 그룹 이름도 패널마다 달라야 한다.
+// 0) 모바일은 시트에만 FilterPanel을 렌더한다(2026-10-27 — 예전엔 숨긴 데스크톱 사이드바에도 동시에 렌더했다). id 중복·
+//    id 참조 깨짐이 없고, 문서 전체의 라디오가 시트의 한 그룹뿐이어야 한다.
 const idAudit = await page.evaluate(() => {
   const ids = [...document.querySelectorAll('[id]')].map((e) => e.id);
   const duplicates = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
@@ -40,22 +40,27 @@ const idAudit = await page.evaluate(() => {
   }
   const groupsIn = (root) => [...new Set([...root.querySelectorAll('input[type="radio"]')].map((r) => r.name))];
   const sheetGroups = groupsIn(document.querySelector('[role="dialog"]'));
-  const sidebarGroups = groupsIn(document.querySelector('aside'));
-  return { idCount: ids.length, duplicates, brokenRefs, sheetGroups, sidebarGroups };
+  return {
+    idCount: ids.length,
+    duplicates,
+    brokenRefs,
+    sheetGroups,
+    asideCount: document.querySelectorAll('aside').length,
+    radioCount: document.querySelectorAll('input[type="radio"]').length,
+  };
 });
 ok(`중복 id 0개(전체 ${idAudit.idCount}개)`, idAudit.duplicates.length === 0);
 ok('시트 안의 id 참조 속성이 모두 존재하는 요소를 가리킴', idAudit.brokenRefs.length === 0);
-ok('시트와 사이드바의 라디오 그룹 이름이 서로 다름', idAudit.sheetGroups.length === 1 && idAudit.sidebarGroups.length === 1 && idAudit.sheetGroups[0] !== idAudit.sidebarGroups[0]);
+ok('모바일에 필터 사이드바가 DOM에 없음', idAudit.asideCount === 0);
+ok('문서의 라디오가 시트의 한 그룹(3개)뿐', idAudit.sheetGroups.length === 1 && idAudit.radioCount === 3);
 
-// 0-1) 시트 안에서 라벨을 클릭하면 시트 쪽 컨트롤이 바뀐다(숨겨진 사이드바 컨트롤이 아니라).
+// 0-1) 시트 안에서 라벨을 클릭하면 시트 컨트롤이 바뀐다.
 const sheetVilla = sheet.getByRole('checkbox', { name: '연립다세대' });
-const sidebarVilla = page.locator('aside').getByRole('checkbox', { name: '연립다세대', includeHidden: true });
 const villaBefore = await sheetVilla.isChecked();
 await sheet.getByText('연립다세대', { exact: true }).click();
 ok('시트의 "연립다세대" 라벨 클릭 시 시트 체크박스가 토글됨', (await sheetVilla.isChecked()) !== villaBefore);
 await sheet.getByText('연립다세대', { exact: true }).click();
 ok('다시 클릭 시 원래 상태로 복귀', (await sheetVilla.isChecked()) === villaBefore);
-ok('사이드바 체크박스도 같은 draft 값을 보임', (await sidebarVilla.isChecked()) === villaBefore);
 await sheet.getByText('월세', { exact: true }).click();
 const sheetRadios = sheet.getByRole('radiogroup', { name: '거래유형' }).getByRole('radio');
 ok('시트의 "월세" 라벨 클릭 시 시트 라디오가 선택됨', await sheetRadios.nth(2).isChecked());

@@ -60,7 +60,7 @@ async function runScenario(tabCount) {
   ok(`${label}: 재발급 요청이 브라우저 전체에서 정확히 1회`, refreshStatuses.length === 1);
   ok(`${label}: 재발급 응답 200`, JSON.stringify(refreshStatuses) === '[200]');
   for (const [i, p] of pages.entries()) {
-    const menuShown = await p.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).waitFor({ timeout: 5000 }).then(() => true, () => false);
+    const menuShown = await p.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).waitFor({ timeout: 5000 }).then(() => true, () => false);
     ok(`${label}: 탭 ${i + 1} 로그인 유지(계정 메뉴 표시)`, menuShown);
   }
   const [access, refresh] = await pages[0].evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [ACCESS_KEY, REFRESH_KEY]);
@@ -104,8 +104,8 @@ await runScenario(3);
   const refreshRequests = [];
   context.on('request', (r) => { if (r.url().includes('/api/auth/refresh')) refreshRequests.push(Date.now()); });
   const readTokens = (p) => p.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), [ACCESS_KEY, REFRESH_KEY]);
-  const loginShown = (p) => p.locator('header').first().getByRole('link', { name: '로그인' }).isVisible();
-  const menuShown = (p) => p.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).isVisible();
+  const loginShown = (p) => p.getByRole('banner').getByRole('link', { name: '로그인' }).isVisible();
+  const menuShown = (p) => p.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).isVisible();
 
   // 사용자 대기 예산(CLAUDE.md "401 자동 재발급과 요청 timeout" 절): 동작 1회의 최악 대기 15초 + 측정 여유 1초.
   // 탭 1(락을 쥔 탭)이 비로그인으로 확정되기까지 이 안에 끝나야 한다 — 예산 초과도 이 테스트가 잡는다.
@@ -119,7 +119,7 @@ await runScenario(3);
   const tab2 = await context.newPage();
   const tab2Start = Date.now();
   await tab2.goto(`${BASE}/`);
-  const tab2Settled = await tab2.locator('header').first().getByRole('link', { name: '로그인' }).waitFor({ timeout: 6000 }).then(() => true, () => false);
+  const tab2Settled = await tab2.getByRole('banner').getByRole('link', { name: '로그인' }).waitFor({ timeout: 6000 }).then(() => true, () => false);
   const tab2Elapsed = Date.now() - tab2Start;
   // 락 대기 상한 2초(LOCK_WAIT_TIMEOUT_MS) + 페이지 로드. 탭 1의 재발급 timeout(5초) 전에 포기해야 같은 토큰으로 다시 재발급하지 않는다.
   ok(`멈춤: 탭 2가 락 대기 상한 뒤 비로그인으로 끝남(${tab2Elapsed}ms)`, tab2Settled && tab2Elapsed >= 2000 && tab2Elapsed < 6000);
@@ -130,7 +130,7 @@ await runScenario(3);
 
   // 예산이 이미 소진됐으면 기다리지 않고 지금 상태만 본다 — Playwright는 timeout: 0을 "제한 없음"으로 해석해
   // 예산을 넘긴 바로 그 경우에 무기한 대기하게 된다.
-  const tab1LoginLink = tab1.locator('header').first().getByRole('link', { name: '로그인' });
+  const tab1LoginLink = tab1.getByRole('banner').getByRole('link', { name: '로그인' });
   const tab1Remaining = USER_WAIT_BUDGET_MS - (Date.now() - tab1Start);
   const tab1Settled = tab1Remaining > 0
     ? await tab1LoginLink.waitFor({ timeout: tab1Remaining }).then(() => true, () => false)
@@ -147,7 +147,7 @@ await runScenario(3);
   await Promise.all(held.map((r) => r.abort().catch(() => {})));
   await tab2.reload();
   await tab2.waitForLoadState('networkidle');
-  const recovered = await tab2.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).waitFor({ timeout: 5000 }).then(() => true, () => false);
+  const recovered = await tab2.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).waitFor({ timeout: 5000 }).then(() => true, () => false);
   ok('멈춤 해소 후 새로고침: 로그인 복구', recovered);
   await context.close();
 }
@@ -172,7 +172,7 @@ await runScenario(3);
   await page.goto(`${BASE}/`);
   await page.waitForLoadState('networkidle');
   ok('폴백: navigator.locks 없음 확인', await page.evaluate(() => navigator.locks === undefined));
-  const menuShown = await page.locator('header').first().getByRole('button', { name: /계정 메뉴/ }).waitFor({ timeout: 5000 }).then(() => true, () => false);
+  const menuShown = await page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).waitFor({ timeout: 5000 }).then(() => true, () => false);
   ok('폴백: 단일 탭 로그인 유지', menuShown);
   ok('폴백: 재발급 1회(StrictMode 이중 effect에도)', refreshCalls.length === 1);
   ok('폴백: pageerror 없음', errors.length === 0);

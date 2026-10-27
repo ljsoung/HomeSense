@@ -311,7 +311,7 @@ async function scenarioWithdraw(label, viewport) {
   ok(`${label} 6: 실패(400) 시 다이얼로그 안 서버 메시지`, await dialog.getByText('현재 비밀번호가 일치하지 않습니다').waitFor({ timeout: 5000 }).then(() => true, () => false));
   ok(`${label} 6: 실패 시 /my에 머묾·토큰 유지`, path(page) === '/my' && (await tokens(page)).every((t) => t !== null));
   ok(`${label} 6: 실패 시 토큰 재발급 0회`, !calls.some((c) => c.path === '/api/auth/refresh'));
-  ok(`${label} 6: 실패 시 헤더는 여전히 로그인 상태`, await page.locator('header:visible').first().getByRole('button', { name: /계정 메뉴/ }).isVisible());
+  ok(`${label} 6: 실패 시 헤더는 여전히 로그인 상태`, await page.getByRole('banner').getByRole('button', { name: /계정 메뉴/ }).isVisible());
   ok(`${label} 6: 실패 후 비밀번호 칸으로 포커스`,await dialog.getByLabel('비밀번호 확인').evaluate((el) => el === document.activeElement));
 
   api.withdraw = 'locked';
@@ -331,7 +331,7 @@ async function scenarioWithdraw(label, viewport) {
   const deleteCall = calls.filter((c) => c.method === 'DELETE' && c.path === '/api/users/me').at(-1);
   ok(`${label} 6: 요청 본문은 password만`, deleteCall && JSON.stringify(Object.keys(JSON.parse(deleteCall.body))) === '["password"]', deleteCall?.body);
   ok(`${label} 6: 완료 토스트`, await page.getByText('회원 탈퇴가 완료되었습니다').isVisible());
-  ok(`${label} 6: 헤더가 비로그인`, await page.locator('header:visible').first().getByRole('link', { name: '로그인', exact: true }).isVisible());
+  ok(`${label} 6: 헤더가 비로그인`, await page.getByRole('banner').getByRole('link', { name: '로그인', exact: true }).isVisible());
   ok(`${label} 6: pageerror 없음`, errors.length === 0, errors.join(' | '));
   await context.close();
 }

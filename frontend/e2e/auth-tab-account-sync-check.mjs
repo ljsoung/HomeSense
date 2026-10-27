@@ -69,7 +69,7 @@ async function openScenario(accountA, { blockStorageEvents = false } = {}) {
   return { context, tab1, errors, favoriteWrites };
 }
 
-const header = (page) => page.locator('header:visible').first();
+const header = (page) => page.getByRole('banner');
 const accountMenu = (page) => header(page).getByRole('button', { name: /계정 메뉴/ });
 const showsAccount = async (page, nickname, timeout = 8000) =>
   accountMenu(page).filter({ hasText: nickname }).waitFor({ timeout }).then(() => true, () => false);
@@ -96,7 +96,7 @@ async function loginInNewTab(context, account) {
   const accountB = await createAccount('b');
   const { context, tab1, errors, favoriteWrites } = await openScenario(accountA, { blockStorageEvents: true });
   ok('방어: 탭 1이 계정 A로 로그인 상태', await showsAccount(tab1, accountA.nickname));
-  const heart = tab1.locator('button[aria-pressed]:visible').first();
+  const heart = tab1.locator('button[aria-pressed]').first();
   ok('방어: 관심 단지 하트가 보임', await heart.waitFor({ timeout: 8000 }).then(() => true, () => false));
 
   await loginInNewTab(context, accountB);
