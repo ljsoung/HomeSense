@@ -19,7 +19,7 @@ for (const viewport of VIEWPORTS) {
   for (const screen of SCREENS.filter((s) => IDS.includes(s.id))) {
     const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
     const page = await context.newPage();
-    await mockApis(page, screen.loggedIn);
+    await mockApis(page, screen.loggedIn, screen.options);
     await page.goto(`${BASE}${screen.path}`);
     await screen.ready(page).waitFor({ timeout: 10_000 });
     await page.evaluate(() =>

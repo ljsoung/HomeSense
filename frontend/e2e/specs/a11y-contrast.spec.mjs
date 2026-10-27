@@ -20,7 +20,7 @@ for (const viewport of VIEWPORTS) {
   for (const screen of SCREENS) {
     test(`${screen.id} ${viewport.name}: color-contrast 위반 0건`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      await mockApis(page, screen.loggedIn);
+      await mockApis(page, screen.loggedIn, screen.options);
       await page.goto(screen.path);
       await expect(screen.ready(page)).toBeVisible({ timeout: 10_000 });
       // 전환이 끝난 화면을 본다(색 전환 중이면 중간 색으로 잴 수 있다). 무한 반복(배경 Ken Burns 등)은 기다리지 않는다.

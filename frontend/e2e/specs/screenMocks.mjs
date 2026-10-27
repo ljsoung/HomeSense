@@ -76,7 +76,8 @@ const NOTIFICATIONS = [
 const SETTINGS = [{ notificationSettingId: 51, favoritePropertyId: 31, priceChangeThresholdPct: 5, newTradeAlertYn: true, emailAlertYn: true }];
 const USER = { userId: 7, email: 'contrast@test.com', nickname: '대비', createdAt: '2026-09-01T00:00:00' };
 
-export async function mockApis(page, loggedIn) {
+/** options.zeroThreshold: 관심 매물 31의 알림 임계치를 0%로(MY-03 0% 경고 상태). */
+export async function mockApis(page, loggedIn, options = {}) {
   await page.route('https://dapi.kakao.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_SDK }),
   );
@@ -99,7 +100,7 @@ export async function mockApis(page, loggedIn) {
     if (path === '/api/regions/interest-summary') return ok(FAV_REGIONS.map(({ favoriteRegionId, legalDongCd, fullPath, avgPrice, changeRate, newTradeCount }) => ({ favoriteRegionId, legalDongCd, fullPath, avgPrice, changeRate, tradeCount: newTradeCount })));
     if (path === '/api/favorites/properties') return ok(FAV_PROPERTIES);
     if (path === '/api/favorites/regions') return ok(FAV_REGIONS);
-    if (path === '/api/notifications/settings') return ok(SETTINGS);
+    if (path === '/api/notifications/settings') return ok(options.zeroThreshold ? SETTINGS.map((x) => ({ ...x, priceChangeThresholdPct: 0 })) : SETTINGS);
     if (path === '/api/notifications') return ok(NOTIFICATIONS, { page: 0, size: 10, totalElements: 2, totalPages: 1 });
     return route.fulfill({ status: 404, contentType: 'application/json', body: errBody('NOT_FOUND', 'mock 없음') });
   });
@@ -128,6 +129,13 @@ export const SCREENS = [
   { id: 'MY-01', path: '/my', loggedIn: true, ready: (p) => p.getByText('contrast@test.com') },
   { id: 'MY-02', path: '/favorites', loggedIn: true, ready: (p) => p.getByText('대비단지1').first() },
   { id: 'MY-03', path: '/notifications/settings', loggedIn: true, ready: (p) => p.getByText('대비단지3').first() },
+  {
+    id: 'MY-03(0%)',
+    path: '/notifications/settings?favoritePropertyId=31',
+    loggedIn: true,
+    options: { zeroThreshold: true },
+    ready: (p) => p.getByText('임계치 0% 설정 확인'),
+  },
   { id: 'MY-04', path: '/notifications', loggedIn: true, ready: (p) => p.getByText('대비단지1 실거래가 2.1% 상승').first() },
   { id: 'MY-05', path: '/my/profile', loggedIn: true, ready: (p) => p.getByRole('button', { name: /저장/ }) },
 ];
