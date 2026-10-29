@@ -7,7 +7,7 @@ interface PlaceholderPageProps {
 export function PlaceholderPage({ title, programId }: PlaceholderPageProps) {
   return (
     <div className="flex min-h-screen w-full flex-col items-center justify-center gap-2 bg-[#f7f8fa] px-4 text-center">
-      <p className="text-[13px] font-semibold text-[#99a1af]">{programId}</p>
+      <p className="text-[13px] font-semibold text-muted">{programId}</p>
       <h1 className="text-[22px] font-extrabold text-[#101828]">{title}</h1>
       <p className="text-[14px] text-[#6a7282]">추후 구현 예정입니다.</p>
     </div>

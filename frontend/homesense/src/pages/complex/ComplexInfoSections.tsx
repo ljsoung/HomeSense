@@ -54,9 +54,9 @@ export function BasicInfoSummary({ basic }: { basic: ComplexBasicInfo }) {
               {item.icon}
             </span>
             <div className="min-w-0">
-              <dt className="text-[11px] font-medium leading-[16.5px] text-[#99a1af]">{item.label}</dt>
+              <dt className="text-[11px] font-medium leading-[16.5px] text-muted">{item.label}</dt>
               <dd
-                className={`break-words text-[14px] font-bold leading-[21px] ${item.value ? 'text-[#101828]' : 'text-[#99a1af]'}`}
+                className={`break-words text-[14px] font-bold leading-[21px] ${item.value ? 'text-[#101828]' : 'text-muted'}`}
               >
                 {item.value ?? NO_INFO}
               </dd>
@@ -91,14 +91,14 @@ export function DetailInfoSection({ extended, basic }: { extended: ComplexExtend
           <span className="text-[14px] font-bold leading-[21px] text-[#101828]">{open ? '상세정보 접기' : '상세정보 보기'}</span>
         </span>
         {!open && (
-          <span className="hidden text-right text-[12px] font-medium leading-[18px] text-[#99a1af] md:block">
+          <span className="hidden text-right text-[12px] font-medium leading-[18px] text-muted md:block">
             관리방식 · 승강기 · 주차/전기차 · 보안/편의시설 등
           </span>
         )}
       </button>
       <div id={panelId} hidden={!open} className="border-t border-[#f3f4f6] px-5 pb-5 md:px-6 md:pb-6">
         {groups.length === 0 ? (
-          <p className="pt-5 text-[13px] text-[#99a1af]">등록된 상세정보가 없습니다.</p>
+          <p className="pt-5 text-[13px] text-muted">등록된 상세정보가 없습니다.</p>
         ) : (
           <div className="grid gap-6 pt-5 md:grid-cols-2 md:gap-x-10">
             {groups.map((group) => (
@@ -112,7 +112,7 @@ export function DetailInfoSection({ extended, basic }: { extended: ComplexExtend
                       <dt className="w-[120px] shrink-0 text-[#6a7282]">{row.label}</dt>
                       <dd
                         className={`min-w-0 flex-1 whitespace-pre-line break-words text-right ${
-                          row.value ? 'font-semibold text-[#1e2939]' : 'text-[#99a1af]'
+                          row.value ? 'font-semibold text-[#1e2939]' : 'text-muted'
                         }`}
                       >
                         {row.value ?? NO_INFO}

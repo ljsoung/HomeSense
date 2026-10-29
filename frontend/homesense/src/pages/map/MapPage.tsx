@@ -486,7 +486,7 @@ export function MapPage() {
         ) : (
           <>
             {formatMapCount(points.items.length, points.truncated).replace(/건$/, '')}
-            <span className="font-medium text-[#99a1af]">건</span>
+            <span className="font-medium text-muted">건</span>
           </>
         )
       }

@@ -23,7 +23,7 @@ export function SegmentedToggle<T extends string>({ options, value, onChange }: 
           type="button"
           onClick={() => onChange(option.value)}
           className={`rounded-full px-3.5 py-1.5 text-[13px] font-semibold whitespace-nowrap transition-colors ${
-            value === option.value ? 'bg-brand text-white' : 'bg-[#f2f3f5] text-[#6e7580]'
+            value === option.value ? 'bg-brand text-white' : 'bg-[#f2f3f5] text-[#4a5565]'
           }`}
         >
           {option.label}

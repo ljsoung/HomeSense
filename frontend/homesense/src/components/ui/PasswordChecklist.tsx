@@ -23,7 +23,7 @@ export function PasswordChecklist({ password }: { password: string }) {
             ) : (
               <span className="size-3 shrink-0 rounded-full border border-[#d1d5dc]" />
             )}
-            <span className={`text-[11.5px] ${met ? 'text-[#00a63e]' : 'text-[#99a1af]'}`}>{rule.label}</span>
+            <span className={`text-[11.5px] ${met ? 'text-[#00a63e]' : 'text-muted'}`}>{rule.label}</span>
           </div>
         );
       })}

@@ -97,7 +97,7 @@ export function InterestRegionSummary() {
               <RegionCard key={region.favoriteRegionId} region={region} />
             ))}
           </div>
-          <div className="flex items-center gap-1 pt-3 text-[11px] text-[#99a1af]">
+          <div className="flex items-center gap-1 pt-3 text-[11px] text-muted">
             <InfoCircleIcon className="size-3" />
             전월 동기간 대비 변동률 · 매일 오전 8시 갱신
           </div>
@@ -151,7 +151,7 @@ export function RegionCard({ region }: { region: InterestRegionSummaryResponse }
     <div className="flex flex-1 flex-col justify-center rounded-[14px] border border-[#f3f4f6] bg-[#fafafa] p-4">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-[11px] text-[#99a1af]">{sigungu}</p>
+          <p className="text-[11px] text-muted">{sigungu}</p>
           <p className="text-[14px] font-bold text-[#101828]">{eupmyeondong}</p>
         </div>
         {changeRate != null ? (
@@ -164,7 +164,7 @@ export function RegionCard({ region }: { region: InterestRegionSummaryResponse }
             {formatChangeRate(changeRate)}
           </span>
         ) : (
-          <span className="px-2 py-0.5 text-[11px] font-bold text-[#99a1af]">
+          <span className="px-2 py-0.5 text-[11px] font-bold text-muted">
             <span aria-hidden="true">—</span>
             <span className="sr-only">변동 정보 없음</span>
           </span>
@@ -173,7 +173,7 @@ export function RegionCard({ region }: { region: InterestRegionSummaryResponse }
       <p className="pt-2 text-[20px] font-extrabold tracking-[-0.3px] text-[#1c1c1e]">
         {avgPrice != null ? formatKoreanPrice(avgPrice) : '거래 없음'}
       </p>
-      <p className="pt-1.5 text-[11px] text-[#99a1af]">평균 거래가 · 최근 1개월 {region.tradeCount}건</p>
+      <p className="pt-1.5 text-[11px] text-muted">평균 거래가 · 최근 1개월 {region.tradeCount}건</p>
     </div>
   );
 }

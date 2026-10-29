@@ -85,7 +85,7 @@ export function RangeSlider({ label, min, max, step = 1, valueMin, valueMax, onC
           onChange={(event) => handleMinChange(Number(event.target.value))}
           className="w-full min-w-0 rounded-[10px] border border-[#e5e7eb] px-2.5 py-1.5 text-[12px] text-[#101828] focus:border-brand focus:outline-none"
         />
-        <span className="text-[#99a1af]">~</span>
+        <span className="text-muted">~</span>
         <input
           id={`${id}-max`}
           type="number"

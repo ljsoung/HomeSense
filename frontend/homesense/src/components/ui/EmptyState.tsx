@@ -31,7 +31,7 @@ export function EmptyState({ icon, title, description, actions, variant = 'plain
     <div className="flex w-full flex-col items-center justify-center py-4 text-center">
       <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-[#f3f4f6] text-[#99a1af]">{icon}</div>
       {title && <p className="mb-1 text-[13px] font-semibold text-[#101828]">{title}</p>}
-      <div className="text-[13px] leading-[1.625] text-[#99a1af]">{description}</div>
+      <div className="text-[13px] leading-[1.625] text-muted">{description}</div>
       {actions && <div className="mt-3 flex items-stretch gap-2">{actions}</div>}
     </div>
   );

@@ -418,7 +418,7 @@ function PageHeading({ layout }: { layout: 'desktop' | 'tablet' }) {
       >
         관심 매물·지역 관리
       </h1>
-      <p className="mt-1 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+      <p className="mt-1 text-[13px] leading-[19.5px] text-muted">{SUBTITLE}</p>
     </div>
   );
 }
@@ -434,7 +434,7 @@ function BothEmpty() {
         <EmptyHeartIcon className="size-9" />
       </div>
       <p className="mt-6 text-[18px] leading-[27px] font-extrabold text-[#101828]">아직 등록한 관심 매물·지역이 없어요</p>
-      <p className="mt-2 text-[14px] leading-[22.75px] text-[#99a1af]">
+      <p className="mt-2 text-[14px] leading-[22.75px] text-muted">
         매물을 탐색하고 관심 목록에 추가하면 시세 변동 알림을 받을 수 있어요.
       </p>
       <Link
@@ -671,7 +671,7 @@ function TabbedLists({
                 } ${
                   selected
                     ? 'text-brand after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-brand after:content-[""]'
-                    : 'text-[#99a1af] hover:text-[#6a7282]'
+                    : 'text-muted hover:text-[#4a5565]'
                 }`}
               >
                 {item.label}

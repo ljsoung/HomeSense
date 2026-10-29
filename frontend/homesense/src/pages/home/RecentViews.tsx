@@ -119,7 +119,7 @@ export function RecentViews({ favoritedIds, onToggleFavorite, pendingFavoriteId 
                       />
                     </button>
                   </div>
-                  <p className="mt-0.5 truncate text-[11px] text-[#99a1af]">{meta}</p>
+                  <p className="mt-0.5 truncate text-[11px] text-muted">{meta}</p>
                 </div>
               </div>
             );

@@ -73,7 +73,7 @@ export function ProfileCard({ state }: { state: Loadable<UserResponse> }) {
             {/* 모바일은 이메일과 가입일을 두 줄로 나눠 이메일만 말줄임한다(긴 이메일이 가입일을 밀어내지 않게). Figma 모바일은
                 가입일을 숨기지만 UI정의서 MY-01의 필수 항목이라 그대로 보인다. 말줄임은 CSS라 전체 이메일은 DOM과
                 스크린리더에 그대로 남고, title로 마우스 오버에서도 보인다. */}
-            <p className="mt-0.5 flex min-w-0 flex-col text-[13px] leading-5 text-[#99a1af] md:flex-row md:items-center md:gap-1.5">
+            <p className="mt-0.5 flex min-w-0 flex-col text-[13px] leading-5 text-muted md:flex-row md:items-center md:gap-1.5">
               <span className="truncate" title={user.email}>
                 {user.email}
               </span>

@@ -165,7 +165,7 @@ export function ComplexHeader({ detail, favorited, favoritePending, favoriteProc
           >
             {detail.complexName}
           </h1>
-          {address && <p className="break-words pt-1.5 text-[13px] leading-[19.5px] text-[#99a1af]">{address}</p>}
+          {address && <p className="break-words pt-1.5 text-[13px] leading-[19.5px] text-muted">{address}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2 pt-1">
           <button

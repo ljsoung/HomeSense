@@ -71,7 +71,7 @@ export function FavoritePreview({ state, onRetry }: { state: Loadable<FavoritePr
                     </div>
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate text-[13px] leading-5 font-bold text-[#101828]">{favorite.complexName}</span>
-                      {summary && <span className="text-[12px] leading-[18px] text-[#99a1af]">{summary}</span>}
+                      {summary && <span className="text-[12px] leading-[18px] text-muted">{summary}</span>}
                     </div>
                     <HeartIcon filled aria-hidden="true" className="size-4 shrink-0 text-[#ff2056]" />
                   </Link>

@@ -37,7 +37,7 @@ export function BottomTabNav() {
             key={to}
             to={to}
             className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10.5px] font-medium ${
-              active ? 'text-brand' : 'text-[#9ca3af]'
+              active ? 'text-brand' : 'text-muted'
             }`}
           >
             <Icon strokeWidth={active ? 2.3 : 1.65} className="size-[22px]" />

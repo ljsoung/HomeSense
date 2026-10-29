@@ -243,7 +243,7 @@ export function SignupPage() {
       <form noValidate onSubmit={onSubmit} className="flex w-full flex-col items-start gap-3.5 md:gap-4">
         <div className="flex w-full flex-col">
           <label htmlFor="email" className="text-[13px] font-semibold text-[#364153]">
-            이메일 <span className="text-[11px] font-normal text-[#99a1af]">포커스 아웃 시 중복 확인</span>
+            이메일 <span className="text-[11px] font-normal text-muted">포커스 아웃 시 중복 확인</span>
           </label>
           <div className="flex items-start gap-2 pt-1.5">
             <Input
@@ -353,7 +353,7 @@ export function SignupPage() {
               label={
                 <>
                   <span>만 14세 이상입니다 </span>
-                  <span className="text-[#99a1af]">(필수)</span>
+                  <span className="text-muted">(필수)</span>
                 </>
               }
             />
@@ -391,7 +391,7 @@ export function SignupPage() {
                     개인정보처리방침
                   </Link>
                   <span>에 동의합니다 </span>
-                  <span className="text-[#99a1af]">(필수)</span>
+                  <span className="text-muted">(필수)</span>
                 </>
               }
             />

@@ -566,7 +566,7 @@ export function KakaoMapView({
     <div className="relative h-full w-full overflow-hidden bg-[#eef3f8]">
       <div ref={containerRef} className="absolute inset-0" data-testid="map-canvas" aria-hidden={status !== 'ready'} />
       {status === 'loading' && (
-        <div className="absolute inset-0 flex items-center justify-center text-[12px] text-[#99a1af]">지도를 불러오는 중…</div>
+        <div className="absolute inset-0 flex items-center justify-center text-[12px] text-[#4a5565]">지도를 불러오는 중…</div>
       )}
       {status === 'error' && (
         <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center" data-testid="map-error">

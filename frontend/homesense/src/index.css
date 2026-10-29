@@ -4,6 +4,12 @@
 @theme {
   --font-sans: 'Pretendard Variable', 'Pretendard', system-ui, sans-serif;
   --color-brand: #0f5c54;
+  /*
+   * 보조 글자색(설명·메타·캡션·placeholder). Figma의 #99a1af는 흰 바탕 2.60:1이라 WCAG 1.4.3(4.5:1)에 못 미쳐 이 값으로 바꿨다
+   * (흰 바탕 4.84:1). #f3f4f6·#eef3f8·#e5e7eb 같은 회색 바탕 위에서는 이 값도 4.5:1에 못 미치니 그런 자리는 #4a5565를 쓴다.
+   * 아이콘만 있는 버튼·장식 아이콘은 비텍스트라 이 토큰을 쓰지 않는다. CLAUDE.md "글자 대비" 절.
+   */
+  --color-muted: #6a7282;
 }
 
 body {

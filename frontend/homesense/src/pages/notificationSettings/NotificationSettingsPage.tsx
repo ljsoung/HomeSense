@@ -53,7 +53,9 @@ const NEW_TRADE_HINT = '매매·전세·월세 거래가 새로 등록되면 알
 const CARD_CLASS = 'rounded-[16px] border border-[#f3f4f6] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.06)]';
 const SECTION_TITLE_CLASS = 'text-[15px] leading-[22.5px] font-bold text-[#101828]';
 /** 카드 설명·대상 행 보조 텍스트·대상마다 다름·이메일 끔 안내·적용 안내(Figma 1.2·1.8) */
-const HELP_TEXT_CLASS = 'text-[12px] leading-[18px] text-[#99a1af]';
+const HELP_TEXT_CLASS = 'text-[12px] leading-[18px] text-muted';
+// 선택된 행(민트 #e8f2f0) 위 보조 글자 — muted(#6a7282)는 4.23:1이라 #4a5565(6.62:1). CLAUDE.md "글자 대비" 절.
+const HELP_TEXT_ON_SELECTED_CLASS = 'text-[12px] leading-[18px] text-[#4a5565]';
 /** 체크박스 행(대상 선택·수신 방법) — 선택 여부로 배경·테두리만 바뀐다. 선택 안 됨도 투명 테두리를 둬 높이가 흔들리지 않게 한다. */
 const ROW_BASE_CLASS = 'flex items-center gap-3 rounded-[14px] border px-4 py-3 transition-colors has-[input:disabled]:cursor-not-allowed';
 const ROW_SELECTED_CLASS = 'border-[rgba(15,92,84,0.2)] bg-[#e8f2f0]';
@@ -184,7 +186,7 @@ export function NotificationSettingsPage() {
             </ol>
           </nav>
           <h1 className="text-[22px] leading-[33px] font-extrabold text-[#101828]">{TITLE}</h1>
-          <p className="mt-0.5 text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+          <p className="mt-0.5 text-[13px] leading-[19.5px] text-muted">{SUBTITLE}</p>
           <div className="mt-6">{body}</div>
         </div>
       ) : (
@@ -192,7 +194,7 @@ export function NotificationSettingsPage() {
           <MobileAppBar title={TITLE} />
           {/* 태블릿·모바일 모두 좌우 16px(태블릿 768에서 736px, 모바일 393에서 361px). */}
           <div className="flex w-full flex-col px-4 pt-5">
-            <p className="text-[13px] leading-[19.5px] text-[#99a1af]">{SUBTITLE}</p>
+            <p className="text-[13px] leading-[19.5px] text-muted">{SUBTITLE}</p>
             <div className="mt-6">{body}</div>
           </div>
         </div>
@@ -312,9 +314,11 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
     showToast('알림 설정을 저장했어요', 'success');
   };
 
+  // 0% 상태 글자는 Figma #ef4444(흰 바탕 3.76:1) 대신 값 텍스트 #e7000b(4.77:1), 숫자 입력 #c10007(#fff5f5 위 6.00:1)
+  // — CLAUDE.md "글자 대비" 절. 테두리·슬라이더 강조(--ntf-accent)는 비텍스트라 Figma 값 그대로.
   const thresholdInput =
     layout === 'desktop' ? (
-      <span className={`text-[17px] leading-[25.5px] font-extrabold ${zero ? 'text-[#ef4444]' : 'text-brand'}`}>
+      <span className={`text-[17px] leading-[25.5px] font-extrabold ${zero ? 'text-[#e7000b]' : 'text-brand'}`}>
         {formatThreshold(values.threshold)}%
       </span>
     ) : (
@@ -341,9 +345,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
           }}
           className={`h-[35px] w-[52px] rounded-[14px] border text-center text-[14px] font-extrabold outline-none focus:border-brand ${
             !draftValid
-              ? 'border-[#fb2c36] bg-[#fff5f5] text-[#ef4444]'
+              ? 'border-[#fb2c36] bg-[#fff5f5] text-[#c10007]'
               : zero
-                ? 'border-[#fecaca] bg-[#fff5f5] text-[#ef4444]'
+                ? 'border-[#fecaca] bg-[#fff5f5] text-[#c10007]'
                 : 'border-[#e5e7eb] bg-[#f9fafb] text-brand'
           }`}
         />
@@ -446,7 +450,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         />
         <style>{THRESHOLD_RANGE_CSS}</style>
         {/* 트랙(입력 높이 22 중 가운데 6)과 라벨 사이 6px */}
-        <div aria-hidden="true" className="-mt-0.5 flex justify-between text-[11px] leading-[16.5px] text-[#99a1af]">
+        <div aria-hidden="true" className="-mt-0.5 flex justify-between text-[11px] leading-[16.5px] text-muted">
           <span>{THRESHOLD_MIN}%</span>
           <span>{THRESHOLD_MAX}%</span>
         </div>
@@ -502,7 +506,9 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
                 이메일 수신
                 {mixed.email && <MixedTag id={ids.emailMixed} />}
               </span>
-              {email && <span className="truncate text-[11px] leading-[16.5px] font-medium text-[#99a1af]">{email}</span>}
+              {email && (
+                <span className={`truncate text-[11px] leading-[16.5px] font-medium ${values.email ? 'text-[#4a5565]' : 'text-muted'}`}>{email}</span>
+              )}
             </span>
           </label>
           {!values.email && (
@@ -550,7 +556,7 @@ function SettingsForm({ layout, targets, settings, onSettingsChange, email }: Se
         )}
         <div className={`flex gap-3 ${layout === 'desktop' ? 'items-center justify-between' : 'flex-col'}`}>
           <div className="flex flex-col gap-0.5">
-            <p id={ids.hint} className="text-[12.5px] leading-[18.75px] text-[#99a1af]">
+            <p id={ids.hint} className="text-[12.5px] leading-[18.75px] text-muted">
               {SAVE_HINT_TEXT[hint]}
             </p>
             {hadDifferences && selectedKeys.length > 1 && (
@@ -700,7 +706,7 @@ function TargetRow({
       <CheckVisual checked={checked} />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className={`truncate ${ROW_LABEL_CLASS} ${checked ? 'text-[#101828]' : 'text-[#364153]'}`}>{target.name}</span>
-        <span id={summaryId} className={HELP_TEXT_CLASS}>
+        <span id={summaryId} className={checked ? HELP_TEXT_ON_SELECTED_CLASS : HELP_TEXT_CLASS}>
           {summary}
         </span>
       </span>
