@@ -805,6 +805,17 @@ AUTH-03 절 참고)과 같은 원자적 read-then-write 패턴이다. `requestPa
 
 **알려진 잔여 리스크 — 읍면동 단위 표본 크기.** `favorite_region`은 시군구(약 250개)보다 훨씬 잘게 쪼개진 읍면동 단위(`legal_dong_cd`)로 등록된다. 위 롤링 1개월 윈도우 기준으로 특정 읍면동의 월 거래건수가 0~2건에 그치는 경우가 드물지 않을 것으로 보인다 — 거래가 0건이면 `RegionStats`가 null을 반환해 "데이터 없음"으로 명확히 구분되지만, 1~2건인 경우는 null도 아니고 통계적으로 신뢰할 만한 평균도 아닌 애매한 중간 지대다. 게다가 `avgPrice`가 위 항목대로 전용면적 정규화 없는 원시 평균이라, 표본이 작은 달에 우연히 어떤 평형이 거래됐는지에 따라 `changeRate`가 실제 시세 변화와 무관하게 크게 흔들릴 수 있다. 지금은 실제 데이터가 없어 최소 표본 수 하한(예: N건 미만이면 null 처리)을 임의로 정할 근거가 없어 로직을 바꾸지 않았다 — 실거래 데이터가 쌓인 뒤 "특정 지역의 변동률이 이상하게 튄다"는 문의가 들어오면 이 항목부터 확인하라. FAV-01/MY-02가 요구하는 "신규거래 건수" 필드(위 항목)가 구현되면 그 값 자체가 표본 크기를 프론트에 노출하는 신호가 될 수 있어 두 항목을 함께 검토하는 것이 좋다.
 
+**[2026-10-29, `feature/backend/region-lookup`] 코드 하나로 이름 조회 — `GET /api/regions/{legalDongCd}`(`RegionService.lookup()`).** SRCH-01이 URL에 `regionCode`만 있을 때(직접 진입·새로고침·MY-04 알림 링크) 검색창·제목에 지역 이름을 보이려고 추가했다(프롬프트 F PR 5 항목 2). 응답은 자동완성과 같은 `RegionAutocompleteResponse`(`legalDongCd`, `fullPath`).
+
+| 항목 | 결정 | 근거 | 무효화 조건 |
+| --- | --- | --- | --- |
+| 범위 | 계층과 무관하게 활성 행이면 돌려준다(`findByLegalDongCdAndIsActiveTrue`) — 시도·시군구 대표행도 이름이 나온다("서울특별시", "서울특별시 강남구"). 자동완성·관심 지역 등록과 달리 대표행을 거르지 않는다 | 단지 검색 `regionCode`가 대표행까지 받는다(구를 가진 시·세종 포함). 이름만 보여 주는 용도라 거래 매칭 여부와 무관하다 | — |
+| 실패 | 형식 오류(10자리 ASCII 숫자가 아님, 전각 숫자 포함)·없는 코드·폐지된 코드는 모두 404 `REGION_NOT_FOUND`(기존 `RegionNotFoundException` 재사용). 형식 오류도 400으로 나누지 않는다 — 호출자는 어느 쪽이든 이름 없이 진행한다. 형식 검사는 서비스 안에서 DB 조회 전에 한다(`complex.exception.InvalidRegionCodeException`에 의존하지 않으려고) | 프롬프트 F: 폐지·없는 코드는 404 | — |
+| 캐시 | `regionLookup::{legalDongCd}`(TTL 24h, `CacheNames.REGION_LOOKUP`, 값 타입 `RegionAutocompleteResponse`). 무효화는 `regionAutocomplete`와 같다 — `LegalDistrictCodeReloadedEvent`에 전체 비움. 두 캐시 비우기를 따로 감싸 한쪽 실패가 다른 쪽을 막지 않는다. 404는 예외라 캐시되지 않는다 | `regionAutocomplete`와 같은 캐시 정책(지시) | 법정동코드를 재적재 이벤트 없이 바꾸는 경로가 생기면 그 경로도 두 캐시를 비운다 |
+| 인증·경로 | 비로그인 허용(SecurityConfig는 `/interest-summary`만 막는다). 리터럴 `/interest-summary`가 경로 변수보다 먼저 매칭된다(`RegionControllerTest`, 실 백엔드에서 401 그대로) | — | — |
+
+검증: `RegionServiceTest` 4건(읍면동·시군구 대표행·없음·형식 오류 6종은 DB 미조회), `RegionControllerTest` 3건(200, 404 코드, interest-summary가 lookup으로 가지 않음), `CacheConfigTest` 왕복, `CacheEvictionListenerTest`(재적재 시 두 캐시 비움, 한쪽 실패에도 다른 쪽 비움 — 두 번째 비우기를 빼면 2건 실패), `CacheHitMariaDbIT`(실 Redis — 캐시 히트에도 같은 응답·키 생성, 404는 키 없음). `./gradlew test` 897건, `./gradlew integrationTest` 143건 통과. 실 백엔드(로컬 DB): `4111112900` 경기도 수원시 장안구 파장동, `1100000000` 서울특별시, `1168000000` 서울특별시 강남구, `3611000000` 세종특별자치시, `2811000000`(폐지)·`abc` 404.
+
 `autocomplete()`의 `searchByNameContaining()`은 `is_active=true` 조건을 포함한다(폐지된 법정동이 자동완성에 노출되지 않도록) — `deactivateAll()`/`findDistinctActiveSggCd()`와 같은 관례. **`eupmyeondongName IS NOT NULL` 조건도 반드시 함께 있어야 한다** — `LegalDistrictCodeLoader`는 시도/시군구 대표행(계층 상위 행)을 `eupmyeondongName=null`로 적재하는데, `LegalDistrictMatcher.matchByTradeSggCd()`는 `eupmyeondongName`이 국토부 API의 `umdNm`과 일치하는 행에만 거래를 매칭시킨다. 즉 대표행의 `legal_dong_cd`는 애초에 어떤 거래에도 연결될 수 없어, 이 조건 없이 "강남구"를 검색하면 그 구의 대표행(예: `1168000000`)이 후보로 나오고 그 코드를 실거래 검색이나 `getInterestSummary()`에 넘기면 항상 0건이 되는 막다른 결과를 낳는다(Codex 코드리뷰 P1로 지적됨, 최초 구현에서 이 조건이 빠져 있었다 — 검증: `LegalDistrictCodeRepositoryMariaDbIT.시군구_대표행은_제외되고_활성_읍면동_행만_후보로_반환된다`).
 
 이 두 신규 리포지토리 쿼리 중 `TradeRepository.findAverageSaleAmount()`는 QueryDSL 동적 쿼리가 아니라 고정된 JPQL이라 `TradeRepository.findTopComplexIdsByRecentTradeVolume()`(SVC-CPX-01)과 같은 성격으로 보고 전용 MariaDB IT 없이 `RegionStatsCalculatorTest`(Mockito)로만 검증했다. 반면 `LegalDistrictCodeRepository.searchByNameContaining()`은 위 P1 버그가 정확히 "Mockito로는 절대 드러나지 않는" 종류(WHERE 절 자체가 실제 DB에서 올바른 행을 걸러내는지)라 `LegalDistrictCodeRepositoryMariaDbIT`(Testcontainers)를 별도로 추가했다 — 겉보기엔 둘 다 "고정 JPQL"이라 같은 검증 수준이면 될 것 같지만, 반환값의 정확성이 그 자체로 도메인 불변식(leaf 행만 선택 가능)과 직결되는 쿼리는 이 예외에 해당한다는 선례로 남긴다.
@@ -1180,6 +1191,8 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 
 ### 프로그램설계서 반영 필요 (문서 반영은 claude.ai에서)
 
+- 3.5절 SVC-RGN-01·API-RGN-01: `lookup(String legalDongCd)` / `GET /api/regions/{legalDongCd}` 추가 — 활성 행이면 계층 무관 `RegionAutocompleteResponse`, 형식 오류·없음·폐지 404 `REGION_NOT_FOUND`, 캐시 `regionLookup::{legalDongCd}`(재적재 시 전체 evict), 비로그인 허용. 5.4절 COM-CACHE-01 캐시 표에도 추가(2026-10-29, SVC-RGN-01 절).
+
 - **UI정의서 5.4절 MAP-01 예외 처리·6.2절 반응형: 화면 폭이 768px 경계를 넘어도(태블릿 회전·창 크기 변경) 지도 위치·확대 레벨·선택(팝업)·진행 중인 지역 검색이 유지된다. 목록은 데스크톱 사이드바 ↔ 모바일 하단 시트로 옮겨지고 목록 스크롤 위치는 처음으로 돌아간다(2026-10-24, "SCR-MAP-01" 절 "반응형 경계를 넘어도 지도 객체 유지" 행).**
 - **UI정의서 5.1절 AUTH-02(회원가입) 이벤트 정의: 가입 성공 후 이동 — HOME-01 고정이 아니라 로그인 화면에서 넘겨받은 복귀 목적지(`state.from`)가 있으면 그 화면, 인증 화면(`/login`·`/signup`·`/password-reset`)과 앱 밖 경로는 무시하고 HOME-01. AUTH-01 ↔ AUTH-02 링크도 목적지를 이어 준다(2026-10-23, "로그아웃 조건부 삭제와 가입 후 복귀" 절).**
 - 프로그램설계서 6.1절 "이전 목적지 보존": 로그인뿐 아니라 회원가입으로 진행해도 목적지와 원래 동작(관심 등록) 재생이 이어진다(2026-10-23).
@@ -1444,6 +1457,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | `complexDetailV4::{complexId}` | 단지 상세 조회(V3: matchMethod 추가 2026-09-30, V4: precisionBadge 추가 2026-10-13) |
 | `popularComplexesV4::{limit}` | 인기 단지 목록(V3: rentType·monthlyRentAmount 추가 2026-09-23, V4: precisionBadge 추가 2026-10-13) |
 | `regionAutocomplete::{query}` | 지역 자동완성 |
+| `regionLookup::{legalDongCd}` | 법정동코드 하나의 이름 조회(2026-10-29) |
 | `popularKeywords::{limit}` | 인기 검색어(TTL 1시간) |
 
 캐시 이름은 `common.cache.CacheNames` 상수로 관리한다. `@Cacheable`, `CacheEvictionListener`, 유지보수 러너가 같은 상수를 쓴다. **캐시 이름은 반드시 `CacheNames` 상수로 쓰고, 새 캐시는 `CacheConfig.cacheConfigurations()`에 값 타입과 함께 등록해야 한다(`CacheConfigTest`·`CacheNameRegistrationTest`가 강제)** — 미등록 캐시는 자동 생성되지 않는다(2026-09-27 리스트 캐시 500 hotfix, "단지 검색 지역코드·키워드·거래유형" 절 참고). 캐시 조회·저장 실패는 `CacheErrorHandler`가 로그만 남기고 미스로 처리한다.
@@ -1464,7 +1478,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | --- | --- | --- | --- |
 | `complexDetailV4::{complexId}` | `TradeCacheEvictionEvent` | BAT-LOD-01(`TradeDataLoader`), BAT-MAT-02 재매칭(`TradeRematchRunner`, 배치 커밋마다) | 일 1회 이상 / 재매칭 실행 시 |
 | `popularComplexes` | `TradeCacheEvictionEvent` (전체 evict) | BAT-LOD-01(`TradeDataLoader`), BAT-MAT-02 재매칭(`TradeRematchRunner`) | 일 1회 이상 / 재매칭 실행 시 |
-| `regionAutocomplete` | `LegalDistrictCodeReloadedEvent` (전체 evict) | BAT-MAT-01(`LegalDistrictCodeLoader`) | 비정기(CSV 재적재 시에만) |
+| `regionAutocomplete`, `regionLookup` | `LegalDistrictCodeReloadedEvent` (전체 evict) | BAT-MAT-01(`LegalDistrictCodeLoader`) | 비정기(CSV 재적재 시에만) |
 
 `regionAutocomplete`를 `TradeCacheEvictionEvent`(일 단위)에 묶으면 정적 데이터를 매일 무효화하게 돼 TTL을 길게 가져가려는 설계 의도가 깨집니다 — 실제로 COM-CACHE-01 1차 구현에서 이 실수가 있었고(`CacheEvictionListener`가 `TradeCacheEvictionEvent.legalDongCds()`로 `regionAutocomplete`까지 evict), 이후 `LegalDistrictCodeReloadedEvent`를 신설해 분리했습니다(검증: `CacheEvictionListener.java`, `LegalDistrictCodeLoader.java`).
 
@@ -1540,7 +1554,7 @@ Redis, TTL 기본 24시간. 배치 적재 완료 시 관련 캐시를 evict합�
 | 회원 | `/api/users` | `GET·PUT /me`, `DELETE /me` |
 | 단지 | `/api/complexes` | `GET /search`(`regionCode`·`keyword` 중 하나 필수, `dealCategory`/`rentType`·범위 필터·`sort`·`page`/`size`), `/popular`, `/{id}`, `/map`(`bounds` 필수 + `/search`와 같은 이름의 필터, 상한 500·complex_id 순) |
 | 실거래 | `/api/trades` | `GET /search`, `?complexId=`, `/{tradeId}` |
-| 지역 | `/api/regions` | `GET ?query=`, `/interest-summary` |
+| 지역 | `/api/regions` | `GET ?query=`, `/interest-summary`, `/{legalDongCd}`(이름 조회, 없거나 폐지 404) |
 | 최근조회 | `/api/recent-views` | `GET` |
 | 관심 | `/api/favorites` | `GET·POST·DELETE /properties`, `/regions` |
 | 알림 | `/api/notifications` | `GET·PUT /settings`, `GET`, `PATCH /{id}/read` |
