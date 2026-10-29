@@ -36,3 +36,15 @@ export function splitRegionPath(fullPath: string): { sigungu: string; eupmyeondo
   const sigungu = rest.slice(0, -1).join(' ');
   return { sigungu, eupmyeondong };
 }
+
+/**
+ * GET /api/regions/{legalDongCd} — 법정동코드 하나의 이름(fullPath). 없거나 폐지된 코드는 404다. SRCH-01이 URL에 regionCode만
+ * 있을 때(직접 진입·새로고침·MY-04 알림 링크) 검색창·제목에 지역 이름을 보이려고 부른다.
+ */
+export async function lookupRegion(legalDongCd: string, signal?: AbortSignal): Promise<RegionAutocompleteResponse> {
+  const { data } = await httpClient.get<ApiResponse<RegionAutocompleteResponse>>(
+    `/api/regions/${encodeURIComponent(legalDongCd)}`,
+    { signal },
+  );
+  return (data as Extract<ApiResponse<RegionAutocompleteResponse>, { success: true }>).data;
+}
