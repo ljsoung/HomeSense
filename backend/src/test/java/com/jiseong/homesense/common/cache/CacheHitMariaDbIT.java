@@ -77,7 +77,7 @@ class CacheHitMariaDbIT extends RedisContainerSupport {
     }
 
     private static final List<String> CACHES = List.of(CacheNames.COMPLEX_DETAIL, CacheNames.POPULAR_COMPLEXES,
-            CacheNames.REGION_AUTOCOMPLETE, CacheNames.POPULAR_KEYWORDS);
+            CacheNames.REGION_AUTOCOMPLETE, CacheNames.REGION_LOOKUP, CacheNames.POPULAR_KEYWORDS);
 
     @Autowired
     private MockMvc mockMvc;
@@ -144,6 +144,21 @@ class CacheHitMariaDbIT extends RedisContainerSupport {
 
         assertThat(first).contains("4111112900");
         assertThat(redisTemplate.hasKey(CacheNames.REGION_AUTOCOMPLETE + "::파장")).isTrue();
+    }
+
+    @Test
+    void 지역_코드_조회는_캐시_히트에도_같은_응답이다() throws Exception {
+        String first = getTwiceAndCompare("/api/regions/4111112900");
+
+        assertThat(first).contains("경기도 수원시 장안구 파장동");
+        assertThat(redisTemplate.hasKey(CacheNames.REGION_LOOKUP + "::4111112900")).isTrue();
+    }
+
+    @Test
+    void 없는_지역_코드의_404는_캐시되지_않는다() throws Exception {
+        mockMvc.perform(get("/api/regions/2811000000")).andExpect(status().isNotFound());
+
+        assertThat(redisTemplate.hasKey(CacheNames.REGION_LOOKUP + "::2811000000")).isFalse();
     }
 
     @Test

@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * API-RGN-01. base path: /api/regions. autocomplete()는 비로그인 조회 허용, interestSummary()는
  * 로그인 회원 전용(SecurityConfig에서 GET /api/regions/interest-summary만 authenticated()로 막음).
+ * lookup()(GET /api/regions/{legalDongCd})은 비로그인 허용 — 리터럴 경로 /interest-summary가 경로 변수보다 먼저 매칭된다.
  */
 @RestController
 @RequestMapping("/api/regions")
@@ -37,5 +39,10 @@ public class RegionController {
     public ApiResponse<List<InterestRegionSummaryResponse>> interestSummary(
             @AuthenticationPrincipal UserPrincipal me) {
         return ApiResponse.success(regionService.getInterestSummary(me.userId()));
+    }
+
+    @GetMapping("/{legalDongCd}")
+    public ApiResponse<RegionAutocompleteResponse> lookup(@PathVariable String legalDongCd) {
+        return ApiResponse.success(regionService.lookup(legalDongCd));
     }
 }

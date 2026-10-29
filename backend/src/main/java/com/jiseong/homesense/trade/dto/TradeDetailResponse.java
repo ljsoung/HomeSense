@@ -14,6 +14,10 @@ import com.jiseong.homesense.trade.entity.Trade;
  *
  * <p>aptDong은 소유권 이전등기 완료 건에만 값이 존재한다 — NULL이면 aptDongPending을 true로 내려
  * 프론트가 "등기 완료 후 제공" 안내로 대체하게 한다.
+ *
+ * <p>complexId(2026-10-29 추가, 끝에 둔다 — 하위 호환): 이 거래가 매칭된 단지. 단지 매칭 실패 거래는 null(JSON 키 생략).
+ * DTL-01이 URL {@code ?trade=}로 들어온 거래가 지금 보는 단지의 거래인지 확인할 때 쓴다. 지연 로딩 프록시의 식별자만
+ * 읽어 추가 쿼리가 없다.
  */
 public record TradeDetailResponse(
         Long tradeId,
@@ -33,7 +37,8 @@ public record TradeDetailResponse(
         LocalDate registrationDate,
         boolean isCancelled,
         LocalDate cancelDate,
-        Boolean landLeaseYn) {
+        Boolean landLeaseYn,
+        Long complexId) {
 
     public static TradeDetailResponse from(Trade t) {
         return new TradeDetailResponse(
@@ -54,6 +59,7 @@ public record TradeDetailResponse(
                 t.getRegistrationDate(),
                 t.isCancelYn(),
                 t.getCancelDate(),
-                t.getLandLeaseYn());
+                t.getLandLeaseYn(),
+                t.getComplex() == null ? null : t.getComplex().getComplexId());
     }
 }

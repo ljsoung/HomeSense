@@ -28,6 +28,12 @@ public interface LegalDistrictCodeRepository extends JpaRepository<LegalDistrict
     Optional<LegalDistrictCode> findByLegalDongCdAndIsActiveTrueAndEupmyeondongNameIsNotNull(String legalDongCd);
 
     /**
+     * SVC-RGN-01.lookup() 전용 — 코드 하나의 이름을 찾는다. 단지 검색(regionCode)이 시도·시군구 대표행까지 받으므로
+     * 계층과 무관하게 활성 행이면 돌려준다(자동완성·관심 지역 등록과 달리 대표행을 거르지 않는다).
+     */
+    Optional<LegalDistrictCode> findByLegalDongCdAndIsActiveTrue(String legalDongCd);
+
+    /**
      * SVC-RGN-01.autocomplete() — 시도/시군구/읍면동명 부분일치 검색(idx_legal_district_region_name).
      * query 2자 미만 차단은 Service 쪽 책임이라 여기서는 검사하지 않는다.
      *

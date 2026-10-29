@@ -33,8 +33,8 @@ import lombok.extern.slf4j.Slf4j;
  *       evict하고, complexId가 하나라도 있으면 popularComplexesV4(인기 단지 순위) 전체를 evict한다.
  *       complexId 하나만으로 "어떤 limit으로 캐시된 popularComplexesV4 항목이 영향받는지"를 역산할 수
  *       없어 전체 clear()로 처리한다.</li>
- *   <li>LegalDistrictCodeReloadedEvent(BAT-MAT-01, 비정기) — regionAutocomplete(지역 자동완성) 전체를
- *       evict한다. 이 캐시를 TradeCacheEvictionEvent에 묶으면 정적 데이터를 매일 무효화하게 돼
+ *   <li>LegalDistrictCodeReloadedEvent(BAT-MAT-01, 비정기) — regionAutocomplete(지역 자동완성)와
+ *       regionLookup(코드 하나의 이름 조회) 전체를 evict한다. 이 캐시를 TradeCacheEvictionEvent에 묶으면 정적 데이터를 매일 무효화하게 돼
  *       TTL을 길게 가져가려는 설계 의도가 깨지므로 반드시 이 이벤트에만 반응해야 한다.</li>
  * </ul>
  *
@@ -59,6 +59,7 @@ public class CacheEvictionListener {
     private static final String COMPLEX_DETAIL_CACHE = CacheNames.COMPLEX_DETAIL;
     private static final String POPULAR_COMPLEXES_CACHE = CacheNames.POPULAR_COMPLEXES;
     private static final String REGION_AUTOCOMPLETE_CACHE = CacheNames.REGION_AUTOCOMPLETE;
+    private static final String REGION_LOOKUP_CACHE = CacheNames.REGION_LOOKUP;
 
     private final CacheManager cacheManager;
 
@@ -90,12 +91,18 @@ public class CacheEvictionListener {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onLegalDistrictCodeReloaded(LegalDistrictCodeReloadedEvent event) {
+        clearRegionCache(REGION_AUTOCOMPLETE_CACHE);
+        clearRegionCache(REGION_LOOKUP_CACHE);
+    }
+
+    /** 한 캐시의 실패가 다른 캐시 무효화를 막지 않게 캐시마다 따로 감싼다. */
+    private void clearRegionCache(String cacheName) {
         try {
-            clearCache(REGION_AUTOCOMPLETE_CACHE);
-            log.info("COM-CACHE-01 법정동코드 재적재발 캐시 무효화 완료: cache={}", REGION_AUTOCOMPLETE_CACHE);
+            clearCache(cacheName);
+            log.info("COM-CACHE-01 법정동코드 재적재발 캐시 무효화 완료: cache={}", cacheName);
         } catch (RuntimeException e) {
             log.error("COM-CACHE-01 법정동코드 재적재발 캐시 무효화 실패 — 캐시는 TTL 만료까지 stale할 수 있다: cache={}",
-                    REGION_AUTOCOMPLETE_CACHE, e);
+                    cacheName, e);
         }
     }
 
