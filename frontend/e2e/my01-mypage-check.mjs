@@ -26,15 +26,19 @@ const USER = { userId: 7, email: LONG_EMAIL, nickname: '지성', createdAt: '202
 function kstAgo(msAgo) {
   return new Date(Date.now() - msAgo + 9 * 3600_000).toISOString().slice(0, 19);
 }
-function favorite(id, name, amount, category) {
+function favorite(id, name, amount, category, registeredAt, area = null) {
   return {
     favoritePropertyId: id, complexId: id * 10, complexName: name, sido: '서울특별시', sigungu: '종로구', dongRi: '숭인동',
     housingType: 'APT', recentDealCategory: category, recentDealDate: amount ? '2026-09-01' : null, recentAmount: amount,
-    changeRate: null, hasNotificationSetting: false,
+    registeredAt, recentArea: area, changeRate: null, hasNotificationSetting: false,
   };
 }
-// 응답 순서와 무관하게 최근 등록(ID 큰) 2건 — 9(자이), 5(힐스테이트).
-const FAVORITES = [favorite(3, '래미안', 90000, 'SALE'), favorite(9, '자이', 125000, 'SALE'), favorite(5, '힐스테이트', null, null)];
+// 응답 순서·ID와 무관하게 registeredAt 최신 2건 — 자이(10-01), 힐스테이트(09-20). ID 순이면 자이·래미안이 된다.
+const FAVORITES = [
+  favorite(3, '래미안', 90000, 'SALE', '2026-09-01T10:00:00', 59.97),
+  favorite(9, '자이', 125000, 'SALE', '2026-10-01T10:00:00', 84.97),
+  favorite(1, '힐스테이트', null, null, '2026-09-20T10:00:00'),
+];
 const NOTIFICATIONS = [
   // BAT-NTF-01 응답 모양: 발생 시각은 createdAt, 이메일 발송 전이라 sentAt 키가 없다(non_null). title은 한 줄 요약.
   { notificationId: 31, notificationType: 'PRICE_CHANGE', title: '자이 실거래가 5.0% 상승', message: '최근 3개월 평균 3.3㎡당 4,520만원 → 신규 매매 2건 평균 3.3㎡당 4,746만원', complexId: 90, legalDongCd: null, tradeId: null, isRead: false, createdAt: kstAgo(3 * 3600_000 + 60_000) },
@@ -157,9 +161,9 @@ async function scenarioContent(label, viewport, mobile) {
   const favSection = page.getByRole('region', { name: '관심 매물' });
   const favLinks = favSection.locator('ul a');
   ok(`${label} 4: 관심 매물 최근 등록 2건`, (await favLinks.count()) === 2);
-  ok(`${label} 4: 관심 매물 순서(ID 내림차순)`, (await favLinks.allInnerTexts()).map((t) => t.split('\n')[0]).join(',') === '자이,힐스테이트', (await favLinks.allInnerTexts()).join('|'));
+  ok(`${label} 4: 관심 매물 순서(등록일시 내림차순)`, (await favLinks.allInnerTexts()).map((t) => t.split('\n')[0]).join(',') === '자이,힐스테이트', (await favLinks.allInnerTexts()).join('|'));
   ok(`${label} 4: 행 → DTL-01`, (await favLinks.first().getAttribute('href')) === '/complexes/90');
-  ok(`${label} 4: 가격 표시, 없는 값은 생략`, (await favLinks.first().innerText()).includes('12억 5,000만원') && !(await favLinks.nth(1).innerText()).includes('null'));
+  ok(`${label} 4: 가격·면적 표시, 없는 값은 생략`, (await favLinks.first().innerText()).includes('12억 5,000만원 · 85㎡') && !/null|undefined|NaN|㎡/.test(await favLinks.nth(1).innerText()), (await favLinks.allInnerTexts()).join('|'));
   ok(`${label} 4: 하트는 aria-hidden`, (await favLinks.first().locator('svg').last().getAttribute('aria-hidden')) === 'true');
   ok(`${label} 4: 전체 관심 매물 보기 → MY-02`, (await favSection.getByRole('link', { name: /전체 관심 매물 보기/ }).getAttribute('href')) === '/favorites');
   ok(`${label} 4: 관심 매물 전체 보기 → MY-02`, (await page.getByRole('link', { name: '관심 매물 전체 보기' }).getAttribute('href')) === '/favorites');
@@ -170,7 +174,8 @@ async function scenarioContent(label, viewport, mobile) {
   ok(`${label} 4: 행 문구는 title(한 줄 요약), message 상세는 안 보임`, notiTexts[0].includes('자이 실거래가 5.0% 상승') && !notiTexts[0].includes('최근 3개월') && notiTexts[2].includes('신규 실거래 1건'), notiTexts.join('|'));
   ok(`${label} 4: 상대 시간(3시간 전·2일 전·날짜)`, notiTexts[0].includes('3시간 전') && notiTexts[1].includes('2일 전') && /\d{4}\.\d{2}\.\d{2}/.test(notiTexts[2]), notiTexts.join('|'));
   const dotColors = await notiLinks.evaluateAll((links) => links.map((a) => getComputedStyle(a.querySelector('span[aria-hidden]')).backgroundColor));
-  ok(`${label} 4: 알림 점은 한 색(Primary)`, dotColors.length === 3 && dotColors.every((c) => c === 'rgb(15, 92, 84)'), dotColors.join('|'));
+  ok(`${label} 4: 알림 점 색 — 관심 매물 Primary, 관심 지역 amber`, dotColors.join('|') === 'rgb(15, 92, 84)|rgb(225, 113, 0)|rgb(225, 113, 0)', dotColors.join('|'));
+  ok(`${label} 4: 색 외 단서 — 대상 종류 글자`, notiTexts[0].includes('관심 매물 · ') && notiTexts[1].includes('관심 지역 · ') && notiTexts[2].includes('관심 지역 · '), notiTexts.join('|'));
   ok(`${label} 4: 알림 행·전체 보기 → MY-04`, (await notiLinks.first().getAttribute('href')) === '/notifications' && (await page.getByRole('link', { name: '알림 전체 보기' }).getAttribute('href')) === '/notifications');
   ok(`${label} 4: 알림 요청 page=0&size=3`, calls.some((c) => c.path === '/api/notifications' && c.search.includes('page=0') && c.search.includes('size=3')));
   ok(`${label} 4: 읽음 처리(PATCH) 없음`, !calls.some((c) => c.method === 'PATCH'));

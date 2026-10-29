@@ -6,17 +6,36 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import type { NotificationResponse } from '../../features/notification/types';
 import { formatRelativeTime } from '../../lib/relativeTime';
 import { MY_ROUTES } from '../../routes/paths';
-import { NOTIFICATION_PREVIEW_COUNT } from './myPageData';
+import { NOTIFICATION_PREVIEW_COUNT, notificationTargetOf, type NotificationTarget } from './myPageData';
 import { CardBody, RowSkeleton, SectionCard, WidgetError } from './SectionCard';
 import type { Loadable } from './useLoadable';
 
 /**
- * 점은 Figma(MY-01·MY-04)에서 알림 대상의 종류를 뜻한다 — 관심 매물 = Primary, 관심 지역 = amber. 지금은 한 색(Primary)으로
- * 둔다. BAT-NTF-01이 조합을 정해(관심 매물 = complexId 있음, 관심 지역 = complexId 없이 legalDongCd) 두 색으로 나눌 수
- * 있게 됐지만, 나눌지는 후속 결정이다(CLAUDE.md 백로그 7번). 읽음 여부는 MY-01에서 표시하지 않는다.
+ * 점 색은 Figma(MY-01·MY-04)에서 알림 대상의 종류다 — 관심 매물 = Primary(#0f5c54), 관심 지역 = amber. Figma의 amber 값을
+ * 직접 받지 못해 기존 토큰 #e17100(MY-03 0% 경고 아이콘)을 썼다 — 흰 배경 대비 약 3.8:1(그래픽 3:1 기준 충족). 대상을 모르면
+ * 회색 #99a1af. 색만으로 구분하지 않도록 시각 줄 앞에 "관심 매물"/"관심 지역" 글자를 함께 둔다(아래 TARGET_LABEL).
+ * 읽음 여부는 MY-01에서 표시하지 않는다.
  */
-function TargetDot() {
-  return <span aria-hidden="true" className="mt-1.5 size-2 shrink-0 rounded-full bg-brand" />;
+const TARGET_DOT_CLASS: Record<NotificationTarget, string> = {
+  property: 'bg-brand',
+  region: 'bg-[#e17100]',
+  unknown: 'bg-[#99a1af]',
+};
+
+const TARGET_LABEL: Record<NotificationTarget, string | null> = {
+  property: '관심 매물',
+  region: '관심 지역',
+  unknown: null,
+};
+
+function TargetDot({ target }: { target: NotificationTarget }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-target={target}
+      className={`mt-1.5 size-2 shrink-0 rounded-full ${TARGET_DOT_CLASS[target]}`}
+    />
+  );
 }
 
 /**
@@ -47,22 +66,27 @@ export function NotificationPreview({ state, onRetry }: { state: Loadable<Notifi
       )}
       {state.status === 'success' && state.data.length > 0 && (
         <ul className="flex flex-col divide-y divide-[#f3f4f6]">
-          {state.data.map((notification) => (
-            <li key={notification.notificationId}>
-              <Link to={MY_ROUTES.notifications} className="flex items-start gap-3.5 px-5 py-4 hover:bg-[#f7f8fa]">
-                <TargetDot />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-[#1e2939]">
-                    {notification.title}
+          {state.data.map((notification) => {
+            const target = notificationTargetOf(notification);
+            const label = TARGET_LABEL[target];
+            return (
+              <li key={notification.notificationId}>
+                <Link to={MY_ROUTES.notifications} className="flex items-start gap-3.5 px-5 py-4 hover:bg-[#f7f8fa]">
+                  <TargetDot target={target} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="line-clamp-2 text-[13px] leading-[18px] font-medium text-[#1e2939]">
+                      {notification.title}
+                    </span>
+                    <span className="mt-0.5 text-[11px] leading-[17px] text-muted">
+                      {label && <span data-testid="notification-target">{label} · </span>}
+                      <time dateTime={notification.createdAt}>{formatRelativeTime(notification.createdAt, now)}</time>
+                    </span>
                   </span>
-                  <time dateTime={notification.createdAt} className="mt-0.5 text-[11px] leading-[17px] text-muted">
-                    {formatRelativeTime(notification.createdAt, now)}
-                  </time>
-                </span>
-                <ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 self-center text-[#99a1af]" />
-              </Link>
-            </li>
-          ))}
+                  <ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 self-center text-[#99a1af]" />
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </SectionCard>
