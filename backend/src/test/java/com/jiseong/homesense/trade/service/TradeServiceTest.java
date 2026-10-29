@@ -24,6 +24,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import com.jiseong.homesense.complex.entity.Complex;
 import com.jiseong.homesense.trade.dto.DealTypeFilter;
 import com.jiseong.homesense.trade.dto.TradeDetailResponse;
 import com.jiseong.homesense.trade.dto.TradeResponse;
@@ -170,6 +171,18 @@ class TradeServiceTest {
 
         assertThat(response.tradeId()).isEqualTo(10L);
         assertThat(response.dealAmount()).isEqualTo(80000L);
+        assertThat(response.complexId()).isNull();
+    }
+
+    @Test
+    void getDetail은_매칭된_단지의_complexId를_담는다() {
+        Trade matched = Trade.builder().tradeId(11L).housingType(HousingType.APT).dealCategory(DealCategory.SALE)
+                .datasetId("15126468").sggCd("11680").complex(Complex.builder().complexId(7L).build())
+                .excluUseArea(new BigDecimal("84.90")).dealDate(LocalDate.of(2026, 1, 10)).dealAmount(80000L)
+                .cancelYn(false).dedupHash("hash-11").build();
+        when(tradeRepository.findById(11L)).thenReturn(Optional.of(matched));
+
+        assertThat(tradeService.getDetail(11L).complexId()).isEqualTo(7L);
     }
 
     @Test

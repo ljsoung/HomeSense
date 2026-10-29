@@ -145,14 +145,15 @@ class TradeControllerTest {
     void 상세조회에_성공하면_200과_상세정보를_반환한다() throws Exception {
         TradeDetailResponse response = new TradeDetailResponse(1L, LocalDate.of(2026, 1, 10),
                 new BigDecimal("84.90"), (short) 5, DealCategory.SALE, null, 80000L, null, null,
-                null, true, "중개거래", "개인", "개인", null, false, null, false);
+                null, true, "중개거래", "개인", "개인", null, false, null, false, 7L);
         when(tradeService.getDetail(1L)).thenReturn(response);
 
         mockMvc.perform(get("/api/trades/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.tradeId").value(1))
                 .andExpect(jsonPath("$.data.aptDongPending").value(true))
-                .andExpect(jsonPath("$.data.dealingType").value("중개거래"));
+                .andExpect(jsonPath("$.data.dealingType").value("중개거래"))
+                .andExpect(jsonPath("$.data.complexId").value(7));
     }
 
     @Test
