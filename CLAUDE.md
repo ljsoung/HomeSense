@@ -1184,6 +1184,8 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 | **`ComplexDetailResponse.legalDongCd` 추가(SVC-CPX-01, 지성 결정)** | 단지의 법정동코드(10자리)를 싣는다. 매칭 대기 단지(`matchPending=true`)는 null(키 생략). 지연 로딩 프록시의 식별자만 읽어 추가 쿼리가 없다. 같은 브랜치에서 이미 `complexDetailV3`로 올려 추가 버전업은 없다 | 브레드크럼의 시도(앞 2자리)·시군구(앞 5자리)를 SRCH-01 지역 검색(`regionCode`) 링크로 만든다 | — |
 | **상세정보 6그룹 매핑(지성 확정, 합계 28)** | 분양/세대구성(6): `supply_type`·`sale_household_count`·`rental_household_count`·`public_rental_count`·`private_rental_count`·`developer` / 관리방식(2): `management_type`·`management_company` / 승강기(3): `elevator_passenger_count`·`elevator_cargo_count`·`elevator_combined_count` / 주차/전기차(6): `ground_parking_count`·`underground_parking_count`·`ev_charger_ground_yn`·`ev_charger_underground_yn`·`ev_parking_ground_count`·`ev_parking_underground_count` / 보안/편의시설(4): `cctv_count`·`home_network_yn`·`community_facilities`·`resident_amenities` / 관리사무소 및 건물구조(7): `office_address`·`office_phone`·`corridor_type`·`building_structure`·`heating_type`·`highest_floor_registered`·`basement_floor_count` | 어느 문서에도 매핑이 없었다. `ExtendedInfo` 28개 필드·`complex` DDL 컬럼과 대조해 빠지거나 겹치는 것이 없음을 확인했다(2026-09-30). Figma는 5그룹·샘플 라벨이라 디자인과 다르다 | `ExtendedInfo`에 필드를 더하거나 빼면 이 매핑을 다시 정한다 |
 
+**[2026-10-29, `feature/backend/region-lookup`] `TradeDetailResponse.complexId` 추가(API-TRD-01 `GET /api/trades/{id}`).** 이 거래가 매칭된 단지 ID — 매칭되지 않은 거래는 null(JSON 키 생략). 레코드 끝에 붙여 기존 필드는 그대로다(하위 호환). DTL-01이 URL `?trade={tradeId}`로 들어온 거래가 지금 보는 단지의 거래인지 확인하는 데 쓴다(다른 단지의 거래면 모달을 열지 않음 — 프롬프트 F PR 5 항목 4). 지연 로딩 프록시의 식별자만 읽어 추가 쿼리가 없고, 거래 상세는 캐시하지 않아 버전업이 필요 없다. 검증: `TradeServiceTest`(매칭 7, 미매칭 null), `TradeControllerTest`(JSON `complexId`), 실 백엔드 `GET /api/trades/391755` → `complexId: 14894`.
+
 **보고만 하고 고치지 않은 불일치:**
 - 중개사 소재지(`estateAgentSggNm`)는 수집·저장하지 않는다(`trade`에 컬럼 없음) — 거래상세 모달에서 그 행을 숨긴다(지성 결정). 아래 완결 필요 참고.
 
@@ -1191,6 +1193,7 @@ SCR-DTL-01(단지 상세) 프론트 착수 전 선행 작업이다. 확인에 �
 
 ### 프로그램설계서 반영 필요 (문서 반영은 claude.ai에서)
 
+- 3.4절 SVC-TRD-01 `getDetail()` 응답 `TradeDetailResponse`: `complexId`(매칭 단지, 미매칭 null) 추가(2026-10-29, "DTL-01 백엔드 보강" 절).
 - 3.5절 SVC-RGN-01·API-RGN-01: `lookup(String legalDongCd)` / `GET /api/regions/{legalDongCd}` 추가 — 활성 행이면 계층 무관 `RegionAutocompleteResponse`, 형식 오류·없음·폐지 404 `REGION_NOT_FOUND`, 캐시 `regionLookup::{legalDongCd}`(재적재 시 전체 evict), 비로그인 허용. 5.4절 COM-CACHE-01 캐시 표에도 추가(2026-10-29, SVC-RGN-01 절).
 
 - **UI정의서 5.4절 MAP-01 예외 처리·6.2절 반응형: 화면 폭이 768px 경계를 넘어도(태블릿 회전·창 크기 변경) 지도 위치·확대 레벨·선택(팝업)·진행 중인 지역 검색이 유지된다. 목록은 데스크톱 사이드바 ↔ 모바일 하단 시트로 옮겨지고 목록 스크롤 위치는 처음으로 돌아간다(2026-10-24, "SCR-MAP-01" 절 "반응형 경계를 넘어도 지도 객체 유지" 행).**
