@@ -48,6 +48,7 @@ import { formatMapCount } from '../../features/map/mapList';
 import { MapListPanel } from './MapListPanel';
 import { MapListSheet, type SheetSnap } from './MapListSheet';
 import { MapPopup } from './MapPopup';
+import { useMapSearchText } from './useMapSearchText';
 
 /** 시작 위치 중 단지 좌표 조회가 필요 없는 것만 StartView로 바꾼다. */
 function toStartView(view: PointView | RegionView): StartView {
@@ -200,30 +201,12 @@ export function MapPage() {
 
   // 지역 검색 — 고른 지역(또는 입력한 지역명)으로 지도를 옮기고, SRCH-01로 돌아갈 때 쓰도록 검색 조건도 URL에 남긴다.
   const urlSearchText = filters.regionLabel ?? filters.keyword ?? '';
-  const [searchValue, setSearchValue] = useState(urlSearchText);
-  // 같은 라우트 안에서 URL의 검색 조건이 바뀌면(GNB "지도로 보기"로 조건 없는 /map, 뒤로가기) 검색창을 맞춘다. 바뀔 때만
-  // 맞추고 매 렌더 덮어쓰지 않는다 — 지도를 움직일 때마다 URL(뷰포트)이 바뀌어도 사용자가 입력 중인 값은 그대로 둔다.
-  const [syncedSearchText, setSyncedSearchText] = useState(urlSearchText);
-  // 이 화면이 검색·지역 선택으로 직접 URL에 쓴 검색 조건(아직 URL 렌더에 반영되지 않은 것, 쓴 순서대로). URL 갱신은 전환
-  // 렌더라 늦게 반영된다 — 느린 기기에서는 Enter 뒤 250ms쯤. 그사이 사용자가 다음 검색어를 입력하면, 자기 검색의 반영이
-  // 검색창을 앞 검색어로 되돌려 다음 Enter가 앞 검색을 다시 보냈다. 자기가 쓴 값이 반영될 때는 검색창을 건드리지 않는다.
-  const [ownSearchTexts, setOwnSearchTexts] = useState<string[]>([]);
-  if (syncedSearchText !== urlSearchText) {
-    setSyncedSearchText(urlSearchText);
-    const own = ownSearchTexts.indexOf(urlSearchText);
-    if (own === -1) {
-      setSearchValue(urlSearchText);
-      if (ownSearchTexts.length > 0) setOwnSearchTexts([]);
-    } else {
-      setOwnSearchTexts(ownSearchTexts.slice(own + 1));
-    }
-  }
-  const rememberOwnSearchText = (text: string) =>
-    setOwnSearchTexts((prev) => {
-      // URL이 바뀌지 않을 값(지금 URL과 같거나 바로 앞에 쓴 값과 같음)은 반영될 일이 없으니 남기지 않는다.
-      const last = prev.length > 0 ? prev[prev.length - 1] : syncedSearchText;
-      return text === last ? prev : [...prev, text];
-    });
+  // 검색창 값 — URL의 검색 조건이 바뀌면 맞추되, 이 화면이 직접 쓴 검색 조건의 반영은 입력 중인 값을 덮지 않는다(백로그 17).
+  const {
+    value: searchValue,
+    setValue: setSearchValue,
+    rememberOwn: rememberOwnSearchText,
+  } = useMapSearchText(urlSearchText);
   const moveToQuery = async (query: string, level: number) => {
     const intent = beginIntent();
     const map = mapRef.current;

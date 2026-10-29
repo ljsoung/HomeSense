@@ -33,13 +33,13 @@ const ITEM = {
   locationPrecision: 'PRECISE',
 };
 
-test('느린 기기에서 검색 직후 붙여 넣은 다음 검색어가 지워지지 않는다', async ({ page, context }) => {
-  test.setTimeout(120_000);
+async function setUp(page, { holdGeocode }) {
   await page.setViewportSize({ width: 1280, height: 800 });
-  // 지오코딩 결과를 붙잡아 두어, 두 검색 모두 진행 중인 상태에서 입력을 확인한 뒤 풀어 준다.
-  await page.addInitScript(() => {
-    window.__FAKE_KAKAO_OPTIONS = { holdGeocode: true };
-  });
+  if (holdGeocode) {
+    await page.addInitScript(() => {
+      window.__FAKE_KAKAO_OPTIONS = { holdGeocode: true };
+    });
+  }
   await page.route('https://dapi.kakao.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/javascript', body: FAKE_SDK }),
   );
@@ -50,6 +50,14 @@ test('느린 기기에서 검색 직후 붙여 넣은 다음 검색어가 지워
     }
     return route.fulfill({ status: 404, contentType: 'application/json', body: errBody('NOT_FOUND', 'mock 없음') });
   });
+}
+
+const urlKeywordOf = (page) => () => new URL(page.url()).searchParams.get('keyword');
+
+test('느린 기기에서 검색 직후 붙여 넣은 다음 검색어가 지워지지 않는다', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  // 지오코딩 결과를 붙잡아 두어, 두 검색 모두 진행 중인 상태에서 입력을 확인한 뒤 풀어 준다.
+  await setUp(page, { holdGeocode: true });
 
   await page.goto('/map');
   const search = page.getByPlaceholder('지역명으로 지도 이동');
@@ -57,7 +65,7 @@ test('느린 기기에서 검색 직후 붙여 넣은 다음 검색어가 지워
   const cdp = await context.newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
 
-  const urlKeyword = () => new URL(page.url()).searchParams.get('keyword');
+  const urlKeyword = urlKeywordOf(page);
   // 한 번에 재현되지 않을 수 있어(전환 렌더 시점이 매번 다르다) 같은 순서를 여덟 번 되풀이한다 — 수정 전 코드로 되돌리면 실행 6번 중 5번 실패했다(2026-10-28).
   for (let round = 1; round <= 8; round++) {
     await search.fill(FIRST);
@@ -82,4 +90,34 @@ test('느린 기기에서 검색 직후 붙여 넣은 다음 검색어가 지워
     expect(urlKeyword(), `${round}회차: 검색이 끝난 뒤에도 URL 그대로`).toBe(SECOND);
     await expect(search).toHaveValue(SECOND);
   }
+});
+
+// 같은 검색어를 다시 검색하면 URL이 바뀌지 않는다 — 이 값을 "자기가 쓴 값"으로 남겨 두면 뒤로가기로 바뀐 URL을 자기 것으로
+// 착각해 검색창을 맞추지 않을 수 있다. 이 시나리오는 URL 반영이 늦지 않아도(감속 없이) 결정적으로 같은 순서로 돈다.
+test('같은 검색어로 두 번 검색한 뒤 뒤로가면 검색창이 이전 URL의 검색어로 돌아간다', async ({ page }) => {
+  await setUp(page, { holdGeocode: false });
+  const urlKeyword = urlKeywordOf(page);
+  const search = page.getByPlaceholder('지역명으로 지도 이동');
+
+  await page.goto(`/map?keyword=${encodeURIComponent(SECOND)}`);
+  await expect(search).toHaveValue(SECOND);
+  await expect(page.locator('[data-testid="map-canvas"] button[data-complex-id="1"]')).toBeVisible();
+
+  // GNB "지도로 보기"는 push라 뒤로가기로 돌아올 항목이 생긴다. 같은 라우트라 지도 화면은 그대로다.
+  await page.getByRole('navigation', { name: '주 메뉴' }).getByRole('link', { name: '지도로 보기' }).click();
+  await expect.poll(urlKeyword).toBeNull();
+  await expect(search).toHaveValue('');
+
+  await search.fill(FIRST);
+  await search.press('Enter');
+  await expect.poll(urlKeyword).toBe(FIRST);
+  await expect(search).toHaveValue(FIRST);
+  // 같은 검색어 다시 — URL은 그대로다.
+  await search.press('Enter');
+  await expect(search).toHaveValue(FIRST);
+  expect(urlKeyword()).toBe(FIRST);
+
+  await page.goBack();
+  await expect.poll(urlKeyword).toBe(SECOND);
+  await expect(search).toHaveValue(SECOND);
 });
