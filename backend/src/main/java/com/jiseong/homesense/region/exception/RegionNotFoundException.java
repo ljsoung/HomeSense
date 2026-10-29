@@ -9,7 +9,7 @@ import com.jiseong.homesense.common.exception.BusinessException;
  * 엔티티({@code LegalDistrictCode})가 존재하지 않는 상황이라 그 엔티티를 소유한 region 패키지에
  * 둔다(ComplexNotFoundException이 원래 complex.exception 소속이었던 것과 같은 위치 기준, CLAUDE.md
  * "SVC-CPX-01/SVC-FAV-01가 공유" 승격 이전 상태 참고) — 지금은 FAV만 던지지만 다른 도메인이 같은
- * 검사를 필요로 하게 되면 그때 common.exception으로 승격한다.
+ * 검사를 필요로 하게 되면 그때 common.exception으로 승격한다. SVC-RGN-01.lookup()도 같은 의미(없거나 폐지된 코드)로 던진다.
  */
 public class RegionNotFoundException extends BusinessException {
 

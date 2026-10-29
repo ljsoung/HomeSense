@@ -108,6 +108,8 @@ public class CacheConfig implements CachingConfigurer {
                 withValueType(base, types.constructCollectionType(List.class, ComplexSummaryResponse.class)),
                 CacheNames.REGION_AUTOCOMPLETE,
                 withValueType(base, types.constructCollectionType(List.class, RegionAutocompleteResponse.class)),
+                CacheNames.REGION_LOOKUP,
+                withValueType(base, types.constructType(RegionAutocompleteResponse.class)),
                 CacheNames.POPULAR_KEYWORDS,
                 withValueType(base, types.constructCollectionType(List.class, PopularKeywordResponse.class))
                         .entryTtl(POPULAR_KEYWORDS_TTL));

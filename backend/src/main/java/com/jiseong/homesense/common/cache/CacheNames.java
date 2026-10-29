@@ -16,6 +16,11 @@ public final class CacheNames {
     public static final String POPULAR_COMPLEXES = "popularComplexesV4";
     /** SVC-RGN-01.autocomplete() — RegionAutocompleteResponse(legalDongCd, fullPath). */
     public static final String REGION_AUTOCOMPLETE = "regionAutocomplete";
+    /**
+     * SVC-RGN-01.lookup() — 코드 하나의 RegionAutocompleteResponse. 무효화는 regionAutocomplete와 같다(법정동코드 재적재 시
+     * 전체 비움, TTL 24h). 없는·폐지된 코드는 404 예외라 캐시되지 않는다.
+     */
+    public static final String REGION_LOOKUP = "regionLookup";
     /** SVC-SEARCH-01.getPopularKeywords() — PopularKeywordResponse. TTL 1시간, evict 트리거 없음. */
     public static final String POPULAR_KEYWORDS = "popularKeywords";
 

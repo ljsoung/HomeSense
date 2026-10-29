@@ -58,13 +58,16 @@ class CacheEvictionListenerTest {
     }
 
     @Test
-    void 법정동코드가_재적재되면_regionAutocomplete를_통째로_clear한다() {
+    void 법정동코드가_재적재되면_regionAutocomplete와_regionLookup을_통째로_clear한다() {
         Cache regionAutocompleteCache = mock(Cache.class);
+        Cache regionLookupCache = mock(Cache.class);
         when(cacheManager.getCache("regionAutocomplete")).thenReturn(regionAutocompleteCache);
+        when(cacheManager.getCache("regionLookup")).thenReturn(regionLookupCache);
 
         listener().onLegalDistrictCodeReloaded(new LegalDistrictCodeReloadedEvent());
 
         verify(regionAutocompleteCache).invalidate();
+        verify(regionLookupCache).invalidate();
         verify(cacheManager, never()).getCache("complexDetailV4");
         verify(cacheManager, never()).getCache("popularComplexesV4");
     }
@@ -95,11 +98,14 @@ class CacheEvictionListenerTest {
     }
 
     @Test
-    void 법정동코드_재적재_캐시_무효화가_실패해도_예외를_전파하지_않는다() {
+    void 법정동코드_재적재_캐시_무효화가_실패해도_예외를_전파하지_않고_다른_캐시는_비운다() {
+        Cache regionLookupCache = mock(Cache.class);
         when(cacheManager.getCache("regionAutocomplete")).thenThrow(new RuntimeException("Redis 연결 실패"));
+        when(cacheManager.getCache("regionLookup")).thenReturn(regionLookupCache);
 
         listener().onLegalDistrictCodeReloaded(new LegalDistrictCodeReloadedEvent());
 
         verify(cacheManager).getCache("regionAutocomplete");
+        verify(regionLookupCache).invalidate();
     }
 }

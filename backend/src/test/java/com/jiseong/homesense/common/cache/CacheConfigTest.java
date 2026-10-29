@@ -93,6 +93,13 @@ class CacheConfigTest {
     }
 
     @Test
+    void 지역_단건_조회_결과가_왕복된다() {
+        RegionAutocompleteResponse value = new RegionAutocompleteResponse("1168000000", "서울특별시 강남구");
+
+        assertThat(roundTrip(CacheNames.REGION_LOOKUP, value)).isEqualTo(value);
+    }
+
+    @Test
     void 빈_리스트도_왕복된다() {
         assertThat(roundTrip(CacheNames.REGION_AUTOCOMPLETE, List.of())).isEqualTo(List.of());
     }

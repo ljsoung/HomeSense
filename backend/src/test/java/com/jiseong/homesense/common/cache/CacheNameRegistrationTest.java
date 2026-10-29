@@ -49,7 +49,7 @@ class CacheNameRegistrationTest {
 
         // 스캔 자체가 동작하는지 — 알려진 캐시를 전부 찾아야 한다.
         assertThat(declared.keySet()).contains(CacheNames.COMPLEX_DETAIL, CacheNames.POPULAR_COMPLEXES,
-                CacheNames.REGION_AUTOCOMPLETE, CacheNames.POPULAR_KEYWORDS);
+                CacheNames.REGION_AUTOCOMPLETE, CacheNames.REGION_LOOKUP, CacheNames.POPULAR_KEYWORDS);
 
         Map<String, Set<String>> unregistered = new TreeMap<>(declared);
         unregistered.keySet().removeAll(registered);

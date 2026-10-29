@@ -1,5 +1,8 @@
 package com.jiseong.homesense.region.controller;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,6 +30,7 @@ import com.jiseong.homesense.common.security.UserStatusResolver;
 import com.jiseong.homesense.common.security.UserPrincipal;
 import com.jiseong.homesense.region.dto.InterestRegionSummaryResponse;
 import com.jiseong.homesense.region.dto.RegionAutocompleteResponse;
+import com.jiseong.homesense.region.exception.RegionNotFoundException;
 import com.jiseong.homesense.region.service.RegionService;
 
 /*
@@ -108,5 +112,36 @@ class RegionControllerTest {
         mockMvc.perform(get("/api/regions/interest-summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").isEmpty());
+    }
+
+    @Test
+    void 코드로_지역을_조회하면_200과_전체_경로를_반환한다() throws Exception {
+        when(regionService.lookup("1168010100"))
+                .thenReturn(new RegionAutocompleteResponse("1168010100", "서울특별시 강남구 역삼동"));
+
+        mockMvc.perform(get("/api/regions/1168010100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.legalDongCd").value("1168010100"))
+                .andExpect(jsonPath("$.data.fullPath").value("서울특별시 강남구 역삼동"));
+    }
+
+    @Test
+    void 없는_코드면_404_REGION_NOT_FOUND를_반환한다() throws Exception {
+        when(regionService.lookup("2811000000")).thenThrow(new RegionNotFoundException());
+
+        mockMvc.perform(get("/api/regions/2811000000"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("REGION_NOT_FOUND"));
+    }
+
+    /** 리터럴 경로가 경로 변수보다 먼저 매칭돼야 한다 — lookup()이 "interest-summary"를 코드로 받으면 안 된다. */
+    @Test
+    void interest_summary는_코드_조회로_매칭되지_않는다() throws Exception {
+        when(regionService.getInterestSummary(1L)).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/regions/interest-summary")).andExpect(status().isOk());
+
+        verify(regionService, never()).lookup(any());
     }
 }

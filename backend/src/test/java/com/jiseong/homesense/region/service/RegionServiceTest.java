@@ -1,6 +1,7 @@
 package com.jiseong.homesense.region.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +25,7 @@ import com.jiseong.homesense.region.dto.InterestRegionSummaryResponse;
 import com.jiseong.homesense.region.dto.RegionAutocompleteResponse;
 import com.jiseong.homesense.region.dto.RegionStats;
 import com.jiseong.homesense.region.entity.LegalDistrictCode;
+import com.jiseong.homesense.region.exception.RegionNotFoundException;
 import com.jiseong.homesense.region.repository.LegalDistrictCodeRepository;
 import com.jiseong.homesense.user.entity.User;
 
@@ -79,6 +82,42 @@ class RegionServiceTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).legalDongCd()).isEqualTo("1168010100");
         assertThat(result.get(0).fullPath()).isEqualTo("서울특별시 강남구 역삼동");
+    }
+
+    @Test
+    void lookup은_활성_코드의_전체_경로를_돌려준다() {
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrue("1168010100"))
+                .thenReturn(Optional.of(legalDistrictCode("1168010100", "서울특별시", "강남구", "역삼동")));
+
+        RegionAutocompleteResponse result = regionService.lookup("1168010100");
+
+        assertThat(result.legalDongCd()).isEqualTo("1168010100");
+        assertThat(result.fullPath()).isEqualTo("서울특별시 강남구 역삼동");
+    }
+
+    /** 단지 검색 regionCode는 시군구 대표행도 받으므로 lookup도 대표행 이름을 돌려준다(읍면동 이름 없음). */
+    @Test
+    void lookup은_시군구_대표행도_이름을_돌려준다() {
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrue("1168000000"))
+                .thenReturn(Optional.of(legalDistrictCode("1168000000", "서울특별시", "강남구", null)));
+
+        assertThat(regionService.lookup("1168000000").fullPath()).isEqualTo("서울특별시 강남구");
+    }
+
+    @Test
+    void lookup은_없거나_폐지된_코드면_RegionNotFoundException을_던진다() {
+        when(legalDistrictCodeRepository.findByLegalDongCdAndIsActiveTrue("2811000000")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> regionService.lookup("2811000000")).isInstanceOf(RegionNotFoundException.class);
+    }
+
+    @Test
+    void lookup은_형식이_틀린_코드면_조회하지_않고_RegionNotFoundException을_던진다() {
+        for (String code : new String[] { "116801010", "11680101000", "11680a0100", "１１６８０１０１００", "" }) {
+            assertThatThrownBy(() -> regionService.lookup(code)).isInstanceOf(RegionNotFoundException.class);
+        }
+        assertThatThrownBy(() -> regionService.lookup(null)).isInstanceOf(RegionNotFoundException.class);
+        verify(legalDistrictCodeRepository, never()).findByLegalDongCdAndIsActiveTrue(any());
     }
 
     @Test
