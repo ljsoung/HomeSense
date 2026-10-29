@@ -30,6 +30,7 @@ import {
 } from '../../features/search/searchParams';
 import { useExecuteSearch } from '../../features/search/useExecuteSearch';
 import { buildMapHref } from '../../features/map/mapParams';
+import { useRegionName } from '../../features/region/useRegionName';
 import type { PageMeta } from '../../types/api';
 import { getErrorMessage } from '../../lib/apiError';
 import { useFavoriteToggle } from '../home/useFavoriteToggle';
@@ -102,6 +103,19 @@ export function SearchResultsPage() {
     dataRef.current = { accumulated, pageMeta };
   }, [accumulated, pageMeta]);
 
+  // URL에 regionCode만 있고 이름이 없으면(직접 진입·새로고침·MY-04 알림 링크) 코드로 이름을 조회해 제목·검색창·지도 링크에 쓴다.
+  // URL에는 쓰지 않는다 — 쓰면 검색 조회 effect(searchParams 의존)가 같은 결과를 다시 부르고 뒤로가기 캐시 키도 바뀐다.
+  // 없는 코드(404)·실패면 이름 없이 검색만 진행한다("선택한 지역").
+  const lookedUpLabel = useRegionName(filters.regionCode, filters.regionLabel);
+  const regionLabel = filters.regionLabel ?? lookedUpLabel ?? undefined;
+  // 이름이 도착하면 검색창이 아직 비어 있을 때만 채운다(그사이 입력한 값은 덮지 않는다). 처음 값을 null로 두어, 탭 안 캐시로
+  // 첫 렌더부터 이름이 있어도 채워지게 한다.
+  const [syncedLookup, setSyncedLookup] = useState<string | null>(null);
+  if (lookedUpLabel !== syncedLookup) {
+    setSyncedLookup(lookedUpLabel);
+    if (lookedUpLabel && keywordInput === '') setKeywordInput(lookedUpLabel);
+  }
+
   // 필터 패널이 닫혀 있을 때는(적용 직후 등) draft가 항상 최신 URL 필터를 그대로 반영해야 한다 —
   // "prop이 바뀌면 state를 리셋한다"는 React 공식 패턴대로 effect가 아니라 렌더 중에 조정한다
   // (react-hooks/set-state-in-effect가 effect 본문의 동기 setState를 금지한다). filters는
@@ -110,7 +124,7 @@ export function SearchResultsPage() {
   if (filters !== filtersSnapshot) {
     setFiltersSnapshot(filters);
     setDraft(filters);
-    setKeywordInput(filters.keyword ?? filters.regionLabel ?? '');
+    setKeywordInput(filters.keyword ?? regionLabel ?? '');
   }
 
   // 뒤로가기 복원 + 실제 데이터 조회. setState 호출은 전부 비동기 콜백(마이크로태스크/프라미스
@@ -226,7 +240,7 @@ export function SearchResultsPage() {
 
   const handleResetFilter = () => {
     const reset = defaultFilters();
-    setDraft({ ...reset, regionCode: filters.regionCode, regionLabel: filters.regionLabel, keyword: filters.keyword });
+    setDraft({ ...reset, regionCode: filters.regionCode, regionLabel, keyword: filters.keyword });
   };
 
   const handleSortChange = (sort: SearchFilters['sort']) => {
@@ -258,7 +272,7 @@ export function SearchResultsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile, filters.page, pageMeta, status]);
 
-  const conditionLabel = filters.regionLabel ?? filters.keyword ?? '선택한 지역';
+  const conditionLabel = regionLabel ?? filters.keyword ?? '선택한 지역';
   const noCondition = !hasSearchCondition(filters);
   const invalidUrlKeyword = urlKeywordIssue(filters);
   // 입력창의 안내 문구: 방금 제출한 검색어의 위반이 우선이고, 없으면 URL 검색어의 위반을 보인다.
@@ -322,7 +336,7 @@ export function SearchResultsPage() {
               )}
             </button>
             <Link
-              to={buildMapHref(filters)}
+              to={buildMapHref({ ...filters, regionLabel })}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-[12px] border border-[#e5e7eb] bg-white py-2.5 text-[13.5px] font-semibold text-[#364153]"
             >
               <MapFoldIcon className="size-4" />
@@ -373,7 +387,7 @@ export function SearchResultsPage() {
               actions={
                 <button
                   type="button"
-                  onClick={() => navigateFilters({ ...defaultFilters(), regionCode: filters.regionCode, regionLabel: filters.regionLabel, keyword: filters.keyword })}
+                  onClick={() => navigateFilters({ ...defaultFilters(), regionCode: filters.regionCode, regionLabel, keyword: filters.keyword })}
                   className="rounded-[10px] bg-brand px-4 py-2 text-[13px] font-semibold text-white"
                 >
                   필터 초기화
@@ -405,7 +419,7 @@ export function SearchResultsPage() {
                     ))}
                   </div>
                   <Link
-                    to={buildMapHref(filters)}
+                    to={buildMapHref({ ...filters, regionLabel })}
                     className="hidden items-center gap-1 rounded-full border border-[#e5e7eb] px-3 py-1.5 text-[12.5px] font-medium text-[#364153] hover:bg-[#f7f8fa] md:flex"
                   >
                     <MapFoldIcon className="size-3.5" />

@@ -16,6 +16,8 @@ interface TradeDetailModalProps {
   /** 열 거래 id. null이면 닫힌 상태. */
   tradeId: number | null;
   onClose: () => void;
+  /** 이미 받은 상세(URL `?trade=` 진입 때 확인하며 받은 값) — 있으면 처음에는 다시 부르지 않는다. */
+  initialData?: TradeDetailResponse;
 }
 
 /**
@@ -23,12 +25,14 @@ interface TradeDetailModalProps {
  * 재시도를 갖는다. 공용 Modal이 포커스 트랩·Esc·배경 클릭·포커스 복귀(행으로)·스크롤 잠금을 맡는다.
  * 호출부는 거래가 바뀔 때 `key`로 새로 마운트한다 — 이 컴포넌트는 tradeId가 고정이라고 본다.
  */
-export function TradeDetailModal({ tradeId, onClose }: TradeDetailModalProps) {
-  const [load, setLoad] = useState<DetailLoad>({ status: 'loading' });
+export function TradeDetailModal({ tradeId, onClose, initialData }: TradeDetailModalProps) {
+  const [load, setLoad] = useState<DetailLoad>(() =>
+    initialData ? { status: 'success', data: initialData } : { status: 'loading' },
+  );
   const [round, setRound] = useState(0);
 
   useEffect(() => {
-    if (tradeId === null) return;
+    if (tradeId === null || (initialData && round === 0)) return;
     const controller = new AbortController();
     const run = async () => {
       setLoad({ status: 'loading' });
@@ -41,7 +45,7 @@ export function TradeDetailModal({ tradeId, onClose }: TradeDetailModalProps) {
     };
     void run();
     return () => controller.abort();
-  }, [tradeId, round]);
+  }, [tradeId, round, initialData]);
 
   return (
     <Modal open={tradeId !== null} onClose={onClose} title="거래 상세">

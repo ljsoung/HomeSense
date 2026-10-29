@@ -60,4 +60,24 @@ describe('NotificationPreview(MY-01 최근 알림)', () => {
     expect(container.textContent).toContain('서울특별시 종로구 숭인동 신규 실거래 1건');
     expect(container.textContent).toContain('2일 전');
   });
+
+  it('점 색과 글자로 관심 매물·관심 지역을 구분하고, 대상을 모르면 회색 점만 둔다', () => {
+    const base = { notificationType: 'NEW_TRADE' as const, isRead: false, createdAt: '2026-10-06T09:00:00' };
+    const { container } = renderPreview([
+      { ...base, notificationId: 1, title: '매물 알림', complexId: 10, tradeId: 3 },
+      { ...base, notificationId: 2, title: '지역 알림', legalDongCd: '1111017400', tradeId: 4 },
+      { ...base, notificationId: 3, title: '대상 없음 알림' },
+    ]);
+
+    const rows = [...container.querySelectorAll('li')];
+    const dot = (row: Element) => row.querySelector('[data-target]');
+    const label = (row: Element) => row.querySelector('[data-testid="notification-target"]')?.textContent;
+    expect(dot(rows[0])?.className).toContain('bg-brand');
+    expect(label(rows[0])).toBe('관심 매물 · ');
+    expect(dot(rows[1])?.className).toContain('bg-[#e17100]');
+    expect(label(rows[1])).toBe('관심 지역 · ');
+    expect(dot(rows[2])?.className).toContain('bg-[#99a1af]');
+    expect(label(rows[2])).toBeUndefined();
+    expect(rows[2].textContent).toContain('3시간 전');
+  });
 });

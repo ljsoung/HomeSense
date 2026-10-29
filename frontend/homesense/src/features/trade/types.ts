@@ -26,6 +26,8 @@ export interface TradeResponse {
 
 /** GET /api/trades/{tradeId} — TradeDetailResponse.java 실제 필드 그대로. */
 export interface TradeDetailResponse {
+  /** 이 거래가 매칭된 단지. 매칭되지 않은 거래는 서버가 키를 뺀다. DTL-01 `?trade=` 진입 시 지금 단지의 거래인지 확인한다. */
+  complexId?: number | null;
   tradeId: number;
   dealDate: string;
   excluUseArea: number;
