@@ -48,6 +48,7 @@ import { formatMapCount } from '../../features/map/mapList';
 import { MapListPanel } from './MapListPanel';
 import { MapListSheet, type SheetSnap } from './MapListSheet';
 import { MapPopup } from './MapPopup';
+import { useMapSearchText } from './useMapSearchText';
 
 /** 시작 위치 중 단지 좌표 조회가 필요 없는 것만 StartView로 바꾼다. */
 function toStartView(view: PointView | RegionView): StartView {
@@ -200,14 +201,12 @@ export function MapPage() {
 
   // 지역 검색 — 고른 지역(또는 입력한 지역명)으로 지도를 옮기고, SRCH-01로 돌아갈 때 쓰도록 검색 조건도 URL에 남긴다.
   const urlSearchText = filters.regionLabel ?? filters.keyword ?? '';
-  const [searchValue, setSearchValue] = useState(urlSearchText);
-  // 같은 라우트 안에서 URL의 검색 조건이 바뀌면(GNB "지도로 보기"로 조건 없는 /map, 뒤로가기) 검색창을 맞춘다. 바뀔 때만
-  // 맞추고 매 렌더 덮어쓰지 않는다 — 지도를 움직일 때마다 URL(뷰포트)이 바뀌어도 사용자가 입력 중인 값은 그대로 둔다.
-  const [syncedSearchText, setSyncedSearchText] = useState(urlSearchText);
-  if (syncedSearchText !== urlSearchText) {
-    setSyncedSearchText(urlSearchText);
-    setSearchValue(urlSearchText);
-  }
+  // 검색창 값 — URL의 검색 조건이 바뀌면 맞추되, 이 화면이 직접 쓴 검색 조건의 반영은 입력 중인 값을 덮지 않는다(백로그 17).
+  const {
+    value: searchValue,
+    setValue: setSearchValue,
+    rememberOwn: rememberOwnSearchText,
+  } = useMapSearchText(urlSearchText);
   const moveToQuery = async (query: string, level: number) => {
     const intent = beginIntent();
     const map = mapRef.current;
@@ -226,6 +225,7 @@ export function MapPage() {
   };
   const handleSelectRegion = (region: RegionAutocompleteResponse) => {
     setSearchValue(region.fullPath);
+    rememberOwnSearchText(region.fullPath);
     replaceUrl((prev) => ({
       ...prev,
       complexId: undefined,
@@ -243,6 +243,7 @@ export function MapPage() {
     }
     const query = value.trim();
     if (!query) return false;
+    rememberOwnSearchText(query);
     replaceUrl((prev) => ({
       ...prev,
       complexId: undefined,
