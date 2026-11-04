@@ -188,6 +188,10 @@ export function SearchResultsPage() {
   useEffect(() => {
     const save = () => {
       if (!hasFetchedRef.current) return;
+      // 카드를 눌러 이동하면 URL(history.state.key)이 먼저 바뀌고, 짧은 상세 화면 때문에 브라우저가 스크롤을 줄이며 낸 이벤트가 이
+      // 리스너가 떼어지기 전에 올 수 있다 — 그 값을 이 항목의 위치로 저장하지 않는다(MY-04 복원과 같은 경합, 8회 중 2회 재현).
+      // 첫 항목(새로 연 페이지)은 react-router가 key 없이 둬 location.key가 'default'다.
+      if (((window.history.state as { key?: string } | null)?.key ?? 'default') !== location.key) return;
       scrollCache.set(location.key, { ...dataRef.current, scrollY: window.scrollY, url: searchParams.toString() });
     };
     window.addEventListener('scroll', save, { passive: true });
