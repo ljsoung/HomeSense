@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../components/ui/ToastProvider';
 import type { NotificationResponse } from '../../features/notification/types';
 import { NotificationHistoryPage } from './NotificationHistoryPage';
-import { resetLocallyRead } from './useNotificationHistory';
+import { resetHistoryRestoreCache, resetLocallyRead } from './useNotificationHistory';
 
 const getNotificationPage = vi.fn();
 vi.mock('../../features/notification/api', () => ({
@@ -29,6 +29,7 @@ function stubViewport(width: number) {
 
 beforeEach(() => {
   resetLocallyRead();
+  resetHistoryRestoreCache();
   vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
 });
 

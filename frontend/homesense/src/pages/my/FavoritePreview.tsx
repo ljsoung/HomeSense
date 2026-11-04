@@ -3,7 +3,7 @@ import { HeartIcon } from '../../components/icons/HeartIcon';
 import { HomeIcon } from '../../components/icons/HomeIcon';
 import { EmptyState } from '../../components/ui/EmptyState';
 import type { FavoritePropertySummaryResponse } from '../../features/favorite/types';
-import { formatKoreanPrice } from '../../lib/format';
+import { formatArea, formatKoreanPrice } from '../../lib/format';
 import { MY_ROUTES } from '../../routes/paths';
 import type { FavoritePreview as FavoritePreviewData } from './myPageData';
 import { FAVORITE_PREVIEW_COUNT } from './myPageData';
@@ -11,16 +11,18 @@ import { CardBody, CardFooterLink, RowSkeleton, SectionCard, WidgetError } from 
 import type { Loadable } from './useLoadable';
 
 /**
- * 행의 "가격 · 면적" — 응답에 있는 값만 쓴다. FavoritePropertySummaryResponse에는 전용면적이 없어 면적은 생략하고,
- * 대표 거래가 없으면(recentAmount=null) 가격도 생략한다. 전월세 대표 거래의 금액은 보증금이다.
- * TODO(MY-02 선행): 관심 매물 요약 응답에 최근 거래의 전용면적·층·거래일이 추가되면 여기에 "· 84㎡"를 붙이고,
- * 서버가 등록순 정렬을 명시하면 pickRecentFavorites의 ID 정렬을 걷어낸다(CLAUDE.md SCR-MY-01 절).
+ * 행의 "가격 · 면적" — 최근 매매 거래의 가격과 전용면적(MY-02 카드와 같은 값). 응답에 있는 값만 쓴다 — 매매 거래가 없으면
+ * 둘 다 없어 줄을 생략한다. 최근 거래는 매매만이라(MY-02 백엔드 보강) "보증금" 표기는 옛 응답 대비로만 남겼다.
  */
 function describeFavorite(favorite: FavoritePropertySummaryResponse): string {
   // 서버가 null 필드를 빼므로(non_null) 값이 없으면 undefined로 온다 — === null이면 "NaN만원"이 된다.
-  if (favorite.recentAmount == null) return '';
-  const price = formatKoreanPrice(favorite.recentAmount);
-  return favorite.recentDealCategory === 'RENT' ? `보증금 ${price}` : price;
+  const parts: string[] = [];
+  if (favorite.recentAmount != null) {
+    const price = formatKoreanPrice(favorite.recentAmount);
+    parts.push(favorite.recentDealCategory === 'RENT' ? `보증금 ${price}` : price);
+  }
+  if (favorite.recentArea != null) parts.push(formatArea(favorite.recentArea));
+  return parts.join(' · ');
 }
 
 /**

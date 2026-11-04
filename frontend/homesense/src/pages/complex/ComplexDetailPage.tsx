@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import axios from 'axios';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertCircleIcon } from '../../components/icons/AlertCircleIcon';
 import { BuildingIcon } from '../../components/icons/BuildingIcon';
 import { MainLayout } from '../../components/layout/MainLayout';
 import { EmptyState } from '../../components/ui/EmptyState';
-import type { TradeDealType, TradeResponse } from '../../features/trade/types';
+import { useToast } from '../../components/ui/useToast';
+import { getTradeDetail } from '../../features/trade/api';
+import type { TradeDealType, TradeDetailResponse, TradeResponse } from '../../features/trade/types';
 import { useFavoriteToggle } from '../home/useFavoriteToggle';
 import { ComplexBreadcrumb, ComplexHeader } from './ComplexHeader';
 import { BasicInfoSummary, DetailInfoSection, MatchPendingNotice } from './ComplexInfoSections';
@@ -22,6 +25,19 @@ const DEAL_TYPES: readonly TradeDealType[] = ['SALE', 'JEONSE', 'WOLSE'];
 function dealTypeFromParam(raw: string | null): TradeDealType {
   return DEAL_TYPES.find((type) => type === raw) ?? 'SALE';
 }
+
+/** `?trade=` — 양의 정수가 아니면 null. */
+function tradeIdFromParam(raw: string | null): number | null {
+  if (raw === null || !/^[1-9][0-9]{0,15}$/.test(raw)) return null;
+  return Number(raw);
+}
+
+/** 화면 안에서 거래 행을 눌러 연 모달의 히스토리 항목 표시 — 닫을 때 뒤로 가기(그 항목을 꺼냄)로 닫는다. */
+interface TradeModalState {
+  tradeModal?: boolean;
+}
+
+export const TRADE_NOT_FOUND_TOAST = '해당 거래를 찾을 수 없습니다.';
 
 /** 단지가 바뀌면(다른 단지 링크로 이동) 화면 상태를 새로 시작한다 — 아래 훅·모달이 id를 고정값으로 본다. */
 export function ComplexDetailRoute() {
@@ -45,7 +61,64 @@ function ComplexDetailPage({ rawId }: { rawId: string | undefined }) {
   const dealType = dealTypeFromParam(rawDeal);
   const { detail, saleHistory, selectedHistory, retryDetail, retryHistory } = useComplexDetailData(complexId, dealType);
   const { favoritedIds, toggleFavorite, pendingFavoriteId, processingIds } = useFavoriteToggle({ listLinkInToast: true });
-  const [openTradeId, setOpenTradeId] = useState<number | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { showToast } = useToast();
+
+  // 거래상세 모달은 URL `?trade={tradeId}`가 연다(UI정의서 6.3). 화면 안에서 행을 누르면 push로 붙이고(state 표시) 닫을 때 뒤로
+  // 가기로 그 항목을 꺼낸다 — 브라우저 뒤로 가기도 같은 결과(모달 닫힘)다. 직접 진입(공유·새로고침 아닌 새 탭 등)은 state 표시가
+  // 없어 먼저 상세를 받아 이 단지의 거래인지 확인한 뒤 연다. 없는 거래(404)·다른 단지의 거래·형식이 틀린 값은 열지 않고 파라미터를
+  // replace로 지운 뒤 안내한다. 직접 진입 후 닫으면 replace로 파라미터만 지운다(이전 항목이 앱 밖일 수 있다).
+  const rawTrade = searchParams.get('trade');
+  const tradeParam = tradeIdFromParam(rawTrade);
+  const openedInApp = (location.state as TradeModalState | null)?.tradeModal === true;
+  const [verified, setVerified] = useState<{ tradeId: number; data?: TradeDetailResponse } | null>(null);
+  const verifiedHere = verified !== null && verified.tradeId === tradeParam;
+
+  const removeTradeParam = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('trade');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    if (rawTrade === null || openedInApp || verifiedHere) return;
+    const reject = () => {
+      showToast(TRADE_NOT_FOUND_TOAST, 'error');
+      removeTradeParam();
+    };
+    const controller = new AbortController();
+    if (tradeParam === null || complexId === null) {
+      // 렌더가 끝난 뒤 한 번만 — StrictMode가 effect를 두 번 돌려도 앞 실행은 정리(abort)돼 안내가 한 번이다.
+      void Promise.resolve().then(() => {
+        if (!controller.signal.aborted) reject();
+      });
+      return () => controller.abort();
+    }
+    getTradeDetail(tradeParam, controller.signal)
+      .then((data) => {
+        if (data.complexId === complexId) setVerified({ tradeId: tradeParam, data });
+        else reject();
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (axios.isAxiosError(error) && error.response?.status === 404) reject();
+        // 일시 오류는 모달을 열고 모달의 오류·다시 시도에 맡긴다(이 단지의 거래인지는 다시 받을 때도 모달이 보이는 값으로 알 수 있다).
+        else setVerified({ tradeId: tradeParam });
+      });
+    return () => controller.abort();
+  }, [rawTrade, tradeParam, openedInApp, verifiedHere, complexId, showToast, removeTradeParam]);
+
+  const openTradeId = tradeParam !== null && (openedInApp || verifiedHere) ? tradeParam : null;
+  const closeTrade = () => {
+    if (openedInApp) navigate(-1);
+    else removeTradeParam();
+  };
 
   // 알 수 없는 ?deal= 값은 매매로 보고 URL도 정리한다(기록을 남기지 않는 replace).
   useEffect(() => {
@@ -108,7 +181,15 @@ function ComplexDetailPage({ rawId }: { rawId: string | undefined }) {
     );
   }
 
-  const openTrade = (trade: TradeResponse) => setOpenTradeId(trade.tradeId);
+  const openTrade = (trade: TradeResponse) =>
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('trade', String(trade.tradeId));
+        return next;
+      },
+      { state: { tradeModal: true } satisfies TradeModalState },
+    );
   const detailLoading = detail.status === 'loading';
 
   return (
@@ -202,7 +283,12 @@ function ComplexDetailPage({ rawId }: { rawId: string | undefined }) {
       </div>
 
       {openTradeId !== null && (
-        <TradeDetailModal key={openTradeId} tradeId={openTradeId} onClose={() => setOpenTradeId(null)} />
+        <TradeDetailModal
+          key={openTradeId}
+          tradeId={openTradeId}
+          onClose={closeTrade}
+          initialData={verifiedHere ? verified?.data : undefined}
+        />
       )}
     </MainLayout>
   );

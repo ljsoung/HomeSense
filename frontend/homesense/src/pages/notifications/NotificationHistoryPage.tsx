@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertCircleIcon } from '../../components/icons/AlertCircleIcon';
 import { BellIcon } from '../../components/icons/BellIcon';
 import { BuildingIcon } from '../../components/icons/BuildingIcon';
@@ -70,7 +70,9 @@ export function NotificationHistoryPage() {
   // 쓰지 않고 항상 첫 페이지부터 받는다. URL에서 지우지 않는 이유: 태블릿 ↔ 모바일 회전 뒤 번호형으로 돌아오면 그 페이지로
   // 돌아가야 한다.
   const effectivePage = mode === 'infinite' ? 1 : params.page;
-  const history = useNotificationHistory({ filter: params.filter, page: effectivePage, mode });
+  const location = useLocation();
+  // 무한 스크롤은 히스토리 항목(location.key)마다 받은 페이지·스크롤 위치를 기억해, 뒤로 오면 다시 받지 않고 그 자리로 돌아온다.
+  const history = useNotificationHistory({ filter: params.filter, page: effectivePage, mode, restoreKey: location.key });
   const navigate = useNavigate();
   const { showToast } = useToast();
 
